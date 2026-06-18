@@ -59,7 +59,7 @@ const nextConfig = {
 		turbopackFileSystemCacheForDev: true,
 		serverActions: {
 			allowedOrigins: [
-				"cap-web-production-4817.up.railway.app",
+				"web-production-e6fe4.up.railway.app",
 				"localhost:3000",
 			],
 		},
@@ -158,4 +158,4 @@ const nextConfig = {
 		process.env.NEXT_PUBLIC_DOCKER_BUILD === "true" ? "standalone" : undefined,
 };
 
-export default withNextIntl(nextConfig);
+export default withWorkflow(withNextIntl(nextConfig));
