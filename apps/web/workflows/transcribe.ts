@@ -26,12 +26,6 @@ import { checkHasAudioTrack, extractAudioFromUrl } from "@/lib/audio-extract";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
 import { transcribeWithGemini } from "@/lib/gemini-transcribe";
 import { startAiGeneration } from "@/lib/generate-ai";
-import {
-	checkHasAudioTrackViaMediaServer,
-	extractAudioViaMediaServer,
-	isMediaServerConfigured,
-	probeVideoViaMediaServer,
-} from "@/lib/media-client";
 import { runPromise } from "@/lib/server";
 import { chunkTranscript } from "@/lib/transcript-chunk";
 import { decodeStorageVideo } from "@/lib/video-storage";
@@ -196,56 +190,23 @@ async function extractAudio(
 
 	const videoUrl = await resolveVideoSourceUrl(videoId, userId, video);
 
-	const useMediaServer = isMediaServerConfigured();
-	console.log(
-		`[transcribe] Audio detection: useMediaServer=${useMediaServer}, videoId=${videoId}`,
-	);
-
-	let hasAudio: boolean;
+	// Media server removed — single-file MP4, no server-side processing
 	let audioBuffer: Buffer;
 
-	if (useMediaServer) {
-		try {
-			const probe = await probeVideoViaMediaServer(videoUrl);
-			console.log(
-				`[transcribe] Probe result for ${videoId}: audioCodec=${probe.audioCodec}, videoCodec=${probe.videoCodec}, duration=${probe.duration}, audioChannels=${probe.audioChannels}, sampleRate=${probe.sampleRate}`,
-			);
-			hasAudio = probe.audioCodec !== null;
-		} catch (probeError) {
-			console.error(
-				`[transcribe] Probe failed for ${videoId}, falling back to audio check:`,
-				probeError,
-			);
-			hasAudio = await checkHasAudioTrackViaMediaServer(videoUrl);
-			console.log(
-				`[transcribe] Fallback audio check result for ${videoId}: hasAudio=${hasAudio}`,
-			);
-		}
+	const hasAudio = await checkHasAudioTrack(videoUrl);
+	console.log(
+		`[transcribe] Local ffmpeg audio check for ${videoId}: hasAudio=${hasAudio}`,
+	);
+	if (!hasAudio) {
+		return null;
+	}
 
-		if (!hasAudio) {
-			console.log(
-				`[transcribe] No audio track detected for ${videoId} via media server`,
-			);
-			return null;
-		}
+	const result = await extractAudioFromUrl(videoUrl);
 
-		audioBuffer = await extractAudioViaMediaServer(videoUrl);
-	} else {
-		hasAudio = await checkHasAudioTrack(videoUrl);
-		console.log(
-			`[transcribe] Local ffmpeg audio check for ${videoId}: hasAudio=${hasAudio}`,
-		);
-		if (!hasAudio) {
-			return null;
-		}
-
-		const result = await extractAudioFromUrl(videoUrl);
-
-		try {
-			audioBuffer = await fs.readFile(result.filePath);
-		} finally {
-			await result.cleanup();
-		}
+	try {
+		audioBuffer = await fs.readFile(result.filePath);
+	} finally {
+		await result.cleanup();
 	}
 
 	console.log(
@@ -345,7 +306,7 @@ async function transcribeAudio(
 		userId: context.userId,
 		videoId: context.videoId,
 		operation: "transcription",
-		model: "gemini-2.0-flash",
+		model: "gemini-2.5-flash-lite",
 		fn: async () => {
 			const res = await transcribeWithGemini(audioUrl, {
 				apiKey: resolvedApiKey,

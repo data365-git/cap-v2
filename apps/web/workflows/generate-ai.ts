@@ -18,7 +18,6 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { FatalError } from "workflow";
 import { z } from "zod";
-import { GROQ_MODEL, getGroqClient } from "@/lib/groq-client";
 import { runPromise } from "@/lib/server";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
@@ -165,9 +164,8 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 async function validateAndSetProcessing(videoId: string): Promise<VideoData> {
 	"use step";
 
-	const groqClient = getGroqClient();
-	if (!groqClient && !serverEnv().OPENAI_API_KEY) {
-		throw new FatalError("Missing Groq or OpenAI API key");
+	if (!serverEnv().GEMINI_API_KEY) {
+		throw new FatalError("Missing GEMINI_API_KEY");
 	}
 
 	const query = await db()
@@ -266,7 +264,6 @@ async function generateWithAi(
 ): Promise<AiResult> {
 	"use step";
 
-	const groqClient = getGroqClient();
 	const chunks = chunkTranscriptWithTimestamps(transcript.segments);
 
 	const videoDuration = getVideoDuration(transcript.segments);
@@ -277,14 +274,12 @@ async function generateWithAi(
 		result = await generateSingleChunk(
 			transcript.segments,
 			videoDuration,
-			groqClient,
 			languageInstruction,
 		);
 	} else {
 		result = await generateMultipleChunks(
 			chunks,
 			videoDuration,
-			groqClient,
 			languageInstruction,
 		);
 	}
@@ -470,6 +465,8 @@ function chunkTranscriptWithTimestamps(
 	return chunks;
 }
 
+const GEMINI_SUMMARY_MODEL = "gemini-2.5-flash-lite";
+
 interface AiApiResult {
 	content: string;
 	model: string;
@@ -477,60 +474,51 @@ interface AiApiResult {
 	outputTokens: number;
 }
 
-async function callAiApi(
-	prompt: string,
-	groqClient: ReturnType<typeof getGroqClient>,
-): Promise<AiApiResult> {
-	if (groqClient) {
-		try {
-			const completion = await groqClient.chat.completions.create({
-				messages: [{ role: "user", content: prompt }],
-				model: GROQ_MODEL,
-			});
-			return {
-				content: completion.choices?.[0]?.message?.content || "{}",
-				model: GROQ_MODEL,
-				inputTokens: completion.usage?.prompt_tokens ?? 0,
-				outputTokens: completion.usage?.completion_tokens ?? 0,
-			};
-		} catch (groqError) {
-			if (serverEnv().OPENAI_API_KEY) {
-				return callOpenAi(prompt);
-			}
-			throw groqError;
-		}
-	} else if (serverEnv().OPENAI_API_KEY) {
-		return callOpenAi(prompt);
+async function callAiApi(prompt: string): Promise<AiApiResult> {
+	const apiKey = serverEnv().GEMINI_API_KEY;
+	if (!apiKey) {
+		console.warn("[generate-ai] GEMINI_API_KEY not set, skipping AI call");
+		return { content: "{}", model: "unknown", inputTokens: 0, outputTokens: 0 };
 	}
-	return { content: "{}", model: "unknown", inputTokens: 0, outputTokens: 0 };
-}
 
-async function callOpenAi(prompt: string): Promise<AiApiResult> {
-	const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${serverEnv().OPENAI_API_KEY}`,
+	const res = await fetch(
+		`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SUMMARY_MODEL}:generateContent?key=${apiKey}`,
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				contents: [{ parts: [{ text: prompt }] }],
+				generationConfig: {
+					temperature: 0.2,
+					maxOutputTokens: 8192,
+				},
+			}),
 		},
-		body: JSON.stringify({
-			model: "gpt-4o-mini",
-			messages: [{ role: "user", content: prompt }],
-		}),
-	});
-	if (!aiRes.ok) {
-		const errorText = await aiRes.text();
-		throw new Error(`OpenAI API error: ${aiRes.status} ${errorText}`);
+	);
+
+	const data = (await res.json()) as {
+		candidates?: Array<{
+			content: { parts: Array<{ text?: string }> };
+		}>;
+		usageMetadata?: {
+			promptTokenCount?: number;
+			candidatesTokenCount?: number;
+		};
+		error?: { message: string };
+	};
+
+	if (!res.ok) {
+		throw new Error(
+			`Gemini generateContent failed: ${data.error?.message ?? res.status}`,
+		);
 	}
-	const aiJson = (await aiRes.json()) as {
-		choices?: Array<{ message?: { content?: string } }>;
-		usage?: { prompt_tokens?: number; completion_tokens?: number };
-	};
-	return {
-		content: aiJson.choices?.[0]?.message?.content || "{}",
-		model: "gpt-4o-mini",
-		inputTokens: aiJson.usage?.prompt_tokens ?? 0,
-		outputTokens: aiJson.usage?.completion_tokens ?? 0,
-	};
+
+	const content =
+		data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+	const inputTokens = data.usageMetadata?.promptTokenCount ?? 0;
+	const outputTokens = data.usageMetadata?.candidatesTokenCount ?? 0;
+
+	return { content, model: GEMINI_SUMMARY_MODEL, inputTokens, outputTokens };
 }
 
 function cleanJsonResponse(content: string): string {
@@ -546,7 +534,6 @@ function cleanJsonResponse(content: string): string {
 async function generateSingleChunk(
 	segments: VttSegment[],
 	videoDuration: number,
-	groqClient: ReturnType<typeof getGroqClient>,
 	languageInstruction: string,
 ): Promise<AiResult> {
 	const transcriptWithTimestamps = segments
@@ -589,7 +576,7 @@ Rules:
 Transcript:
 ${transcriptWithTimestamps}`;
 
-	const apiResult = await callAiApi(prompt, groqClient);
+	const apiResult = await callAiApi(prompt);
 	const parsed = parseAiResponse(apiResult.content);
 	return {
 		...parsed,
@@ -604,7 +591,6 @@ ${transcriptWithTimestamps}`;
 async function generateMultipleChunks(
 	chunks: { text: string; startTime: number; endTime: number }[],
 	videoDuration: number,
-	groqClient: ReturnType<typeof getGroqClient>,
 	languageInstruction: string,
 ): Promise<AiResult> {
 	const chunkSummaries: {
@@ -640,7 +626,7 @@ Return ONLY valid JSON without any markdown formatting or code blocks.
 Transcript section:
 ${chunk.text}`;
 
-		const chunkResult = await callAiApi(chunkPrompt, groqClient);
+		const chunkResult = await callAiApi(chunkPrompt);
 		totalInputTokens += chunkResult.inputTokens;
 		totalOutputTokens += chunkResult.outputTokens;
 		usedModel = chunkResult.model;
@@ -720,7 +706,7 @@ Rules:
 - refinedTranscript restructures speech into clean readable paragraphs
 - Keep ALL JSON property names exactly as shown`;
 
-	const finalResult = await callAiApi(finalPrompt, groqClient);
+	const finalResult = await callAiApi(finalPrompt);
 	totalInputTokens += finalResult.inputTokens;
 	totalOutputTokens += finalResult.outputTokens;
 	usedModel = finalResult.model;

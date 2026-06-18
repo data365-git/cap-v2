@@ -1,25 +1,21 @@
+// Media server removed — audio enhancement uses Replicate only, WAV output served directly
 import { serverEnv } from "@cap/env";
 import Replicate from "replicate";
-import {
-	convertAudioToMp3ViaMediaServer,
-	isMediaServerConfigured,
-} from "./media-client";
 
 const MAX_POLL_ATTEMPTS = 120;
 const POLL_INTERVAL_MS = 5000;
 
-export const ENHANCED_AUDIO_EXTENSION = "mp3";
-export const ENHANCED_AUDIO_CONTENT_TYPE = "audio/mpeg";
+export const ENHANCED_AUDIO_EXTENSION = "wav";
+export const ENHANCED_AUDIO_CONTENT_TYPE = "audio/wav";
 
 export function isAudioEnhancementConfigured(): boolean {
 	const hasReplicateToken = !!serverEnv().REPLICATE_API_TOKEN;
-	const hasMediaServer = isMediaServerConfigured();
 
 	console.log(
-		`[audio-enhance] Config check: REPLICATE_API_TOKEN=${hasReplicateToken}, MEDIA_SERVER_URL=${hasMediaServer}`,
+		`[audio-enhance] Config check: REPLICATE_API_TOKEN=${hasReplicateToken}`,
 	);
 
-	return hasReplicateToken && hasMediaServer;
+	return hasReplicateToken;
 }
 
 export async function enhanceAudioFromUrl(audioUrl: string): Promise<Buffer> {
@@ -28,10 +24,6 @@ export async function enhanceAudioFromUrl(audioUrl: string): Promise<Buffer> {
 	const apiToken = serverEnv().REPLICATE_API_TOKEN;
 	if (!apiToken) {
 		throw new Error("REPLICATE_API_TOKEN is not configured");
-	}
-
-	if (!isMediaServerConfigured()) {
-		throw new Error("MEDIA_SERVER_URL is not configured");
 	}
 
 	const replicate = new Replicate({
@@ -85,13 +77,18 @@ export async function enhanceAudioFromUrl(audioUrl: string): Promise<Buffer> {
 		throw new Error("No output received from Replicate");
 	}
 
-	console.log("[audio-enhance] Converting WAV to MP3 via media server...");
+	// Media server removed — fetch the WAV output directly instead of converting to MP3
+	console.log("[audio-enhance] Downloading enhanced audio...");
+	const response = await fetch(enhancedAudioUrl);
+	if (!response.ok) {
+		throw new Error(`Failed to download enhanced audio: ${response.status}`);
+	}
 
-	const mp3Buffer = await convertAudioToMp3ViaMediaServer(enhancedAudioUrl);
+	const audioBuffer = Buffer.from(await response.arrayBuffer());
 
 	console.log(
-		`[audio-enhance] Conversion complete, buffer size: ${mp3Buffer.length} bytes`,
+		`[audio-enhance] Download complete, buffer size: ${audioBuffer.length} bytes`,
 	);
 
-	return mp3Buffer;
+	return audioBuffer;
 }

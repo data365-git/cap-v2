@@ -76,6 +76,13 @@ async function applyS3BucketCors(s3Client: S3Client) {
 }
 
 async function createS3Bucket() {
+	// Cloudflare R2 buckets are pre-provisioned and don't support CreateBucket
+	// or PutBucketPolicy via the S3 API — skip this step when using R2.
+	if (process.env.CLOUDFLARE_R2_ACCOUNT_ID) {
+		console.log("Using Cloudflare R2 — skipping MinIO bucket creation");
+		return;
+	}
+
 	const s3Client = new S3Client({
 		endpoint: serverEnv().S3_INTERNAL_ENDPOINT,
 		region: serverEnv().CAP_AWS_REGION,

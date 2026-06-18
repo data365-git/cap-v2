@@ -1,7 +1,6 @@
-import { buildEnv, serverEnv } from "@cap/env";
+import { serverEnv } from "@cap/env";
 import { stripe } from "@cap/utils";
 import type { NextRequest } from "next/server";
-import { PostHog } from "posthog-node";
 
 export async function POST(request: NextRequest) {
 	console.log("Starting guest checkout process");
@@ -30,28 +29,6 @@ export async function POST(request: NextRequest) {
 
 		if (checkoutSession.url) {
 			console.log("Successfully created guest checkout session");
-
-			try {
-				const ph = new PostHog(buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "", {
-					host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "",
-				});
-
-				ph.capture({
-					distinctId: `guest-${checkoutSession.id}`,
-					event: "guest_checkout_started",
-					properties: {
-						price_id: priceId,
-						quantity: quantity || 1,
-						platform: "web",
-						session_id: checkoutSession.id,
-					},
-				});
-
-				await ph.shutdown();
-			} catch (e) {
-				console.error("Failed to capture guest_checkout_started in PostHog", e);
-			}
-
 			return Response.json({ url: checkoutSession.url }, { status: 200 });
 		}
 

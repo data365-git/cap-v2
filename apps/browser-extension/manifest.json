@@ -1,0 +1,51 @@
+{
+	"manifest_version": 3,
+	"name": "Cap Recorder",
+	"version": "0.1.0",
+	"description": "Record your screen and share instantly with Cap — the open-source Loom alternative.",
+	"action": {
+		"default_popup": "popup.html",
+		"default_icon": {
+			"16": "icons/icon-16.png",
+			"48": "icons/icon-48.png",
+			"128": "icons/icon-128.png"
+		}
+	},
+	"background": {
+		"service_worker": "background.js",
+		"type": "module"
+	},
+	"permissions": [
+		"storage",
+		"alarms",
+		"scripting",
+		"activeTab",
+		"tabs",
+		"offscreen",
+		"notifications",
+		"tabCapture",
+		"desktopCapture"
+	],
+	"host_permissions": ["https://*/*"],
+	"content_scripts": [
+		{
+			"matches": ["https://meet.google.com/*"],
+			"js": ["content.js"],
+			"run_at": "document_idle"
+		}
+	],
+	"web_accessible_resources": [
+		{
+			"resources": ["sounds/*", "icons/*"],
+			"matches": ["https://meet.google.com/*"]
+		}
+	],
+	"externally_connectable": {
+		"matches": [
+			"https://cap-web-production-4817.up.railway.app/*",
+			"https://*.up.railway.app/*",
+			"https://cap.so/*",
+			"http://localhost:3000/*"
+		]
+	}
+}

@@ -8,7 +8,7 @@ import {
 	organizations,
 	users,
 } from "@cap/database/schema";
-import { buildEnv, serverEnv } from "@cap/env";
+import { serverEnv } from "@cap/env";
 import { stripe, userIsPro } from "@cap/utils";
 import { OrganizationBrandingPatchBody } from "@cap/web-api-contract";
 import { ImageUploads } from "@cap/web-backend";
@@ -17,7 +17,6 @@ import { zValidator } from "@hono/zod-validator";
 import { and, eq, isNull } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { type Context, Hono } from "hono";
-import { PostHog } from "posthog-node";
 import type Stripe from "stripe";
 import { z } from "zod";
 import { runPromise } from "@/lib/server";
@@ -761,27 +760,6 @@ app.post(
 
 		if (checkoutSession.url) {
 			console.log("[POST] Checkout session created successfully");
-
-			try {
-				const ph = new PostHog(buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "", {
-					host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "",
-				});
-
-				ph.capture({
-					distinctId: user.id,
-					event: "checkout_started",
-					properties: {
-						price_id: priceId,
-						quantity: 1,
-						platform: "desktop",
-					},
-				});
-
-				await ph.shutdown();
-			} catch (e) {
-				console.error("Failed to capture checkout_started in PostHog", e);
-			}
-
 			return c.json({ url: checkoutSession.url });
 		}
 

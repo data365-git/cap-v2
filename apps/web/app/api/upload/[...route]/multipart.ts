@@ -1,6 +1,5 @@
 import { updateIfDefined } from "@cap/database";
 import * as Db from "@cap/database/schema";
-import { serverEnv } from "@cap/env";
 import {
 	Database,
 	makeCurrentUserLayer,
@@ -27,9 +26,6 @@ import {
 } from "./multipart-utils";
 
 export const app = new Hono().use(withAuth);
-
-const MEDIA_SERVER_PRESIGNED_GET_EXPIRES_SECONDS = 3 * 60 * 60;
-const MEDIA_SERVER_PRESIGNED_PUT_EXPIRES_SECONDS = 3 * 60 * 60;
 
 const runPromiseAnyEnv = runPromise as <A, E>(
 	effect: Effect.Effect<A, E, unknown>,
@@ -554,79 +550,7 @@ app.post(
 						),
 					);
 
-					const mediaServerUrl = serverEnv().MEDIA_SERVER_URL;
-					if (
-						bucket.provider === "s3" &&
-						(video.source.type === "webMP4" ||
-							video.source.type === "extensionWeb") &&
-						mediaServerUrl
-					) {
-						const webhookSecret = serverEnv().MEDIA_SERVER_WEBHOOK_SECRET;
-						const inputUrl = yield* bucket.getInternalSignedObjectUrl(fileKey, {
-							expiresIn: MEDIA_SERVER_PRESIGNED_GET_EXPIRES_SECONDS,
-						});
-						const outputPresignedUrl = yield* bucket.getInternalPresignedPutUrl(
-							fileKey,
-							{
-								ContentType: "video/mp4",
-								CacheControl: "max-age=31536000",
-								Metadata: {
-									userId: user.id,
-									source: "cap-multipart-upload",
-								},
-							},
-							{ expiresIn: MEDIA_SERVER_PRESIGNED_PUT_EXPIRES_SECONDS },
-						);
-						const previewGifKey = `${user.id}/${videoId}/preview/animated-preview.gif`;
-						const previewGifPresignedUrl =
-							yield* bucket.getInternalPresignedPutUrl(
-								previewGifKey,
-								{
-									ContentType: "image/gif",
-									CacheControl: "public, max-age=31536000, immutable",
-								},
-								{ expiresIn: MEDIA_SERVER_PRESIGNED_PUT_EXPIRES_SECONDS },
-							);
-
-						yield* Effect.tryPromise({
-							try: async () => {
-								const response = await fetch(
-									`${mediaServerUrl}/video/process`,
-									{
-										method: "POST",
-										headers: {
-											"Content-Type": "application/json",
-											...(webhookSecret
-												? { "x-media-server-secret": webhookSecret }
-												: {}),
-										},
-										body: JSON.stringify({
-											videoId,
-											userId: user.id,
-											videoUrl: inputUrl,
-											outputPresignedUrl,
-											previewGifPresignedUrl,
-											remuxOnly: true,
-										}),
-									},
-								);
-
-								if (!response.ok) {
-									const errorText = await response.text().catch(() => "");
-									throw new Error(
-										`Media server remux failed: ${response.status} ${errorText}`,
-									);
-								}
-							},
-							catch: (cause) =>
-								cause instanceof Error ? cause : new Error(String(cause)),
-						}).pipe(
-							Effect.catchAll((error) => {
-								console.error("Failed to queue faststart remux:", error);
-								return Effect.succeed(null);
-							}),
-						);
-					}
+					// P6.3: Faststart remux via media server removed — browsers produce seekable MP4 with H.264 codec
 
 					return c.json({
 						location: result.Location,

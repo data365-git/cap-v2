@@ -158,4 +158,4 @@ const nextConfig = {
 		process.env.NEXT_PUBLIC_DOCKER_BUILD === "true" ? "standalone" : undefined,
 };
 
-export default withWorkflow(withNextIntl(nextConfig));
+export default withNextIntl(nextConfig);

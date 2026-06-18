@@ -126,6 +126,8 @@ export const users = mysqlTable(
 			nanoIdNullable("defaultOrgId").$type<Organisation.OrganisationId>(),
 		geminiApiKey: encryptedTextNullable("geminiApiKey"),
 		authSessionVersion: int("authSessionVersion").notNull().default(0),
+		passwordHash: varchar("passwordHash", { length: 255 }),
+		isAdmin: boolean("isAdmin").notNull().default(false),
 	},
 	(table) => ({
 		emailIndex: uniqueIndex("email_idx").on(table.email),
@@ -1578,3 +1580,38 @@ export const auditLog = mysqlTable("audit_log", {
 	metadata: json("metadata"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const invites = mysqlTable(
+	"invites",
+	{
+		id: nanoId("id").notNull().primaryKey(),
+		token: varchar("token", { length: 255 }).unique().notNull(),
+		email: varchar("email", { length: 255 }),
+		createdByUserId: nanoId("createdByUserId")
+			.notNull()
+			.$type<User.UserId>(),
+		usedByUserId: nanoIdNullable("usedByUserId").$type<User.UserId>(),
+		expiresAt: timestamp("expiresAt").notNull(),
+		createdAt: timestamp("createdAt").notNull().defaultNow(),
+	},
+	(table) => ({
+		tokenIndex: uniqueIndex("invite_token_idx").on(table.token),
+		emailIndex: index("invite_email_idx").on(table.email),
+		createdByUserIdIndex: index("invite_created_by_user_id_idx").on(
+			table.createdByUserId,
+		),
+	}),
+);
+
+export const invitesRelations = relations(invites, ({ one }) => ({
+	createdByUser: one(users, {
+		fields: [invites.createdByUserId],
+		references: [users.id],
+		relationName: "inviteCreator",
+	}),
+	usedByUser: one(users, {
+		fields: [invites.usedByUserId],
+		references: [users.id],
+		relationName: "inviteUser",
+	}),
+}));

@@ -18,10 +18,6 @@ export function SettingsNav() {
 			href: "/dashboard/settings/organization/integrations",
 		},
 		{
-			label: "Billing",
-			href: "/dashboard/settings/organization/billing",
-		},
-		{
 			label: "Members",
 			href: "/dashboard/settings/organization/members",
 		},

@@ -1,23 +1,19 @@
-import { createHash } from "node:crypto";
 import { serverEnv } from "@cap/env";
-import { type Organisation, User } from "@cap/web-domain";
+import { User } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession as _getServerSession } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
 import { decode, type JWT, type JWTDecodeParams } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
-import GoogleProvider from "next-auth/providers/google";
 import type { Provider } from "next-auth/providers/index";
-import WorkOSProvider from "next-auth/providers/workos";
 import { nanoId } from "../helpers.ts";
 import { db } from "../index.ts";
 import {
 	organizationInvites,
 	organizationMembers,
-	organizations,
 	users,
-	verificationTokens,
 } from "../schema.ts";
 import { DrizzleAdapter } from "./drizzle-adapter.ts";
 
@@ -74,43 +70,16 @@ export const authOptions = (): NextAuthOptions => {
 		get providers() {
 			if (_providers) return _providers;
 			_providers = [
-				GoogleProvider({
-					clientId: serverEnv().GOOGLE_CLIENT_ID as string,
-					clientSecret: serverEnv().GOOGLE_CLIENT_SECRET as string,
-					authorization: {
-						params: {
-							scope: [
-								"https://www.googleapis.com/auth/userinfo.email",
-								"https://www.googleapis.com/auth/userinfo.profile",
-							].join(" "),
-							prompt: "select_account",
-						},
-					},
-				}),
-				WorkOSProvider({
-					clientId: serverEnv().WORKOS_CLIENT_ID as string,
-					clientSecret: serverEnv().WORKOS_API_KEY as string,
-					profile(profile) {
-						return {
-							id: profile.id,
-							name: profile.first_name
-								? `${profile.first_name} ${profile.last_name || ""}`
-								: profile.email?.split("@")[0] || profile.id,
-							email: profile.email,
-							image: profile.profile_picture_url,
-						};
-					},
-				}),
 				CredentialsProvider({
-					id: "email",
-					name: "Email",
+					id: "credentials",
+					name: "credentials",
 					credentials: {
 						email: { label: "Email", type: "email" },
+						password: { label: "Password", type: "password" },
 					},
 					async authorize(credentials) {
-						const raw = credentials?.email;
-						if (!raw || typeof raw !== "string") return null;
-						const email = raw.trim().toLowerCase();
+						if (!credentials?.email || !credentials?.password) return null;
+						const email = credentials.email.trim().toLowerCase();
 
 						const [user] = await db()
 							.select({
@@ -118,102 +87,26 @@ export const authOptions = (): NextAuthOptions => {
 								email: users.email,
 								name: users.name,
 								image: users.image,
+								passwordHash: users.passwordHash,
 							})
 							.from(users)
 							.where(eq(users.email, email))
 							.limit(1);
 
-						if (!user) return null;
-						return user;
-					},
-				}),
-				CredentialsProvider({
-					id: "email-otp",
-					name: "Email OTP",
-					credentials: {
-						email: { label: "Email", type: "email" },
-						code: { label: "Code", type: "text" },
-					},
-					async authorize(credentials) {
-						const rawEmail = credentials?.email;
-						const rawCode = credentials?.code;
-						if (!rawEmail || typeof rawEmail !== "string") return null;
-						if (!rawCode || typeof rawCode !== "string") return null;
-						const email = rawEmail.trim().toLowerCase();
+						if (!user || !user.passwordHash) return null;
 
-						const hashedCode = createHash("sha256")
-							.update(rawCode)
-							.digest("hex");
+						const valid = await bcrypt.compare(
+							credentials.password,
+							user.passwordHash,
+						);
+						if (!valid) return null;
 
-						const [token] = await db()
-							.select()
-							.from(verificationTokens)
-							.where(
-								and(
-									eq(verificationTokens.identifier, email),
-									eq(verificationTokens.token, hashedCode),
-								),
-							)
-							.limit(1);
-
-						if (!token) return null;
-
-						if (token.expires < new Date()) {
-							await db()
-								.delete(verificationTokens)
-								.where(eq(verificationTokens.identifier, email));
-							return null;
-						}
-
-						await db()
-							.delete(verificationTokens)
-							.where(eq(verificationTokens.identifier, email));
-
-						let [user] = await db()
-							.select({
-								id: users.id,
-								email: users.email,
-								name: users.name,
-								image: users.image,
-							})
-							.from(users)
-							.where(eq(users.email, email))
-							.limit(1);
-
-						if (!user) {
-							const newId = nanoId() as User.UserId;
-							const orgId = nanoId() as Organisation.OrganisationId;
-							await db().transaction(async (tx) => {
-								await tx.insert(users).values({
-									id: newId,
-									email,
-									name: email.split("@")[0],
-									emailVerified: new Date(),
-									activeOrganizationId: orgId,
-									defaultOrgId: orgId,
-									inviteQuota: 1,
-								});
-								await tx.insert(organizations).values({
-									id: orgId,
-									ownerId: newId,
-									name: "My Organization",
-								});
-								await tx.insert(organizationMembers).values({
-									id: nanoId(),
-									organizationId: orgId,
-									userId: newId,
-									role: "owner",
-								});
-							});
-							user = {
-								id: newId,
-								email,
-								name: email.split("@")[0],
-								image: null,
-							};
-						}
-
-						return user;
+						return {
+							id: user.id,
+							email: user.email,
+							name: user.name,
+							image: user.image,
+						};
 					},
 				}),
 				CredentialsProvider({
@@ -313,9 +206,8 @@ export const authOptions = (): NextAuthOptions => {
 		},
 		callbacks: {
 			async signIn({ user, account }) {
-				if (account?.provider === "workos") return true;
 				if (account?.provider === "invite-token") return true;
-				if (account?.provider === "email-otp") return true;
+				if (account?.provider === "credentials") return true;
 
 				const email = user?.email?.toLowerCase();
 				if (!email) return false;
@@ -336,6 +228,8 @@ export const authOptions = (): NextAuthOptions => {
 					session.user.name = token.name ?? null;
 					session.user.email = token.email ?? null;
 					session.user.image = token.picture ?? null;
+					(session.user as { isAdmin?: boolean }).isAdmin =
+						token.isAdmin === true;
 				}
 
 				return session;
@@ -349,6 +243,7 @@ export const authOptions = (): NextAuthOptions => {
 							lastName: users.lastName,
 							email: users.email,
 							image: users.image,
+							isAdmin: users.isAdmin,
 							authSessionVersion: users.authSessionVersion,
 						})
 						.from(users)
@@ -368,6 +263,7 @@ export const authOptions = (): NextAuthOptions => {
 						lastName: dbUser.lastName,
 						email: dbUser.email,
 						picture: dbUser.image,
+						isAdmin: dbUser.isAdmin,
 						sessionVersion: dbUser.authSessionVersion,
 					};
 				}

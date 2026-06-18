@@ -12,6 +12,7 @@ export type CurrentUser = {
 	defaultOrgId: Organisation.OrganisationId | null;
 	isPro: boolean;
 	devModeEnabled: boolean;
+	isAdmin: boolean;
 };
 
 const AuthContext = createContext<

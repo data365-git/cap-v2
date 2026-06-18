@@ -1,4 +1,4 @@
-import { buildEnv, serverEnv } from "@cap/env";
+import { buildEnv } from "@cap/env";
 import { STRIPE_PLAN_IDS } from "@cap/utils";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { type PropsWithChildren, Suspense } from "react";
@@ -21,10 +21,7 @@ import { StripeContextProvider } from "./StripeContext";
 
 export async function AppProviders({ children }: PropsWithChildren) {
 	const bootstrapData = await getBootstrapData();
-	const plans =
-		serverEnv().VERCEL_ENV === "production"
-			? STRIPE_PLAN_IDS.production
-			: STRIPE_PLAN_IDS.development;
+	const plans = STRIPE_PLAN_IDS.development;
 
 	return (
 		<TooltipPrimitive.Provider>
@@ -35,8 +32,7 @@ export async function AppProviders({ children }: PropsWithChildren) {
 							<PublicEnvContext
 								value={{
 									webUrl: buildEnv.NEXT_PUBLIC_WEB_URL,
-									workosAuthAvailable: !!serverEnv().WORKOS_CLIENT_ID,
-									googleAuthAvailable: !!serverEnv().GOOGLE_CLIENT_ID,
+									googleAuthAvailable: false,
 								}}
 							>
 								<ReactQueryProvider>

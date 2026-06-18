@@ -18,19 +18,12 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, Option, Schema } from "effect";
 import { apiToHandler } from "@/lib/server";
 import { CACHE_CONTROL_HEADERS } from "@/utils/helpers";
-import {
-	generateM3U8Playlist,
-	generateMasterPlaylist,
-} from "@/utils/video/ffmpeg/helpers";
 
 export const dynamic = "force-dynamic";
 
 const GetPlaylistParams = Schema.Struct({
 	videoId: Video.VideoId,
 	videoType: Schema.Literal(
-		"video",
-		"audio",
-		"master",
 		"mp4",
 		"raw-preview",
 		"segments-master",
@@ -345,124 +338,16 @@ const getPlaylistResponse = (
 
 		yield* Effect.log("Resolving path with custom bucket");
 
-		const videoPrefix = `${video.ownerId}/${video.id}/video/`;
-		const audioPrefix = `${video.ownerId}/${video.id}/audio/`;
-
-		return yield* Effect.gen(function* () {
-			if (video.source.type === "local") {
-				const playlistText =
-					(yield* bucket.getObject(
-						`${video.ownerId}/${video.id}/combined-source/stream.m3u8`,
-					)).pipe(Option.getOrNull) ?? "";
-
-				const lines = playlistText.split("\n");
-
-				for (const [index, line] of lines.entries()) {
-					if (line.endsWith(".ts")) {
-						const url = yield* bucket.getSignedObjectUrl(
-							`${video.ownerId}/${video.id}/combined-source/${line}`,
-						);
-						lines[index] = url;
-					}
-				}
-
-				const playlist = lines.join("\n");
-
-				return HttpServerResponse.text(playlist, {
-					headers: {
-						...CACHE_CONTROL_HEADERS,
-						"Content-Type": "application/vnd.apple.mpegurl",
-					},
-				});
-			} else if (isMp4Source) {
-				yield* Effect.log(
-					`Returning path ${`${video.ownerId}/${video.id}/result.mp4`}`,
-				);
-				return yield* bucket
-					.getSignedObjectUrl(`${video.ownerId}/${video.id}/result.mp4`)
-					.pipe(Effect.map(HttpServerResponse.redirect));
-			}
-
-			if (urlParams.videoType === "master") {
-				const [videoSegment, audioSegment] = yield* Effect.all([
-					bucket.listObjects({ prefix: videoPrefix, maxKeys: 1 }),
-					bucket.listObjects({ prefix: audioPrefix, maxKeys: 1 }),
-				]);
-
-				const videoSegmentKey = videoSegment.Contents?.[0]?.Key;
-				if (!videoSegmentKey) {
-					return yield* Effect.fail(new HttpApiError.NotFound());
-				}
-
-				const videoMetadata = yield* bucket.headObject(videoSegmentKey);
-				const audioMetadata =
-					audioSegment?.KeyCount && audioSegment.KeyCount > 0
-						? audioSegment.Contents?.[0]?.Key
-							? yield* bucket.headObject(audioSegment.Contents[0].Key)
-							: undefined
-						: undefined;
-
-				const generatedPlaylist = generateMasterPlaylist(
-					videoMetadata?.Metadata?.resolution ?? "",
-					videoMetadata?.Metadata?.bandwidth ?? "",
-					`/api/playlist?videoId=${video.id}&videoType=video`,
-					audioMetadata
-						? `/api/playlist?videoId=${video.id}&videoType=audio`
-						: null,
-				);
-
-				return HttpServerResponse.text(generatedPlaylist, {
-					headers: {
-						...CACHE_CONTROL_HEADERS,
-						"Content-Type": "application/vnd.apple.mpegurl",
-					},
-				});
-			}
-
-			const prefix =
-				urlParams.videoType === "video"
-					? videoPrefix
-					: urlParams.videoType === "audio"
-						? audioPrefix
-						: undefined;
-
-			if (!prefix) {
-				return yield* Effect.fail(new HttpApiError.NotFound());
-			}
-
-			const objects = yield* bucket.listObjects({
-				prefix,
-				maxKeys: urlParams.thumbnail ? 1 : undefined,
-			});
-
-			const chunksUrls = yield* Effect.all(
-				(objects.Contents || []).map((object) =>
-					Effect.gen(function* () {
-						const url = yield* bucket.getSignedObjectUrl(object.Key ?? "");
-						const metadata = yield* bucket.headObject(object.Key ?? "");
-
-						return {
-							url: url,
-							duration: metadata?.Metadata?.duration ?? "",
-							bandwidth: metadata?.Metadata?.bandwidth ?? "",
-							resolution: metadata?.Metadata?.resolution ?? "",
-							videoCodec: metadata?.Metadata?.videocodec ?? "",
-							audioCodec: metadata?.Metadata?.audiocodec ?? "",
-						};
-					}),
-				),
-				{ concurrency: "unbounded" },
+		if (isMp4Source) {
+			yield* Effect.log(
+				`Returning path ${`${video.ownerId}/${video.id}/result.mp4`}`,
 			);
+			return yield* bucket
+				.getSignedObjectUrl(`${video.ownerId}/${video.id}/result.mp4`)
+				.pipe(Effect.map(HttpServerResponse.redirect));
+		}
 
-			const generatedPlaylist = generateM3U8Playlist(chunksUrls);
-
-			return HttpServerResponse.text(generatedPlaylist, {
-				headers: {
-					...CACHE_CONTROL_HEADERS,
-					"Content-Type": "application/vnd.apple.mpegurl",
-				},
-			});
-		}).pipe(Effect.withSpan("generateUrls"));
+		return yield* Effect.fail(new HttpApiError.NotFound());
 	});
 
 const handler = apiToHandler(ApiLive);

@@ -321,5 +321,5 @@ function errorMessageShouldFallback(error: unknown): boolean {
 		return true;
 	}
 
-	return error.message === "MEDIA_SERVER_URL is not configured";
+	return false;
 }

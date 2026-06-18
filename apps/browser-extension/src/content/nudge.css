@@ -1,0 +1,235 @@
+/*
+ * Reference stylesheet for the Cap Meet nudge UI.
+ * This file is NOT loaded by the browser — the CSS is embedded as a string
+ * in meet-detect.ts and injected into a shadow root to prevent Meet's styles
+ * from leaking in.
+ *
+ * All class names use the cap-nudge- prefix (BEM convention).
+ */
+
+:host {
+	all: initial;
+}
+
+.cap-nudge-container {
+	position: fixed;
+	bottom: 20px;
+	right: 20px;
+	z-index: 2147483647;
+	font-family: system-ui, sans-serif;
+	font-size: 14px;
+	color: #1a1a1a;
+	pointer-events: all;
+	user-select: none;
+}
+
+@keyframes cap-nudge-in {
+	from {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes cap-nudge-out {
+	from {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	to {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+@keyframes cap-nudge-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.65);
+	}
+	55% {
+		box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+	}
+}
+
+/* ── Card state (default + countdown) ────────────────────────────────────── */
+
+.cap-nudge-card {
+	background: #ffffff;
+	border-radius: 12px;
+	box-shadow:
+		0 4px 24px rgba(0, 0, 0, 0.18),
+		0 1px 4px rgba(0, 0, 0, 0.08);
+	padding: 16px;
+	width: 320px;
+	box-sizing: border-box;
+	animation: cap-nudge-in 0.2s cubic-bezier(0.2, 0.8, 0.4, 1) both;
+}
+
+.cap-nudge-card.cap-nudge-leaving {
+	animation: cap-nudge-out 0.18s ease-in both;
+}
+
+.cap-nudge-title {
+	font-weight: 700;
+	font-size: 15px;
+	margin: 0 0 4px 0;
+	color: #111;
+}
+
+.cap-nudge-subtitle {
+	font-size: 12px;
+	color: #666;
+	margin: 0 0 14px 0;
+}
+
+.cap-nudge-buttons {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.cap-nudge-btn-primary {
+	background: #675fff;
+	color: #fff;
+	border: none;
+	border-radius: 8px;
+	padding: 8px 16px;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: inherit;
+	transition: filter 0.15s;
+	white-space: nowrap;
+}
+
+.cap-nudge-btn-primary:hover {
+	filter: brightness(1.1);
+}
+
+.cap-nudge-btn-secondary {
+	background: #f3f4f6;
+	color: #374151;
+	border: none;
+	border-radius: 8px;
+	padding: 8px 14px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	font-family: inherit;
+	transition: background 0.15s;
+	white-space: nowrap;
+}
+
+.cap-nudge-btn-secondary:hover {
+	background: #e5e7eb;
+}
+
+.cap-nudge-btn-dismiss {
+	background: transparent;
+	border: none;
+	color: #9ca3af;
+	font-size: 12px;
+	cursor: pointer;
+	font-family: inherit;
+	padding: 4px 8px;
+	text-decoration: underline;
+	white-space: nowrap;
+}
+
+.cap-nudge-btn-dismiss:hover {
+	color: #6b7280;
+}
+
+/* ── Countdown state ─────────────────────────────────────────────────────── */
+
+.cap-nudge-btn-cancel {
+	display: block;
+	width: 100%;
+	background: #f3f4f6;
+	color: #374151;
+	border: none;
+	border-radius: 8px;
+	padding: 9px 0;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: inherit;
+	margin-bottom: 8px;
+	transition: background 0.15s;
+}
+
+.cap-nudge-btn-cancel:hover {
+	background: #e5e7eb;
+}
+
+.cap-nudge-no-auto {
+	display: block;
+	text-align: center;
+	background: transparent;
+	border: none;
+	color: #9ca3af;
+	font-size: 11px;
+	cursor: pointer;
+	font-family: inherit;
+	text-decoration: underline;
+}
+
+.cap-nudge-no-auto:hover {
+	color: #6b7280;
+}
+
+/* ── Recording-active pill state ─────────────────────────────────────────── */
+
+.cap-nudge-pill {
+	background: #111827;
+	border-radius: 999px;
+	padding: 8px 14px;
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+	animation: cap-nudge-in 0.2s cubic-bezier(0.2, 0.8, 0.4, 1) both;
+}
+
+.cap-nudge-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #ef4444;
+	flex-shrink: 0;
+	animation: cap-nudge-pulse 1.9s ease-out infinite;
+}
+
+.cap-nudge-elapsed {
+	font-size: 13px;
+	font-weight: 600;
+	color: #f9fafb;
+	font-variant-numeric: tabular-nums;
+	min-width: 52px;
+}
+
+.cap-nudge-paused-label {
+	font-size: 11px;
+	color: #9ca3af;
+}
+
+.cap-nudge-btn-stop {
+	background: #ef4444;
+	color: #fff;
+	border: none;
+	border-radius: 6px;
+	padding: 4px 10px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: inherit;
+	transition: filter 0.15s;
+}
+
+.cap-nudge-btn-stop:hover {
+	filter: brightness(1.1);
+}

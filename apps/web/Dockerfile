@@ -1,37 +1,89 @@
-FROM node:24-alpine AS base
+FROM node:20-alpine AS base
 RUN corepack enable
 
+# Stage 1: Install dependencies
+FROM base AS deps
+WORKDIR /app
+
+# Copy workspace config files needed for pnpm install
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ ./patches/
+
+# Copy all package.json files so pnpm can resolve workspaces
+COPY apps/web/package.json ./apps/web/
+COPY packages/config/package.json ./packages/config/
+COPY packages/database/package.json ./packages/database/
+COPY packages/env/package.json ./packages/env/
+COPY packages/local-docker/package.json ./packages/local-docker/
+COPY packages/tsconfig/package.json ./packages/tsconfig/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/utils/package.json ./packages/utils/
+COPY packages/web-api-contract/package.json ./packages/web-api-contract/
+COPY packages/web-api-contract-effect/package.json ./packages/web-api-contract-effect/
+COPY packages/web-backend/package.json ./packages/web-backend/
+COPY packages/web-domain/package.json ./packages/web-domain/
+
+RUN pnpm install --frozen-lockfile
+
+# Stage 2: Build the application
 FROM base AS builder
 WORKDIR /app
+
+# Copy the entire node_modules tree (pnpm virtual store + workspace symlinks)
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
+COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
+COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
+COPY --from=deps /app/packages/utils/node_modules ./packages/utils/node_modules
+COPY --from=deps /app/packages/web-api-contract/node_modules ./packages/web-api-contract/node_modules
+COPY --from=deps /app/packages/web-api-contract-effect/node_modules ./packages/web-api-contract-effect/node_modules
+COPY --from=deps /app/packages/web-backend/node_modules ./packages/web-backend/node_modules
+COPY --from=deps /app/packages/web-domain/node_modules ./packages/web-domain/node_modules
+COPY --from=deps /app/packages/config/node_modules ./packages/config/node_modules
+
+# Copy all source files
 COPY . .
 
-RUN corepack enable pnpm
-RUN pnpm i --frozen-lockfile
+# NEXT_PUBLIC_DOCKER_BUILD enables standalone output mode in next.config.mjs
+# WORKFLOW_NEXT_PRIVATE_BUILT=1 skips the workflow esbuild step during build
+# (workflow routes are pre-compiled in apps/web/app/.well-known/workflow/)
+# NODE_OPTIONS limits memory to avoid OOM during large Next.js builds
+ENV NEXT_PUBLIC_DOCKER_BUILD=true
+ENV WORKFLOW_NEXT_PRIVATE_BUILT=1
+ENV NEXT_TELEMETRY_DISABLED=1
 
-ARG NEXT_PUBLIC_DOCKER_BUILD=true
-ENV NEXT_PUBLIC_WEB_URL=http://localhost:3000
+# Build upstream packages first (database, env, utils, web-backend, web-domain)
+# Then build Next.js app using standard webpack (not turbopack) for lower memory usage
+RUN pnpm --filter @cap/database build && \
+    pnpm --filter @cap/env build && \
+    pnpm --filter @cap/utils build && \
+    pnpm --filter @cap/web-domain build && \
+    pnpm --filter @cap/web-backend build && \
+    pnpm --filter @cap/web build:next:docker
 
-RUN pnpm run build:web
-
-
-# 3. Production image, copy all the files and run next
-FROM base AS runner
+# Stage 3: Production runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
+# Copy the standalone build output (includes all required server-side files)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# Copy static assets (CSS, JS chunks, images)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+# Copy public directory (favicons, robots.txt, etc.)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+# Copy database migrations for runtime migration support
 COPY --from=builder --chown=nextjs:nodejs /app/packages/database/migrations ./apps/web/migrations
-
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD HOSTNAME="0.0.0.0" node apps/web/server.js
+CMD ["node", "apps/web/server.js"]

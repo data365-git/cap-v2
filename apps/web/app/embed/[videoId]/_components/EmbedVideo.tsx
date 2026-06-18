@@ -2,7 +2,6 @@
 
 import type { userSelectProps } from "@cap/database/auth/session";
 import type { comments as commentsSchema, videos } from "@cap/database/schema";
-import { NODE_ENV } from "@cap/env";
 import { Avatar, Logo } from "@cap/ui";
 import type { ViewerSettings } from "@cap/web-backend";
 import { AnimatePresence, motion } from "framer-motion";
@@ -15,7 +14,6 @@ import {
 	useState,
 } from "react";
 import { CapVideoPlayer } from "@/app/s/[videoId]/_components/CapVideoPlayer";
-import { HLSVideoPlayer } from "@/app/s/[videoId]/_components/HLSVideoPlayer";
 import { useUploadProgress } from "@/app/s/[videoId]/_components/ProgressCircle";
 import {
 	PreparingVideoOverlay,
@@ -152,10 +150,6 @@ export const EmbedVideo = forwardRef<
 			});
 		}, [chapters, chaptersDisabled]);
 
-		const isMp4Source =
-			data.source.type === "desktopMP4" ||
-			data.source.type === "webMP4" ||
-			data.source.type === "extensionWeb";
 		const isSegmentsSource = data.source.type === "desktopSegments";
 		const isActivelyRecording =
 			isSegmentsSource &&
@@ -178,29 +172,13 @@ export const EmbedVideo = forwardRef<
 			}
 		}, [isActivelyRecording]);
 
-		let videoSrc: string;
+		// All source types use the native <video> player via the mp4 playlist endpoint.
+		const videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=mp4`;
 		const rawFallbackSrc =
 			data.source.type === "webMP4" || data.source.type === "extensionWeb"
 				? `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=raw-preview`
 				: undefined;
-		let enableCrossOrigin = false;
-
-		if (isSegmentsSource) {
-			videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=segments-master`;
-		} else if (isMp4Source) {
-			videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=mp4`;
-			enableCrossOrigin = true;
-		} else if (
-			NODE_ENV === "development" ||
-			((data.skipProcessing === true || data.jobStatus !== "COMPLETE") &&
-				data.source.type === "MediaConvert")
-		) {
-			videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=master`;
-		} else if (data.source.type === "MediaConvert") {
-			videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=video`;
-		} else {
-			videoSrc = `/api/playlist?userId=${data.ownerId}&videoId=${data.id}&videoType=video`;
-		}
+		const enableCrossOrigin = true;
 
 		useEffect(() => {
 			if (!videoRef.current) return;
@@ -237,7 +215,7 @@ export const EmbedVideo = forwardRef<
 						/>
 					) : isTransitioning ? (
 						<PreparingVideoOverlay className="w-full h-full" />
-					) : isMp4Source ? (
+					) : (
 						<CapVideoPlayer
 							videoId={data.id}
 							mediaPlayerClassName="w-full h-full"
@@ -251,19 +229,6 @@ export const EmbedVideo = forwardRef<
 							videoRef={videoRef}
 							enableCrossOrigin={enableCrossOrigin}
 							hasActiveUpload={data.hasActiveUpload}
-						/>
-					) : (
-						<HLSVideoPlayer
-							videoId={data.id}
-							mediaPlayerClassName="w-full h-full"
-							videoSrc={videoSrc}
-							duration={data.duration}
-							disableCaptions={captionsDisabled}
-							chaptersSrc={chaptersDisabled ? "" : chaptersUrl || ""}
-							captionsSrc={captionsDisabled ? "" : subtitleUrl || ""}
-							videoRef={videoRef}
-							hasActiveUpload={data.hasActiveUpload}
-							isLiveSegments={isSegmentsSource}
 						/>
 					)}
 				</div>

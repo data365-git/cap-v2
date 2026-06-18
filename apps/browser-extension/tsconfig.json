@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"moduleResolution": "bundler",
+		"module": "ES2022",
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "WebWorker"],
+		"types": ["chrome"],
+		"outDir": "dist",
+		"rootDir": "src",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"noEmit": true
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist"]
+}

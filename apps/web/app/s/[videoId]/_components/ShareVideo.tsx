@@ -1,5 +1,4 @@
 import type { comments as commentsSchema } from "@cap/database/schema";
-import { NODE_ENV } from "@cap/env";
 import { Logo } from "@cap/ui";
 import type { ImageUpload } from "@cap/web-domain";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -24,7 +23,6 @@ import { AIFab } from "./AIFab";
 import { BelowVideoTabs } from "./BelowVideoTabs";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
-import { HLSVideoPlayer } from "./HLSVideoPlayer";
 import {
 	shouldDeferPlaybackSource,
 	shouldReloadPlaybackAfterUploadCompletes,
@@ -237,10 +235,6 @@ export const ShareVideo = forwardRef<
 			});
 		}, [chapters]);
 
-		const isMp4Source =
-			data.source.type === "desktopMP4" ||
-			data.source.type === "webMP4" ||
-			data.source.type === "extensionWeb";
 		const isSegmentsSource = data.source.type === "desktopSegments";
 		const previousSegmentUploadProgressRef = useRef(segmentUploadProgress);
 		const isActivelyRecording =
@@ -345,30 +339,14 @@ export const ShareVideo = forwardRef<
 			userConfirmedStopped,
 		]);
 
-		let videoSrc: string;
+		// All source types use the native <video> player via the mp4 playlist endpoint.
+		// The /api/playlist?videoType=mp4 route returns a signed redirect to result.mp4.
+		const videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=mp4`;
 		const rawFallbackSrc =
 			data.source.type === "webMP4" || data.source.type === "extensionWeb"
 				? `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=raw-preview`
 				: undefined;
-		let enableCrossOrigin = false;
-
-		if (isSegmentsSource) {
-			const requireComplete = userConfirmedStopped ? "&requireComplete=1" : "";
-			videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=segments-master${requireComplete}`;
-		} else if (isMp4Source) {
-			videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=mp4`;
-			enableCrossOrigin = true;
-		} else if (
-			NODE_ENV === "development" ||
-			((data.skipProcessing === true || data.jobStatus !== "COMPLETE") &&
-				data.source.type === "MediaConvert")
-		) {
-			videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=master`;
-		} else if (data.source.type === "MediaConvert") {
-			videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=video`;
-		} else {
-			videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=video`;
-		}
+		const enableCrossOrigin = true;
 
 		return (
 			<>
@@ -378,20 +356,21 @@ export const ShareVideo = forwardRef<
 				>
 					{isActivelyRecording ? (
 						<div className="relative h-full overflow-hidden rounded-xl bg-black">
-							<HLSVideoPlayer
+							<CapVideoPlayer
 								videoId={data.id}
 								mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
 								videoSrc={videoSrc}
 								duration={data.duration}
-								disableCaptions={true}
+								disableCaptions
+								disableCommentStamps
+								disableReactionStamps
+								disablePreviewGif
 								chaptersSrc=""
 								captionsSrc=""
 								videoRef={videoRef}
+								enableCrossOrigin={enableCrossOrigin}
 								hasActiveUpload={data.hasActiveUpload}
-								isLiveSegments={isSegmentsSource}
-								allowSegmentProbeDuringUpload={true}
-								autoplay={true}
-								previewMode="background"
+								autoplay
 							/>
 							<div className="absolute inset-0 z-20">
 								<RecordingInProgressOverlay
@@ -405,7 +384,7 @@ export const ShareVideo = forwardRef<
 						</div>
 					) : isProcessingInProgress ? (
 						<PreparingVideoOverlay className="h-full" />
-					) : isMp4Source ? (
+					) : (
 						<CapVideoPlayer
 							videoId={data.id}
 							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl overflow-visible"
@@ -433,37 +412,6 @@ export const ShareVideo = forwardRef<
 								authorImage: comment.authorImage ?? undefined,
 							}))}
 							onSeek={handleSeek}
-							captionLanguage={captionContext.selectedLanguage}
-							onCaptionLanguageChange={handleCaptionLanguageChange}
-							availableCaptions={captionContext.availableTranslations}
-							isCaptionLoading={captionContext.isTranslating}
-							hasCaptions={data.transcriptionStatus === "COMPLETE"}
-							canRetryProcessing={canRetryProcessing}
-							chapters={
-								areChaptersDisabled
-									? []
-									: chapters.map((ch) => ({
-											startSec: ch.start,
-											title: ch.title,
-										}))
-							}
-						/>
-					) : (
-						<HLSVideoPlayer
-							videoId={data.id}
-							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
-							videoSrc={videoSrc}
-							duration={data.duration}
-							defaultPlaybackSpeed={defaultPlaybackSpeed}
-							disableCaptions={areCaptionsDisabled ?? false}
-							chaptersSrc={areChaptersDisabled ? "" : chaptersUrl || ""}
-							captionsSrc={areCaptionsDisabled ? "" : subtitleUrl || ""}
-							videoRef={videoRef}
-							hasActiveUpload={data.hasActiveUpload}
-							isLiveSegments={isSegmentsSource}
-							allowSegmentProbeDuringUpload={
-								isSegmentsSource && userConfirmedStopped
-							}
 							captionLanguage={captionContext.selectedLanguage}
 							onCaptionLanguageChange={handleCaptionLanguageChange}
 							availableCaptions={captionContext.availableTranslations}

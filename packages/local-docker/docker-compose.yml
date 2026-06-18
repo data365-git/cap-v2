@@ -20,16 +20,7 @@ services:
     volumes:
       - ps-mysql:/var/lib/mysql
 
-  cap-media-server:
-    container_name: cap-media-server-dev
-    build:
-      context: ../..
-      dockerfile: apps/media-server/Dockerfile
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      PORT: 3456
-      MEDIA_SERVER_WEBHOOK_SECRET: ${MEDIA_SERVER_WEBHOOK_SECRET:-local-media-server-secret}
+  # Media server removed — no server-side video processing
 
   # Local S3 Strorage
   minio:

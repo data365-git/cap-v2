@@ -286,6 +286,9 @@ export const Share = ({
 		? new Date(data.metadata.customCreatedAt)
 		: data.createdAt;
 
+	const olderThanFiveMin =
+		Date.now() - effectiveDate.getTime() > 5 * 60 * 1000;
+
 	const playerRef = useRef<HTMLVideoElement | null>(null);
 	const activityRef = useRef<{ scrollToBottom: () => void }>(null);
 	const initialComments: CommentType[] =

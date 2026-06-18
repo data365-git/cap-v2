@@ -486,8 +486,7 @@ async function AuthorizedContent({
 	if (
 		user?.id === video.owner.id &&
 		video.source?.type === "desktopSegments" &&
-		!video.hasActiveUpload &&
-		serverEnv().MEDIA_SERVER_URL
+		!video.hasActiveUpload
 	) {
 		try {
 			const result = await completeDesktopSegmentsManifestAndQueue({
@@ -553,7 +552,7 @@ async function AuthorizedContent({
 	const env = serverEnv();
 	const transcriptionGenerationAvailable =
 		Boolean(env.DEEPGRAM_API_KEY) && !rules.settings.disableTranscript;
-	const aiProviderAvailable = Boolean(env.GROQ_API_KEY || env.OPENAI_API_KEY);
+	const aiProviderAvailable = Boolean(env.GEMINI_API_KEY);
 
 	let aiGenerationEnabled = false;
 	const videoOwnerQuery = await db()

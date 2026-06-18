@@ -709,9 +709,9 @@ export const useWebRecorder = ({
 				videoStream = await navigator.mediaDevices.getUserMedia({
 					video: {
 						deviceId: { exact: selectedCameraId },
-						frameRate: { ideal: 30 },
-						width: { ideal: 1920 },
-						height: { ideal: 1080 },
+						frameRate: { max: 30 },
+						width: { max: 1280 },
+						height: { max: 720 },
 					},
 				});
 				cameraStreamRef.current = videoStream;
@@ -1029,6 +1029,8 @@ export const useWebRecorder = ({
 
 			const recorder = new MediaRecorder(mixedStream, {
 				mimeType: pipeline.mimeType,
+				videoBitsPerSecond: 1_200_000,
+				audioBitsPerSecond: 128_000,
 			});
 			recorder.ondataavailable = handleRecorderDataAvailable;
 			recorder.onstop = onRecorderStop;

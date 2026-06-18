@@ -24,6 +24,7 @@ export const resolveCurrentUser = Effect.gen(function* () {
 						: null,
 					isPro: userIsPro(u),
 					devModeEnabled: Boolean(prefs?.devModeEnabled),
+					isAdmin: u.isAdmin ?? false,
 				};
 			}),
 		),

@@ -1,0 +1,16 @@
+{
+	"name": "@cap/browser-extension",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "node scripts/build.mjs",
+		"watch": "node scripts/build.mjs --watch",
+		"package": "node scripts/package.mjs"
+	},
+	"devDependencies": {
+		"@types/chrome": "^0.0.287",
+		"esbuild": "^0.24.2",
+		"typescript": "^5.7.0"
+	}
+}

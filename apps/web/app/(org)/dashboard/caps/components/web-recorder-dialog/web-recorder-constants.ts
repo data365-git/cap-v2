@@ -31,9 +31,9 @@ export const dialogVariants = {
 };
 
 export const DISPLAY_MEDIA_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
-	frameRate: { ideal: 30 },
-	width: { ideal: 1920 },
-	height: { ideal: 1080 },
+	frameRate: { max: 30 },
+	width: { max: 1280 },
+	height: { max: 720 },
 };
 
 export type ExtendedDisplayMediaStreamOptions = DisplayMediaStreamOptions & {

@@ -26,10 +26,6 @@ function createServerEnv() {
 					"32 byte hex string for encrypting values like AWS access keys",
 				),
 
-			// Cap uses Resend for email sending, including sending login code emails
-			RESEND_API_KEY: z.string().optional(),
-			RESEND_FROM_DOMAIN: z.string().optional(),
-
 			/// S3 configuration
 			// Though they are prefixed with `CAP_AWS`, these don't have to be
 			// for AWS, and can instead be for any S3-compatible service
@@ -67,10 +63,25 @@ function createServerEnv() {
 			GOOGLE_CLIENT_ID: z.string().optional(),
 			GOOGLE_CLIENT_SECRET: z.string().optional(),
 
-			/// WorkOS SSO
-			// Provide these to use WorkOS for enterprise SSO
-			WORKOS_CLIENT_ID: z.string().optional(),
-			WORKOS_API_KEY: z.string().optional(),
+			/// Invite system
+			INVITE_TOKEN_SECRET: z
+				.string()
+				.describe("Secret for signing invite tokens"),
+			INITIAL_ADMIN_EMAIL: z
+				.string()
+				.optional()
+				.describe("Email of the initial admin user (seed script)"),
+			INITIAL_ADMIN_PASSWORD: z
+				.string()
+				.optional()
+				.describe("Password of the initial admin user (seed script)"),
+
+			/// Cloudflare R2 (optional — alternative to S3/MinIO)
+			CLOUDFLARE_R2_ACCOUNT_ID: z.string().optional(),
+			CLOUDFLARE_R2_ACCESS_KEY: z.string().optional(),
+			CLOUDFLARE_R2_SECRET_KEY: z.string().optional(),
+			CLOUDFLARE_R2_BUCKET: z.string().optional(),
+			CLOUDFLARE_R2_PUBLIC_URL: z.string().optional(),
 
 			/// Settings
 			CAP_VIDEOS_DEFAULT_PUBLIC: boolString(true).describe(
@@ -127,37 +138,60 @@ function createServerEnv() {
 			POSTHOG_PERSONAL_API_KEY: z.string().optional(),
 			DUB_API_KEY: z.string().optional(),
 
-			/// Media Server
+			/// Media Server (removed — kept as optional for backward compatibility)
 			MEDIA_SERVER_URL: z
 				.string()
 				.optional()
-				.describe("URL of the media server for FFmpeg processing"),
+				.describe("DEPRECATED: Media server has been removed"),
 			MEDIA_SERVER_WEBHOOK_SECRET: z
 				.string()
 				.optional()
-				.describe("Secret for authenticating media server webhook callbacks"),
+				.describe("DEPRECATED: Media server has been removed"),
 			MEDIA_SERVER_WEBHOOK_URL: z
 				.string()
 				.optional()
-				.describe(
-					"Base URL for media server webhooks (use host.docker.internal for Docker setups)",
-				),
+				.describe("DEPRECATED: Media server has been removed"),
 
 			/// Ignore
 			NODE_ENV: z.string(),
 			WORKFLOWS_RPC_URL: z.string().optional(),
 			WORKFLOWS_RPC_SECRET: z.string().optional(),
 		},
-		experimental__runtimeEnv: {
-			S3_PUBLIC_ENDPOINT: process.env.CAP_AWS_ENDPOINT,
-			S3_INTERNAL_ENDPOINT: process.env.CAP_AWS_ENDPOINT,
-			...process.env,
-			NODE_ENV: process.env.NODE_ENV ?? "production",
-			VERCEL_URL_HOST: process.env.VERCEL_URL,
-			VERCEL_BRANCH_URL_HOST: process.env.VERCEL_BRANCH_URL,
-			VERCEL_PROJECT_PRODUCTION_URL_HOST:
-				process.env.VERCEL_PROJECT_PRODUCTION_URL,
-		},
+		experimental__runtimeEnv: (() => {
+			// When Cloudflare R2 credentials are present, map them onto the generic
+			// CAP_AWS_* / S3_* vars so the rest of the codebase needs no changes.
+			const r2AccountId = process.env.CLOUDFLARE_R2_ACCOUNT_ID;
+			const r2Overrides = r2AccountId
+				? {
+						CAP_AWS_ACCESS_KEY: process.env.CLOUDFLARE_R2_ACCESS_KEY,
+						CAP_AWS_SECRET_KEY: process.env.CLOUDFLARE_R2_SECRET_KEY,
+						CAP_AWS_BUCKET:
+							process.env.CLOUDFLARE_R2_BUCKET ?? process.env.CAP_AWS_BUCKET,
+						CAP_AWS_REGION: "auto",
+						S3_PUBLIC_ENDPOINT: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+						S3_INTERNAL_ENDPOINT: `https://${r2AccountId}.r2.cloudflarestorage.com`,
+						CAP_AWS_BUCKET_URL:
+							process.env.CLOUDFLARE_R2_PUBLIC_URL ??
+							`https://${r2AccountId}.r2.cloudflarestorage.com/${process.env.CLOUDFLARE_R2_BUCKET ?? process.env.CAP_AWS_BUCKET}`,
+						S3_PATH_STYLE: "true",
+					}
+				: {
+						S3_PUBLIC_ENDPOINT:
+							process.env.S3_PUBLIC_ENDPOINT ?? process.env.CAP_AWS_ENDPOINT,
+						S3_INTERNAL_ENDPOINT:
+							process.env.S3_INTERNAL_ENDPOINT ?? process.env.CAP_AWS_ENDPOINT,
+					};
+
+			return {
+				...process.env,
+				...r2Overrides,
+				NODE_ENV: process.env.NODE_ENV ?? "production",
+				VERCEL_URL_HOST: process.env.VERCEL_URL,
+				VERCEL_BRANCH_URL_HOST: process.env.VERCEL_BRANCH_URL,
+				VERCEL_PROJECT_PRODUCTION_URL_HOST:
+					process.env.VERCEL_PROJECT_PRODUCTION_URL,
+			};
+		})(),
 	});
 }
 

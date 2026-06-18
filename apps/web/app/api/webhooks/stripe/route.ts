@@ -1,12 +1,11 @@
 import { db } from "@cap/database";
 import { nanoId } from "@cap/database/helpers";
 import { developerCreditTransactions, users } from "@cap/database/schema";
-import { buildEnv, serverEnv } from "@cap/env";
+import { serverEnv } from "@cap/env";
 import { stripe } from "@cap/utils";
 import { Organisation, User } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { PostHog } from "posthog-node";
 import type Stripe from "stripe";
 import { addCreditsToAccount } from "@/lib/developer-credits";
 
@@ -315,41 +314,6 @@ export const POST = async (req: Request) => {
 					.where(eq(users.id, dbUser.id));
 
 				console.log("Successfully updated user in database");
-
-				try {
-					const serverPostHog = new PostHog(
-						buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "",
-						{ host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "" },
-					);
-
-					const isFirstPurchase = !dbUser.stripeSubscriptionId;
-					const isGuestCheckout = session.metadata?.guestCheckout === "true";
-					serverPostHog.capture({
-						distinctId: dbUser.id,
-						event: "purchase_completed",
-						properties: {
-							subscription_id: subscription.id,
-							subscription_status: subscription.status,
-							invite_quota: inviteQuota,
-							price_id: subscription.items.data[0]?.price.id,
-							quantity: inviteQuota,
-							is_onboarding: session.metadata?.isOnBoarding === "true",
-							platform:
-								session.metadata?.platform === "desktop"
-									? "desktop"
-									: session.metadata?.platform === "web"
-										? "web"
-										: "unknown",
-							is_first_purchase: isFirstPurchase,
-							is_guest_checkout: isGuestCheckout,
-						},
-					});
-
-					await serverPostHog.shutdown();
-					console.log("Successfully tracked purchase event in PostHog");
-				} catch (error) {
-					console.error("Error tracking purchase in PostHog:", error);
-				}
 			}
 
 			if (event.type === "customer.subscription.updated") {
