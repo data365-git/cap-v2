@@ -53,6 +53,12 @@ ENV NEXT_PUBLIC_DOCKER_BUILD=true
 ENV WORKFLOW_NEXT_PRIVATE_BUILT=1
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Build-time public env vars (baked into Next.js client bundle)
+ARG WEB_URL=https://cap-v2.up.railway.app
+ARG NEXT_PUBLIC_WEB_URL=https://cap-v2.up.railway.app
+ENV WEB_URL=$WEB_URL
+ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
+
 # Build upstream packages first (database, env, utils, web-backend, web-domain)
 # Then build Next.js app using standard webpack (not turbopack) for lower memory usage
 RUN pnpm --filter @cap/database build && \
