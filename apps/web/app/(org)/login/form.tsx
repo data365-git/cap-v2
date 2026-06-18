@@ -46,7 +46,8 @@ export function LoginForm() {
 			});
 
 			if (res?.ok && !res?.error) {
-				router.push(next && next.length > 0 ? next : "/dashboard");
+				const dest = next && next.length > 0 ? next : "/dashboard";
+				window.location.href = dest;
 				return;
 			}
 
