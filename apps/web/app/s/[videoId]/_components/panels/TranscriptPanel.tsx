@@ -201,7 +201,7 @@ export function TranscriptPanel({
 									ref={active ? activeRef : undefined}
 									className={`grid items-start rounded-lg px-2 py-2 transition-colors group ${
 										active
-											? "border-l-2 border-blue-500 bg-blue-50 pl-3"
+											? "border-l-2 border-purple-600 bg-purple-50 pl-3"
 											: "border-l-2 border-transparent hover:bg-gray-50"
 									}`}
 									style={{ gridTemplateColumns: "42px 1fr 34px" }}
@@ -228,7 +228,7 @@ export function TranscriptPanel({
 											type="button"
 											onClick={() => onVideoJump?.(cue.startSeconds)}
 											aria-label={`Jump to ${cue.timestamp}`}
-											className="flex size-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 opacity-0 transition-all duration-150 group-hover:opacity-100 hover:scale-110 hover:bg-blue-100 hover:text-blue-600"
+											className="flex size-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 opacity-0 transition-all duration-150 group-hover:opacity-100 hover:scale-110 hover:bg-purple-100 hover:text-purple-600"
 										>
 											<svg
 												aria-hidden="true"

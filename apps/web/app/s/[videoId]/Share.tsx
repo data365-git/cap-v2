@@ -23,7 +23,6 @@ import type { OrganizationSettings } from "@/app/(org)/dashboard/dashboard-data"
 import { CaptionProvider } from "./_components/CaptionContext";
 import { ShareVideo } from "./_components/ShareVideo";
 import { Sidebar } from "./_components/Sidebar";
-import SummaryChapters from "./_components/SummaryChapters";
 import type { VideoData } from "./types";
 
 type CommentWithAuthor = typeof commentsSchema.$inferSelect & {
@@ -581,46 +580,6 @@ export const Share = ({
 							/>
 						</div>
 					)}
-				</div>
-
-				<div className="hidden mt-4 lg:block">
-					{aiLoading && (
-						<div className="p-4 animate-pulse new-card-style">
-							<div className="space-y-6">
-								<div>
-									<div className="mb-3 w-24 h-6 bg-gray-200 rounded"></div>
-									<div className="mb-4 w-32 h-3 bg-gray-100 rounded"></div>
-									<div className="space-y-3">
-										<div className="w-full h-4 bg-gray-200 rounded"></div>
-										<div className="w-5/6 h-4 bg-gray-200 rounded"></div>
-										<div className="w-4/5 h-4 bg-gray-200 rounded"></div>
-										<div className="w-full h-4 bg-gray-200 rounded"></div>
-										<div className="w-3/4 h-4 bg-gray-200 rounded"></div>
-									</div>
-								</div>
-
-								<div>
-									<div className="mb-4 w-24 h-6 bg-gray-200 rounded"></div>
-									<div className="space-y-2">
-										{[1, 2, 3, 4].map((i) => (
-											<div key={i} className="flex items-center p-2">
-												<div className="mr-3 w-12 h-4 bg-gray-200 rounded"></div>
-												<div className="flex-1 h-4 bg-gray-200 rounded"></div>
-											</div>
-										))}
-									</div>
-								</div>
-							</div>
-						</div>
-					)}
-
-					<SummaryChapters
-						isSummaryDisabled={isSummaryDisabled}
-						areChaptersDisabled={areChaptersDisabled}
-						handleSeek={handleSeek}
-						aiData={aiData}
-						aiLoading={aiLoading}
-					/>
 				</div>
 			</div>
 		</CaptionProvider>

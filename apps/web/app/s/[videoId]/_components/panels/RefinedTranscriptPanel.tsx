@@ -33,13 +33,13 @@ export function RefinedTranscriptPanel({
 			{refinedTranscript.chapters.map((chapter) => (
 				<section
 					key={chapter.startSec}
-					className="refined-section rounded-xl border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-sm"
+					className="refined-section rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
 				>
 					<div className="mb-3 flex items-center gap-2">
 						<button
 							type="button"
 							onClick={() => onVideoJump?.(chapter.startSec)}
-							className="rounded-md bg-blue-50 px-2 py-0.5 font-mono text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+							className="rounded-md bg-purple-50 px-2 py-0.5 font-mono text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
 						>
 							{formatTimeMinutes(chapter.startSec)}
 						</button>
@@ -50,7 +50,7 @@ export function RefinedTranscriptPanel({
 							type="button"
 							onClick={() => onVideoJump?.(chapter.startSec)}
 							aria-label={`Play from ${chapter.title}`}
-							className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 transition-colors hover:bg-blue-100"
+							className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-purple-50 text-purple-600 transition-colors hover:bg-purple-100"
 						>
 							<Play className="size-3.5 fill-current" />
 						</button>

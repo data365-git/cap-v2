@@ -43,33 +43,38 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 		return null;
 	}
 
+	const breakdownValues = OPERATIONS.map(({ key }) => data.breakdown[key] ?? 0);
+	const allBreakdownZero = breakdownValues.every((v) => v === 0);
+
 	return (
 		<div className="flex flex-col gap-4">
-			<div className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 bg-white/80 px-6 py-5 text-center shadow-sm backdrop-blur-sm">
+			<div className="flex flex-col items-center gap-1 rounded-xl border border-gray-200 bg-white px-6 py-5 text-center shadow-sm">
 				<span className="text-xs font-medium text-gray-500">
-					Bu uchrashuv uchun
+					Meeting cost
 				</span>
 				<span className="text-3xl font-bold text-gray-900">
 					{formatUsd(data.totalUsdCents)}
 				</span>
 			</div>
 
-			<div className="grid grid-cols-4 gap-3">
-				{OPERATIONS.map(({ key, label }) => {
-					const cents = data.breakdown[key] ?? 0;
-					return (
-						<div
-							key={key}
-							className="flex flex-col gap-1 rounded-xl border border-gray-200 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-sm"
-						>
-							<span className="text-xs font-medium text-gray-500">{label}</span>
-							<span className="text-sm font-semibold text-gray-900">
-								{formatUsd(cents)}
-							</span>
-						</div>
-					);
-				})}
-			</div>
+			{!allBreakdownZero && (
+				<div className="grid grid-cols-4 gap-3">
+					{OPERATIONS.map(({ key, label }) => {
+						const cents = data.breakdown[key] ?? 0;
+						return (
+							<div
+								key={key}
+								className="flex flex-col gap-1 rounded-xl border border-gray-200 bg-white px-3 py-3 shadow-sm"
+							>
+								<span className="text-xs font-medium text-gray-500">{label}</span>
+								<span className="text-sm font-semibold text-gray-900">
+									{formatUsd(cents)}
+								</span>
+							</div>
+						);
+					})}
+				</div>
+			)}
 		</div>
 	);
 }

@@ -153,7 +153,18 @@ export function CapVideoPlayer({
 	const [currentCue, setCurrentCue] = useState<string>("");
 	const [controlsVisible, setControlsVisible] = useState(false);
 	const [mainControlsVisible, setMainControlsVisible] = useState(false);
-	const [toggleCaptions, setToggleCaptions] = useState(true);
+	const [toggleCaptions, setToggleCaptionsState] = useState<boolean>(() => {
+		if (typeof window === "undefined") return false;
+		const stored = localStorage.getItem("cap-captions-enabled");
+		return stored === null ? false : stored === "true";
+	});
+
+	const setToggleCaptions = useCallback((value: boolean) => {
+		setToggleCaptionsState(value);
+		if (typeof window !== "undefined") {
+			localStorage.setItem("cap-captions-enabled", String(value));
+		}
+	}, []);
 	const [showPlayButton, setShowPlayButton] = useState(false);
 	const [videoLoaded, setVideoLoaded] = useState(false);
 	const [hasPlayedOnce, setHasPlayedOnce] = useState(false);

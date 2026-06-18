@@ -34,7 +34,7 @@ function Initials({ name }: { name: string }) {
 	const parts = name.trim().split(/\s+/);
 	const letters =
 		parts.length >= 2
-			? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+			? ((parts[0]?.[0] ?? "") + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase()
 			: name.slice(0, 2).toUpperCase();
 	return (
 		<span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700">
@@ -115,7 +115,7 @@ export function TasksPanel({
 					body: JSON.stringify({
 						videoId,
 						taskIndex: index,
-						done: next[index].done,
+						done: next[index]?.done,
 					}),
 				}).catch(() => undefined);
 			}, 400);
@@ -170,7 +170,7 @@ function BoardView({
 	const done = tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.done);
 
 	return (
-		<div className="grid grid-cols-3 gap-3">
+		<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
 			<Column label="To Do" items={todo} onToggle={onToggle} />
 			<Column label="In Progress" items={inProgress} onToggle={onToggle} />
 			<Column label="Done" items={done} onToggle={onToggle} />
@@ -188,7 +188,7 @@ function Column({
 	onToggle: (i: number) => void;
 }) {
 	return (
-		<div className="flex flex-col gap-2">
+		<div className="flex flex-col gap-2 bg-gray-50 border border-gray-200 rounded-xl p-4 min-h-[120px] overflow-hidden">
 			<div className="flex items-center gap-2">
 				<span className="text-xs font-semibold text-gray-600">{label}</span>
 				<span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
@@ -220,7 +220,7 @@ function TaskCard({
 }) {
 	return (
 		<div
-			className={`flex flex-col gap-2 rounded-xl border p-3 transition-opacity ${task.done ? "border-gray-100 bg-gray-50 opacity-60" : "border-gray-200 bg-white"}`}
+			className={`flex flex-col gap-2 rounded-lg border p-3 shadow-sm transition-opacity ${task.done ? "border-gray-100 bg-gray-50 opacity-60" : "border-gray-200 bg-white"}`}
 		>
 			<div className="flex items-start gap-2">
 				<input

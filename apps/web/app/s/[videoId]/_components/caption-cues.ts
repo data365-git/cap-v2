@@ -20,5 +20,9 @@ export function getActiveCaptionText(
 		}
 	}
 
-	return selectedCue?.text.replace(/<[^>]*>/g, "") ?? "";
+	const raw = selectedCue?.text.replace(/<[^>]*>/g, "") ?? "";
+	return raw
+		.replace(/^Speaker\s*\d+:\s*/i, "")
+		.replace(/\*\*(.*?)\*\*/g, "$1")
+		.trim();
 }
