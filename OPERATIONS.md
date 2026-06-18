@@ -206,7 +206,37 @@ railway logs
 
 ---
 
-## 9. Local Development
+## 9. Browser Extension
+
+### Build
+```bash
+pnpm --filter @cap/browser-extension build
+```
+Output: `apps/browser-extension/dist/`
+
+### Install in Chrome
+1. Go to `chrome://extensions/`
+2. Toggle **Developer mode** ON (top-right)
+3. Click **Load unpacked**
+4. Select: `apps/browser-extension/dist`
+
+### First-time setup
+Click the extension icon → it opens the options page → links your account via `https://web-production-e6fe4.up.railway.app/extension/install`.
+
+### Features
+- **Manual recording**: click extension icon → pick screen/tab/window → 5-second countdown → records → uploads → opens share page
+- **Google Meet auto-record** (opt-in): records meetings automatically when you join. OFF by default — enable in extension options.
+- Manual recordings land in `/dashboard/caps`, Meet recordings in `/dashboard/meetings`.
+
+### Share with team
+```bash
+pnpm --filter @cap/browser-extension package
+```
+Produces `cap-recorder.zip` — each team member loads it the same way (no Chrome Web Store needed for internal use).
+
+---
+
+## 10. Local Development
 
 ### Prerequisites
 - Node.js 20+, pnpm, Docker
