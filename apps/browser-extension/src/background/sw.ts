@@ -141,6 +141,41 @@ function _getBoolean(
 	return typeof v === "boolean" ? v : undefined;
 }
 
+// ── Shared meeting-capture helper ─────────────────────────────────────────────
+
+// Do NOT pass targetTab to chooseDesktopMedia. Chrome docs: a targetTab-
+// restricted streamId "can only be used by frames in the given tab." The
+// offscreen document is a separate extension page, so getUserMedia would throw
+// "Error starting tab capture." Omitting targetTab makes the streamId valid in
+// any extension context including the offscreen document.
+async function launchMeetCapture(
+	meetingId: string | undefined,
+	tabId: number | undefined,
+	settings: ExtensionSettings,
+): Promise<void> {
+	let streamId: string;
+	try {
+		streamId = await chooseDesktopMediaAsync(
+			["screen", "window", "tab"],
+			undefined,
+		);
+	} catch {
+		await setState({ kind: "idle" });
+		updateBadge({ kind: "idle" });
+		return;
+	}
+	await ensureOffscreenDocument();
+	await sendToOffscreen({
+		type: "START_CAPTURE",
+		mode: "desktop",
+		streamId,
+		meetingId,
+		tabId,
+		micEnabled: settings.micEnabled,
+		...(settings.micEnabled ? { micDeviceId: settings.micDeviceId } : {}),
+	});
+}
+
 async function handleMessage(
 	message: unknown,
 	_sender: chrome.runtime.MessageSender,
@@ -191,31 +226,7 @@ async function handleMessage(
 			}
 			const settings = await getSettings();
 			await setState({ kind: "arming", mode: "meeting", meetingId, tabId });
-			let meetStreamId: string;
-			try {
-				const senderTab =
-					tabId !== undefined
-						? await chrome.tabs.get(tabId)
-						: undefined;
-				meetStreamId = await chooseDesktopMediaAsync(
-					["screen", "window", "tab"],
-					senderTab,
-				);
-			} catch {
-				await setState({ kind: "idle" });
-				updateBadge({ kind: "idle" });
-				return { ok: true };
-			}
-			await ensureOffscreenDocument();
-			await sendToOffscreen({
-				type: "START_CAPTURE",
-				mode: "desktop",
-				streamId: meetStreamId,
-				meetingId,
-				tabId,
-				micEnabled: settings.micEnabled,
-				...(settings.micEnabled ? { micDeviceId: settings.micDeviceId } : {}),
-			});
+			await launchMeetCapture(meetingId, tabId, settings);
 			return { ok: true };
 		}
 
@@ -291,28 +302,7 @@ async function handleMessage(
 			}
 			const settings = await getSettings();
 			await setState({ kind: "arming", mode: "meeting", meetingId, tabId });
-			let nudgeStreamId: string;
-			try {
-				const senderTab = _sender.tab ?? undefined;
-				nudgeStreamId = await chooseDesktopMediaAsync(
-					["screen", "window", "tab"],
-					senderTab,
-				);
-			} catch {
-				await setState({ kind: "idle" });
-				updateBadge({ kind: "idle" });
-				return { ok: true };
-			}
-			await ensureOffscreenDocument();
-			await sendToOffscreen({
-				type: "START_CAPTURE",
-				mode: "desktop",
-				streamId: nudgeStreamId,
-				meetingId,
-				tabId,
-				micEnabled: settings.micEnabled,
-				...(settings.micEnabled ? { micDeviceId: settings.micDeviceId } : {}),
-			});
+			await launchMeetCapture(meetingId, tabId, settings);
 			return { ok: true };
 		}
 

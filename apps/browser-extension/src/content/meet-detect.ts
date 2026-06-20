@@ -216,8 +216,10 @@ const NUDGE_CSS = `
 	border-radius: 14px;
 	box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
 	border: 1px solid rgba(0,0,0,.06);
-	padding: 16px;
-	width: 288px;
+	padding: 14px 16px;
+	min-width: 320px;
+	max-width: 480px;
+	width: auto;
 	box-sizing: border-box;
 	animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -249,7 +251,7 @@ const NUDGE_CSS = `
 .cap-nudge-subtitle {
 	font-size: 12px;
 	color: #666;
-	margin: 0 0 14px 0;
+	margin: 0;
 }
 
 .cap-nudge-buttons {
@@ -264,18 +266,14 @@ const NUDGE_CSS = `
 	color: #fff;
 	border: none;
 	border-radius: 10px;
-	padding: 10px 16px;
+	padding: 9px 14px;
 	font-size: 13px;
 	font-weight: 600;
 	cursor: pointer;
 	font-family: inherit;
 	transition: filter .15s, transform .1s, outline .1s;
 	white-space: nowrap;
-	width: 100%;
-	display: block;
-	text-align: center;
-	margin-bottom: 10px;
-	box-sizing: border-box;
+	flex-shrink: 0;
 }
 
 .cap-nudge-btn-primary:hover { filter: brightness(1.1); }
@@ -520,6 +518,66 @@ const NUDGE_CSS = `
 	margin: 4px 0 12px 0;
 }
 
+.cap-nudge-main-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.cap-nudge-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.cap-nudge-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 10px;
+	gap: 8px;
+}
+
+.cap-nudge-consent {
+	font-size: 10px;
+	color: #9ca3af;
+	line-height: 1.4;
+	flex: 1;
+}
+
+.cap-nudge-btn-x {
+	flex-shrink: 0;
+	background: transparent;
+	border: none;
+	color: #9ca3af;
+	font-size: 14px;
+	cursor: pointer;
+	font-family: inherit;
+	padding: 2px 5px;
+	line-height: 1;
+	border-radius: 4px;
+	transition: color .15s, opacity .1s;
+}
+
+.cap-nudge-btn-x:hover { color: #374151; }
+.cap-nudge-btn-x:active { opacity: 0.5; }
+
+.cap-nudge-btn-later {
+	flex-shrink: 0;
+	background: transparent;
+	border: none;
+	color: #9ca3af;
+	font-size: 10px;
+	cursor: pointer;
+	font-family: inherit;
+	padding: 0;
+	white-space: nowrap;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	transition: color .15s;
+}
+
+.cap-nudge-btn-later:hover { color: #6b7280; }
+
 @media (prefers-color-scheme: dark) {
 	.cap-nudge-card,
 	.cap-nudge-complete-card,
@@ -566,6 +624,14 @@ const NUDGE_CSS = `
 
 	.cap-nudge-no-auto { color: #6b7280; }
 	.cap-nudge-no-auto:hover { color: #9ca3af; }
+
+	.cap-nudge-consent { color: #6b7280; }
+
+	.cap-nudge-btn-x { color: #6b7280; }
+	.cap-nudge-btn-x:hover { color: #9ca3af; }
+
+	.cap-nudge-btn-later { color: #6b7280; }
+	.cap-nudge-btn-later:hover { color: #9ca3af; }
 }
 `;
 
@@ -650,31 +716,39 @@ function renderDefaultNudge(): void {
 	container.textContent = "";
 	const card = makeEl("div", "cap-nudge-card");
 
-	// Header: icon + title side by side
-	const header = makeEl("div", "cap-nudge-header");
+	// ── Main row: icon | text | Record | ✕ ──────────────────────────────
+	const mainRow = makeEl("div", "cap-nudge-main-row");
+
 	const icon = document.createElement("img");
 	icon.src = chrome.runtime.getURL("icons/icon-48.png");
 	icon.className = "cap-nudge-icon";
 	icon.alt = "Cap";
-	const titleWrapper = makeEl("div");
-	const title = makeEl("div", "cap-nudge-title", "Want to record this meeting?");
-	titleWrapper.appendChild(title);
-	header.append(icon, titleWrapper);
 
+	const textBlock = makeEl("div", "cap-nudge-text");
+	const title = makeEl("div", "cap-nudge-title", "Record this meeting?");
 	const subtitle = makeEl(
 		"div",
 		"cap-nudge-subtitle",
 		"Make sure participants have agreed.",
 	);
+	textBlock.append(title, subtitle);
 
-	const btnRecord = makeBtn("cap-nudge-btn-primary", "Record now");
+	const btnRecord = makeBtn("cap-nudge-btn-primary", "Record");
+	const btnX = makeBtn("cap-nudge-btn-x", "✕");
 
-	const buttons = makeEl("div", "cap-nudge-buttons");
-	const btnLater = makeBtn("cap-nudge-btn-secondary", "Later");
-	const btnDismiss = makeBtn("cap-nudge-btn-dismiss", "Dismiss");
-	buttons.append(btnLater, btnDismiss);
+	mainRow.append(icon, textBlock, btnRecord, btnX);
 
-	card.append(header, subtitle, btnRecord, buttons);
+	// ── Footer: consent text | Later link ────────────────────────────────
+	const footer = makeEl("div", "cap-nudge-footer");
+	const consent = makeEl(
+		"span",
+		"cap-nudge-consent",
+		"By recording you confirm all participants have consented.",
+	);
+	const btnLater = makeBtn("cap-nudge-btn-later", "Later");
+	footer.append(consent, btnLater);
+
+	card.append(mainRow, footer);
 	container.appendChild(card);
 	nudgeState = "default";
 
@@ -687,16 +761,16 @@ function renderDefaultNudge(): void {
 		nudgeState = "hidden";
 	});
 
-	btnLater.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_LATER" });
-		laterUntil = Date.now() + LATER_MS;
+	btnX.addEventListener("click", () => {
+		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
+		dismissed = true;
 		clearNudge();
 		nudgeState = "hidden";
 	});
 
-	btnDismiss.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
-		dismissed = true;
+	btnLater.addEventListener("click", () => {
+		sendToBackground({ type: "MEET_NUDGE_LATER" });
+		laterUntil = Date.now() + LATER_MS;
 		clearNudge();
 		nudgeState = "hidden";
 	});
@@ -896,8 +970,6 @@ function renderErrorCard(reason: string, recoverable: boolean): void {
 
 	if (recoverable) {
 		const retryBtn = makeBtn("cap-nudge-btn-primary", "Retry");
-		// Override full-width default so Retry sits inline next to Dismiss
-		retryBtn.style.cssText = "width:auto;display:inline-block;margin-bottom:0";
 		retryBtn.addEventListener("click", () => {
 			sendToBackground({ type: "RETRY" } as OutboundMessage);
 		});

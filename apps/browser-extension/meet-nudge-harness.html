@@ -82,9 +82,9 @@
 </div>
 
 <script>
-// ── Shared CSS (copied verbatim from NUDGE_CSS in meet-detect.ts) ─────────────
-// The only addition: override .cap-nudge-container to position:relative so
-// the cards render in-flow inside the harness instead of fixed to the viewport.
+// ── Shared CSS (kept in sync with NUDGE_CSS in meet-detect.ts) ───────────────
+// Only addition: override .cap-nudge-container to position:relative so
+// cards render in-flow in the harness rather than fixed to the viewport.
 
 const NUDGE_CSS = `
 :host { all: initial; }
@@ -125,8 +125,10 @@ const NUDGE_CSS = `
   border-radius: 14px;
   box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
   border: 1px solid rgba(0,0,0,.06);
-  padding: 16px;
-  width: 288px;
+  padding: 14px 16px;
+  min-width: 320px;
+  max-width: 480px;
+  width: auto;
   box-sizing: border-box;
   animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -158,7 +160,7 @@ const NUDGE_CSS = `
 .cap-nudge-subtitle {
   font-size: 12px;
   color: #666;
-  margin: 0 0 14px 0;
+  margin: 0;
 }
 
 .cap-nudge-buttons {
@@ -173,18 +175,14 @@ const NUDGE_CSS = `
   color: #fff;
   border: none;
   border-radius: 10px;
-  padding: 10px 16px;
+  padding: 9px 14px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
   transition: filter .15s, transform .1s, outline .1s;
   white-space: nowrap;
-  width: 100%;
-  display: block;
-  text-align: center;
-  margin-bottom: 10px;
-  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .cap-nudge-btn-primary:hover { filter: brightness(1.1); }
@@ -428,6 +426,68 @@ const NUDGE_CSS = `
   margin: 4px 0 12px 0;
 }
 
+/* ── New: horizontal pill layout (Phase 2) ── */
+
+.cap-nudge-main-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cap-nudge-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cap-nudge-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  gap: 8px;
+}
+
+.cap-nudge-consent {
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.cap-nudge-btn-x {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 2px 5px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color .15s, opacity .1s;
+}
+
+.cap-nudge-btn-x:hover { color: #374151; }
+.cap-nudge-btn-x:active { opacity: 0.5; }
+
+.cap-nudge-btn-later {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color .15s;
+}
+
+.cap-nudge-btn-later:hover { color: #6b7280; }
+
 @media (prefers-color-scheme: dark) {
   .cap-nudge-card,
   .cap-nudge-complete-card,
@@ -474,6 +534,14 @@ const NUDGE_CSS = `
 
   .cap-nudge-no-auto { color: #6b7280; }
   .cap-nudge-no-auto:hover { color: #9ca3af; }
+
+  .cap-nudge-consent { color: #6b7280; }
+
+  .cap-nudge-btn-x { color: #6b7280; }
+  .cap-nudge-btn-x:hover { color: #9ca3af; }
+
+  .cap-nudge-btn-later { color: #6b7280; }
+  .cap-nudge-btn-later:hover { color: #9ca3af; }
 }
 `;
 
@@ -502,7 +570,7 @@ function mountShadow(hostEl) {
   return container;
 }
 
-// ── State 1: Default nudge ────────────────────────────────────────────────────
+// ── State 1: Default nudge (horizontal pill — Phase 2) ───────────────────────
 
 (function renderDefaultNudge() {
   const container = mountShadow(document.getElementById('host-default'));
@@ -510,44 +578,53 @@ function mountShadow(hostEl) {
   const card = document.createElement('div');
   card.className = 'cap-nudge-card';
 
-  // Header with icon + title
-  const header = document.createElement('div');
-  header.className = 'cap-nudge-header';
+  // Main row: icon | text block | Record button | ✕
+  const mainRow = document.createElement('div');
+  mainRow.className = 'cap-nudge-main-row';
 
   const icon = document.createElement('img');
   icon.src = ICON_SVG;
   icon.className = 'cap-nudge-icon';
   icon.alt = 'Cap';
 
-  const titleWrapper = document.createElement('div');
+  const textBlock = document.createElement('div');
+  textBlock.className = 'cap-nudge-text';
+
   const title = document.createElement('div');
   title.className = 'cap-nudge-title';
-  title.textContent = 'Want to record this meeting?';
-  titleWrapper.appendChild(title);
-
-  header.append(icon, titleWrapper);
+  title.textContent = 'Record this meeting?';
 
   const subtitle = document.createElement('div');
   subtitle.className = 'cap-nudge-subtitle';
   subtitle.textContent = 'Make sure participants have agreed.';
 
+  textBlock.append(title, subtitle);
+
   const btnRecord = document.createElement('button');
   btnRecord.className = 'cap-nudge-btn-primary';
-  btnRecord.textContent = 'Record now';
+  btnRecord.textContent = 'Record';
 
-  const buttons = document.createElement('div');
-  buttons.className = 'cap-nudge-buttons';
+  const btnX = document.createElement('button');
+  btnX.className = 'cap-nudge-btn-x';
+  btnX.textContent = '✕';
+
+  mainRow.append(icon, textBlock, btnRecord, btnX);
+
+  // Footer: consent fine print | Later link
+  const footer = document.createElement('div');
+  footer.className = 'cap-nudge-footer';
+
+  const consent = document.createElement('span');
+  consent.className = 'cap-nudge-consent';
+  consent.textContent = 'By recording you confirm all participants have consented.';
 
   const btnLater = document.createElement('button');
-  btnLater.className = 'cap-nudge-btn-secondary';
+  btnLater.className = 'cap-nudge-btn-later';
   btnLater.textContent = 'Later';
 
-  const btnDismiss = document.createElement('button');
-  btnDismiss.className = 'cap-nudge-btn-dismiss';
-  btnDismiss.textContent = 'Dismiss';
+  footer.append(consent, btnLater);
 
-  buttons.append(btnLater, btnDismiss);
-  card.append(header, subtitle, btnRecord, buttons);
+  card.append(mainRow, footer);
   container.appendChild(card);
 })();
 
@@ -663,10 +740,6 @@ function mountShadow(hostEl) {
   const retryBtn = document.createElement('button');
   retryBtn.className = 'cap-nudge-btn-primary';
   retryBtn.textContent = 'Retry';
-  // Inline override: primary in error card isn't full-width, reset to auto
-  retryBtn.style.width = 'auto';
-  retryBtn.style.display = 'inline-block';
-  retryBtn.style.marginBottom = '0';
 
   const dismissBtn = document.createElement('button');
   dismissBtn.className = 'cap-nudge-btn-secondary';
