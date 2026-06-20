@@ -5,7 +5,9 @@ import { db } from "@cap/database";
 import { verificationTokens } from "@cap/database/schema";
 import { and, eq, gt, sql } from "drizzle-orm";
 
-export async function requestOtp(email: string): Promise<{ success: boolean }> {
+export async function requestOtp(
+	email: string,
+): Promise<{ success: boolean; code?: string }> {
 	const normalized = email.trim().toLowerCase();
 
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
@@ -44,5 +46,6 @@ export async function requestOtp(email: string): Promise<{ success: boolean }> {
 
 	console.log(`[OTP] code for ${normalized}: ${code}`);
 
-	return { success: true };
+	// Return the code directly — email delivery is not yet configured on this instance
+	return { success: true, code };
 }
