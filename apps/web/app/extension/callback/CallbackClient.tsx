@@ -187,35 +187,18 @@ export function CallbackClient({
 				</div>
 			</div>
 			<h1 className="text-xl font-semibold text-gray-12 mb-2">
-				Extension connected
+				Signed in as {status.email}
 			</h1>
-			<p className="text-gray-11 text-sm mb-4">
-				Connected for {status.email}. If the extension didn&apos;t pick up the
-				key automatically, copy it below and paste into the extension&apos;s
-				Options page.
+			<p className="text-gray-11 text-sm mb-6">
+				Close this tab and click the Cap extension icon to start recording.
 			</p>
-
-			{status.fallbackToken && (
-				<div className="mb-4">
-					<code className="block bg-gray-3 rounded-lg px-4 py-3 text-sm font-mono text-gray-12 break-all select-all mb-2">
-						{status.fallbackToken}
-					</code>
-					<button
-						type="button"
-						onClick={() => {
-							const key = status.fallbackToken;
-							if (!key) return;
-							navigator.clipboard.writeText(key).then(() => {
-								setCopied(true);
-								setTimeout(() => setCopied(false), 2000);
-							});
-						}}
-						className="w-full inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-					>
-						{copied ? "Copied!" : "Copy key"}
-					</button>
-				</div>
-			)}
+			<button
+				type="button"
+				onClick={() => window.close()}
+				className="w-full inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+			>
+				Close tab
+			</button>
 		</div>
 	);
 }

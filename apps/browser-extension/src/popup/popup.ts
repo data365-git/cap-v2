@@ -442,72 +442,11 @@ function renderNotSignedIn(
 	signInBtn.addEventListener("click", () => {
 		const url = `${settings.apiBaseUrl}/extension/callback?extensionId=${chrome.runtime.id}`;
 		chrome.tabs.create({ url });
-	});
-
-	const apiKeyInput = el("input", {
-		className: "api-key-input",
-		type: "text",
-		placeholder: "Paste your Cap API key",
-	} as unknown as Partial<HTMLInputElement>);
-
-	const connectBtn = el(
-		"button",
-		{ className: "btn btn-secondary" },
-		"Connect",
-	);
-
-	const inlineMsg = el("p", { className: "inline-msg" });
-
-	connectBtn.addEventListener("click", async () => {
-		const key = (apiKeyInput as HTMLInputElement).value.trim();
-		if (!key) {
-			inlineMsg.textContent = "Please paste a key";
-			return;
-		}
-		inlineMsg.textContent = "";
-		connectBtn.disabled = true;
-		connectBtn.textContent = "Verifying...";
-		chrome.runtime.sendMessage(
-			{
-				type: "SAVE_SETTINGS",
-				settings: { apiKey: key, apiBaseUrl: settings.apiBaseUrl },
-			},
-			async () => {
-				try {
-					const res = await fetch(`${settings.apiBaseUrl}/api/extension/me`, {
-						headers: { Authorization: `Bearer ${key}` },
-					});
-					if (res.ok) {
-						location.reload();
-					} else {
-						inlineMsg.textContent =
-							"That key isn't valid — check it and try again";
-						connectBtn.disabled = false;
-						connectBtn.textContent = "Connect";
-						chrome.runtime.sendMessage({
-							type: "SAVE_SETTINGS",
-							settings: { apiKey: "", apiBaseUrl: settings.apiBaseUrl },
-						});
-					}
-				} catch {
-					inlineMsg.textContent =
-						"That key isn't valid — check it and try again";
-					connectBtn.disabled = false;
-					connectBtn.textContent = "Connect";
-					chrome.runtime.sendMessage({
-						type: "SAVE_SETTINGS",
-						settings: { apiKey: "", apiBaseUrl: settings.apiBaseUrl },
-					});
-				}
-			},
-		);
+		window.close();
 	});
 
 	root.appendChild(logoWrap);
 	root.appendChild(signInBtn);
-	root.appendChild(apiKeyInput);
-	root.appendChild(connectBtn);
-	root.appendChild(inlineMsg);
 }
 
 function renderRecording(
@@ -874,9 +813,15 @@ async function init(): Promise<void> {
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
-		if (area === "local" && changes.capExtState?.newValue) {
+		if (area !== "local") return;
+		if (changes.capExtState?.newValue) {
 			const newState = changes.capExtState.newValue as ExtensionState;
 			currentData = { ...currentData, state: newState };
+			render(currentData);
+		}
+		if (changes.capExtSettings?.newValue) {
+			const newSettings = changes.capExtSettings.newValue as ExtensionSettings;
+			currentData = { ...currentData, settings: newSettings };
 			render(currentData);
 		}
 	});

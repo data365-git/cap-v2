@@ -236,7 +236,6 @@ function buildAccountSection(
 	container: HTMLElement,
 ): {
 	apiBaseUrlInput: HTMLInputElement;
-	apiKeyInput: HTMLInputElement;
 } {
 	container.appendChild(sectionHeader("Account"));
 
@@ -248,82 +247,24 @@ function buildAccountSection(
 	apiBaseUrlInput.placeholder = "https://your-cap-instance.com";
 	container.appendChild(fieldGroup("Cap Server URL", apiBaseUrlInput));
 
-	const apiKeyWrapper = document.createElement("div");
-	apiKeyWrapper.className = "input-with-button";
-
-	const apiKeyInput = document.createElement("input");
-	apiKeyInput.type = "password";
-	apiKeyInput.id = "apiKey";
-	apiKeyInput.className = "text-input";
-	apiKeyInput.value = settings.apiKey || "";
-	apiKeyInput.placeholder = "Paste your Cap API key";
-
-	const showHideBtn = document.createElement("button");
-	showHideBtn.type = "button";
-	showHideBtn.className = "btn btn--secondary btn--icon";
-	showHideBtn.textContent = "Show";
-	showHideBtn.addEventListener("click", () => {
-		if (apiKeyInput.type === "password") {
-			apiKeyInput.type = "text";
-			showHideBtn.textContent = "Hide";
-		} else {
-			apiKeyInput.type = "password";
-			showHideBtn.textContent = "Show";
-		}
-	});
-
-	const saveConnectBtn = document.createElement("button");
-	saveConnectBtn.type = "button";
-	saveConnectBtn.className = "btn btn--primary";
-	saveConnectBtn.textContent = "Save & Connect";
-	saveConnectBtn.addEventListener("click", async () => {
-		const key = apiKeyInput.value.trim();
-		if (!key) {
-			showToast("Paste a key first");
-			return;
-		}
-		saveConnectBtn.disabled = true;
-		const baseUrl = apiBaseUrlInput.value.trim() || DEFAULT_API_BASE_URL;
-		await saveSettings({
-			apiKey: key,
-			apiBaseUrl: baseUrl,
-		});
-		try {
-			const res = await fetch(`${baseUrl}/api/status`, {
-				headers: { Authorization: `Bearer ${key}` },
-			});
-			if (res.ok) {
-				showToast("Connected ✓");
-			} else {
-				showToast("Key saved, but couldn't verify — check the key");
-			}
-		} catch {
-			showToast("Key saved, but couldn't verify — check the key");
-		} finally {
-			saveConnectBtn.disabled = false;
-		}
-	});
-
-	apiKeyWrapper.appendChild(apiKeyInput);
-	apiKeyWrapper.appendChild(showHideBtn);
-	apiKeyWrapper.appendChild(saveConnectBtn);
-
-	const apiKeyGroup = document.createElement("div");
-	apiKeyGroup.className = "field-group";
-	const apiKeyLabel = document.createElement("label");
-	apiKeyLabel.className = "field-label";
-	apiKeyLabel.htmlFor = "apiKey";
-	apiKeyLabel.textContent = "API Key";
-	apiKeyGroup.appendChild(apiKeyLabel);
-	apiKeyGroup.appendChild(apiKeyWrapper);
-	container.appendChild(apiKeyGroup);
-
 	const connectionRow = document.createElement("div");
 	connectionRow.className = "button-row";
 
+	const signInBtn = document.createElement("button");
+	signInBtn.type = "button";
+	signInBtn.className = "btn btn--primary";
+	signInBtn.textContent = "Sign in with Cap";
+	signInBtn.addEventListener("click", () => {
+		const baseUrl = apiBaseUrlInput.value.trim() || DEFAULT_API_BASE_URL;
+		const extensionId = chrome.runtime.id;
+		chrome.tabs.create({
+			url: `${baseUrl}/extension/callback?extensionId=${extensionId}`,
+		});
+	});
+
 	const testBtn = document.createElement("button");
 	testBtn.type = "button";
-	testBtn.className = "btn btn--primary";
+	testBtn.className = "btn btn--secondary";
 	testBtn.textContent = "Test connection";
 
 	const connectionStatus = document.createElement("span");
@@ -335,11 +276,20 @@ function buildAccountSection(
 		connectionStatus.textContent = "Testing…";
 
 		const baseUrl = apiBaseUrlInput.value.trim() || DEFAULT_API_BASE_URL;
-		const key = apiKeyInput.value.trim();
+
+		const storedKey = await new Promise<string>((resolve) => {
+			chrome.runtime.sendMessage(
+				{ type: "GET_ALL_SETTINGS" },
+				(response: unknown) => {
+					const s = response as { apiKey?: string } | null;
+					resolve(s?.apiKey ?? "");
+				},
+			);
+		});
 
 		try {
-			const res = await fetch(`${baseUrl}/api/status`, {
-				headers: key ? { Authorization: `Bearer ${key}` } : {},
+			const res = await fetch(`${baseUrl}/api/extension/me`, {
+				headers: storedKey ? { Authorization: `Bearer ${storedKey}` } : {},
 			});
 			if (res.ok) {
 				connectionStatus.className =
@@ -348,7 +298,7 @@ function buildAccountSection(
 			} else {
 				connectionStatus.className =
 					"connection-status connection-status--error";
-				connectionStatus.textContent = "× Connection failed";
+				connectionStatus.textContent = "× Not connected";
 			}
 		} catch {
 			connectionStatus.className = "connection-status connection-status--error";
@@ -358,24 +308,12 @@ function buildAccountSection(
 		}
 	});
 
-	const signInBtn = document.createElement("button");
-	signInBtn.type = "button";
-	signInBtn.className = "btn btn--secondary";
-	signInBtn.textContent = "Sign in with Cap";
-	signInBtn.addEventListener("click", () => {
-		const baseUrl = apiBaseUrlInput.value.trim() || DEFAULT_API_BASE_URL;
-		const extensionId = chrome.runtime.id;
-		chrome.tabs.create({
-			url: `${baseUrl}/extension/callback?extensionId=${extensionId}`,
-		});
-	});
-
-	connectionRow.appendChild(testBtn);
 	connectionRow.appendChild(signInBtn);
+	connectionRow.appendChild(testBtn);
 	connectionRow.appendChild(connectionStatus);
 	container.appendChild(connectionRow);
 
-	return { apiBaseUrlInput, apiKeyInput };
+	return { apiBaseUrlInput };
 }
 
 async function buildRecordingSection(
@@ -655,28 +593,17 @@ async function init(): Promise<void> {
 	await buildPermissionsSection(container);
 	container.appendChild(divider());
 
-	const { apiBaseUrlInput, apiKeyInput } = buildAccountSection(
-		settings,
-		container,
-	);
+	const { apiBaseUrlInput } = buildAccountSection(settings, container);
 	await buildRecordingSection(settings, container);
 	buildMeetSection(settings, container);
 	buildAboutSection(settings, container);
 
 	root.appendChild(container);
 
-	function saveOnBlur(
-		input: HTMLInputElement,
-		key: keyof ExtensionSettings,
-	): void {
-		input.addEventListener("blur", async () => {
-			await saveSettings({ [key]: input.value.trim() });
-			showToast("Saved");
-		});
-	}
-
-	saveOnBlur(apiBaseUrlInput, "apiBaseUrl");
-	saveOnBlur(apiKeyInput, "apiKey");
+	apiBaseUrlInput.addEventListener("blur", async () => {
+		await saveSettings({ apiBaseUrl: apiBaseUrlInput.value.trim() });
+		showToast("Saved");
+	});
 
 	chrome.runtime.onMessage.addListener((message: unknown) => {
 		if (
@@ -688,7 +615,6 @@ async function init(): Promise<void> {
 			const token = typeof msg.token === "string" ? msg.token : "";
 			const newBaseUrl =
 				typeof msg.apiBaseUrl === "string" ? msg.apiBaseUrl : "";
-			if (token) apiKeyInput.value = token;
 			if (newBaseUrl) apiBaseUrlInput.value = newBaseUrl;
 			saveSettings({
 				apiKey: token,
