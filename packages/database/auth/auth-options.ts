@@ -1,8 +1,7 @@
 import { serverEnv } from "@cap/env";
 import { User } from "@cap/web-domain";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import crypto from "node:crypto";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession as _getServerSession } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
@@ -14,7 +13,6 @@ import { db } from "../index.ts";
 import {
 	organizationInvites,
 	users,
-	verificationTokens,
 } from "../schema.ts";
 import { DrizzleAdapter } from "./drizzle-adapter.ts";
 import { createUserFromOrgInvite } from "./create-user-from-invite.ts";
@@ -135,57 +133,15 @@ export const authOptions = (): NextAuthOptions => {
 						return user;
 					},
 				}),
-				CredentialsProvider({
-					id: "otp",
-					name: "Email Code",
-					credentials: {
-						email: { label: "Email", type: "email" },
-						code: { label: "Code", type: "text" },
-					},
-					async authorize(credentials) {
-						if (!credentials?.email || !credentials?.code) return null;
-						const email = credentials.email.trim().toLowerCase();
-						const hashedCode = crypto
-							.createHash("sha256")
-							.update(credentials.code)
-							.digest("hex");
-
-						const [record] = await db()
-							.select()
-							.from(verificationTokens)
-							.where(
-								and(
-									eq(verificationTokens.identifier, email),
-									eq(verificationTokens.token, hashedCode),
-								),
-							)
-							.limit(1);
-
-						if (!record || record.expires < new Date()) return null;
-
-						await db()
-							.delete(verificationTokens)
-							.where(eq(verificationTokens.identifier, email));
-
-						const [user] = await db()
-							.select({
-								id: users.id,
-								email: users.email,
-								name: users.name,
-								image: users.image,
-							})
-							.from(users)
-							.where(eq(users.email, email))
-							.limit(1);
-
-						return user ?? null;
-					},
-				}),
-				GoogleProvider({
-					clientId: serverEnv().GOOGLE_CLIENT_ID ?? "",
-					clientSecret: serverEnv().GOOGLE_CLIENT_SECRET ?? "",
-					allowDangerousEmailAccountLinking: true,
-				}),
+				...(serverEnv().GOOGLE_CLIENT_ID && serverEnv().GOOGLE_CLIENT_SECRET
+					? [
+							GoogleProvider({
+								clientId: serverEnv().GOOGLE_CLIENT_ID!,
+								clientSecret: serverEnv().GOOGLE_CLIENT_SECRET!,
+								allowDangerousEmailAccountLinking: true,
+							}),
+						]
+					: []),
 			];
 
 			return _providers;
@@ -205,7 +161,6 @@ export const authOptions = (): NextAuthOptions => {
 			async signIn({ user, account, profile }) {
 				if (account?.provider === "invite-token") return true;
 				if (account?.provider === "credentials") return true;
-				if (account?.provider === "otp") return true;
 
 				if (account?.provider === "google") {
 					const email = user?.email?.toLowerCase();
