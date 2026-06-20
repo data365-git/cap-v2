@@ -9,15 +9,14 @@ import type { Adapter } from "next-auth/adapters";
 import { decode, type JWT, type JWTDecodeParams } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers/index";
-import { nanoId } from "../helpers.ts";
 import { db } from "../index.ts";
 import {
 	organizationInvites,
-	organizationMembers,
 	users,
 	verificationTokens,
 } from "../schema.ts";
 import { DrizzleAdapter } from "./drizzle-adapter.ts";
+import { createUserFromOrgInvite } from "./create-user-from-invite.ts";
 
 export const maxDuration = 120;
 
@@ -130,64 +129,7 @@ export const authOptions = (): NextAuthOptions => {
 						if (invite.expiresAt && invite.expiresAt < new Date()) return null;
 
 						const email = invite.invitedEmail.toLowerCase();
-
-						let [user] = await db()
-							.select({
-								id: users.id,
-								email: users.email,
-								name: users.name,
-								image: users.image,
-							})
-							.from(users)
-							.where(eq(users.email, email))
-							.limit(1);
-
-						if (!user) {
-							const newId = nanoId() as User.UserId;
-							await db()
-								.insert(users)
-								.values({
-									id: newId,
-									email,
-									name: email.split("@")[0],
-									emailVerified: new Date(),
-									activeOrganizationId: invite.organizationId,
-									defaultOrgId: invite.organizationId,
-									inviteQuota: 1,
-								});
-							user = {
-								id: newId,
-								email,
-								name: email.split("@")[0],
-								image: null,
-							};
-						}
-
-						const [alreadyMember] = await db()
-							.select({ id: organizationMembers.id })
-							.from(organizationMembers)
-							.where(
-								and(
-									eq(organizationMembers.userId, user.id),
-									eq(organizationMembers.organizationId, invite.organizationId),
-								),
-							)
-							.limit(1);
-
-						if (!alreadyMember) {
-							await db().insert(organizationMembers).values({
-								id: nanoId(),
-								userId: user.id,
-								organizationId: invite.organizationId,
-								role: invite.role,
-							});
-						}
-
-						await db()
-							.update(organizationInvites)
-							.set({ consumedAt: new Date(), status: "accepted" })
-							.where(eq(organizationInvites.id, invite.id));
-
+						const user = await createUserFromOrgInvite(email, invite);
 						return user;
 					},
 				}),

@@ -61,6 +61,8 @@
 		".": "./index.ts",
 		"./auth/auth-options": "./auth/auth-options.ts",
 		"./auth/session": "./auth/session.ts",
+		"./auth/allowed-check": "./auth/allowed-check.ts",
+		"./auth/create-user-from-invite": "./auth/create-user-from-invite.ts",
 		"./schema": "./schema.ts",
 		"./crypto": "./crypto.ts",
 		"./helpers": "./helpers.ts",
@@ -74,6 +76,8 @@
 			".": "./dist/index.js",
 			"./auth/auth-options": "./dist/auth/auth-options.js",
 			"./auth/session": "./dist/auth/session.js",
+			"./auth/allowed-check": "./dist/auth/allowed-check.js",
+			"./auth/create-user-from-invite": "./dist/auth/create-user-from-invite.js",
 			"./schema": "./dist/schema.js",
 			"./crypto": "./dist/crypto.js",
 			"./helpers": "./dist/helpers.js"

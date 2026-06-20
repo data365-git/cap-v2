@@ -3,17 +3,40 @@
 import crypto from "node:crypto";
 import { db } from "@cap/database";
 import { verificationTokens } from "@cap/database/schema";
+import { checkAllowedEmail } from "@cap/database/auth/allowed-check";
+import {
+	createUserFromGenericInvite,
+	createUserFromOrgInvite,
+} from "@cap/database/auth/create-user-from-invite";
 import { and, eq, gt, sql } from "drizzle-orm";
 
-export async function requestOtp(
-	email: string,
-): Promise<{ success: boolean; code?: string }> {
+export type RequestOtpResult =
+	| { allowed: false }
+	| { allowed: true; code: string };
+
+export async function requestOtp(email: string): Promise<RequestOtpResult> {
 	const normalized = email.trim().toLowerCase();
 
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
 		throw new Error("Invalid email address");
 	}
 
+	// Gate: only proceed if the email is invited or already a user
+	const check = await checkAllowedEmail(normalized);
+	if (!check.allowed) {
+		return { allowed: false };
+	}
+
+	// Auto-create account for invited emails that have no user row yet
+	if (!check.existingUser) {
+		if (check.source === "orgInvite") {
+			await createUserFromOrgInvite(normalized, check.invite);
+		} else {
+			await createUserFromGenericInvite(normalized, check.invite);
+		}
+	}
+
+	// Rate-limit: one code per 30 seconds per email
 	const recent = await db()
 		.select({ identifier: verificationTokens.identifier })
 		.from(verificationTokens)
@@ -46,6 +69,6 @@ export async function requestOtp(
 
 	console.log(`[OTP] code for ${normalized}: ${code}`);
 
-	// Return the code directly — email delivery is not yet configured on this instance
-	return { success: true, code };
+	// Return the code directly — email delivery is not yet configured
+	return { allowed: true, code };
 }
