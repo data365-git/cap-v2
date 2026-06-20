@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cap Meet Nudge — State Harness</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0f172a;
+    font-family: system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding-bottom: 88px; /* same offset as bottom:88px in widget */
+    gap: 0;
+  }
+
+  .harness-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 32px;
+    width: 100%;
+    padding: 0 24px;
+  }
+
+  .harness-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .harness-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-left: 2px;
+  }
+
+  /* The shadow host just needs to be a plain block so the fixed-inside-shadow
+     container renders relative to its own stacking context. We override
+     .cap-nudge-container to position:relative inside the harness so cards
+     stack naturally in the flow rather than going fixed to the viewport. */
+  .nudge-host {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+<div class="harness-row">
+  <!-- State 1: Default nudge -->
+  <div class="harness-col">
+    <span class="harness-label">Default nudge</span>
+    <div class="nudge-host" id="host-default"></div>
+  </div>
+
+  <!-- State 2: Recording pill -->
+  <div class="harness-col">
+    <span class="harness-label">Recording</span>
+    <div class="nudge-host" id="host-recording"></div>
+  </div>
+
+  <!-- State 3: Complete card -->
+  <div class="harness-col">
+    <span class="harness-label">Complete</span>
+    <div class="nudge-host" id="host-complete"></div>
+  </div>
+
+  <!-- State 4: Error card -->
+  <div class="harness-col">
+    <span class="harness-label">Error</span>
+    <div class="nudge-host" id="host-error"></div>
+  </div>
+</div>
+
+<script>
+// ── Shared CSS (copied verbatim from NUDGE_CSS in meet-detect.ts) ─────────────
+// The only addition: override .cap-nudge-container to position:relative so
+// the cards render in-flow inside the harness instead of fixed to the viewport.
+
+const NUDGE_CSS = `
+:host { all: initial; }
+
+.cap-nudge-container {
+  /* harness override: render in-flow, not fixed */
+  position: relative;
+  bottom: auto;
+  right: auto;
+  left: auto;
+  top: auto;
+  transform: none;
+  z-index: 1;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: #1a1a1a;
+  pointer-events: all;
+  user-select: none;
+}
+
+@keyframes cap-nudge-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cap-nudge-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(6px) scale(0.97); }
+}
+
+@keyframes cap-nudge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.65); }
+  55%       { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
+
+.cap-nudge-card {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
+  border: 1px solid rgba(0,0,0,.06);
+  padding: 16px;
+  width: 288px;
+  box-sizing: border-box;
+  animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
+}
+
+.cap-nudge-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
+
+.cap-nudge-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cap-nudge-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.cap-nudge-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin: 0;
+  color: #111;
+}
+
+.cap-nudge-subtitle {
+  font-size: 12px;
+  color: #666;
+  margin: 0 0 14px 0;
+}
+
+.cap-nudge-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  align-items: center;
+}
+
+.cap-nudge-btn-primary {
+  background: #675FFF;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter .15s, transform .1s, outline .1s;
+  white-space: nowrap;
+  width: 100%;
+  display: block;
+  text-align: center;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.cap-nudge-btn-primary:hover { filter: brightness(1.1); }
+
+.cap-nudge-btn-primary:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.cap-nudge-btn-primary:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.cap-nudge-btn-secondary {
+  background: transparent;
+  color: #6b7280;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color .15s, transform .1s, outline .1s;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.cap-nudge-btn-secondary:hover { color: #374151; }
+
+.cap-nudge-btn-secondary:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.cap-nudge-btn-secondary:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.cap-nudge-btn-dismiss {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 4px 6px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color .15s, opacity .1s;
+}
+
+.cap-nudge-btn-dismiss:hover { color: #374151; }
+.cap-nudge-btn-dismiss:active { opacity: 0.5; }
+
+.cap-nudge-btn-cancel {
+  display: block;
+  width: 100%;
+  background: #f3f4f6;
+  color: #374151;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  margin-bottom: 8px;
+  transition: background .15s;
+}
+
+.cap-nudge-btn-cancel:hover { background: #e5e7eb; }
+
+.cap-nudge-no-auto {
+  display: block;
+  text-align: center;
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+}
+
+.cap-nudge-no-auto:hover { color: #6b7280; }
+
+.cap-nudge-pill {
+  background: #111827;
+  border-radius: 999px;
+  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
+}
+
+.cap-nudge-pill.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
+
+.cap-nudge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: cap-nudge-pulse 1.9s ease-out infinite;
+}
+
+.cap-nudge-elapsed {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f9fafb;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+}
+
+.cap-nudge-paused-label {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.cap-nudge-btn-stop {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter .15s, transform .1s, outline .1s;
+}
+
+.cap-nudge-btn-stop:hover { filter: brightness(1.1); }
+
+.cap-nudge-btn-stop:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.cap-nudge-btn-stop:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.cap-nudge-progress {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-left: 4px;
+}
+
+.cap-nudge-complete-card {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
+  border: 1px solid rgba(0,0,0,.06);
+  padding: 16px;
+  width: 288px;
+  box-sizing: border-box;
+  animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
+}
+
+.cap-nudge-complete-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
+
+.cap-nudge-complete-check {
+  font-size: 22px;
+  color: #16a34a;
+  margin: 0;
+  line-height: 1;
+}
+
+.cap-nudge-share-url {
+  font-size: 11px;
+  color: #6b7280;
+  word-break: break-all;
+  margin: 4px 0 12px 0;
+}
+
+.cap-nudge-btn-copy {
+  background: #675FFF;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter .15s, transform .1s, outline .1s;
+  white-space: nowrap;
+}
+
+.cap-nudge-btn-copy:hover { filter: brightness(1.1); }
+
+.cap-nudge-btn-copy:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.cap-nudge-btn-copy:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.cap-nudge-btn-open {
+  background: #f3f4f6;
+  color: #374151;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s;
+  white-space: nowrap;
+}
+
+.cap-nudge-btn-open:hover { background: #e5e7eb; }
+
+.cap-nudge-error-card {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
+  border: 1px solid rgba(0,0,0,.06);
+  padding: 16px;
+  width: 288px;
+  box-sizing: border-box;
+  animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
+}
+
+.cap-nudge-error-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
+
+.cap-nudge-error-msg {
+  font-size: 12px;
+  color: #dc2626;
+  margin: 4px 0 12px 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cap-nudge-card,
+  .cap-nudge-complete-card,
+  .cap-nudge-error-card {
+    background: #1f2937;
+    border-color: rgba(255,255,255,.08);
+  }
+
+  .cap-nudge-title { color: #f9fafb; }
+
+  .cap-nudge-subtitle,
+  .cap-nudge-elapsed,
+  .cap-nudge-share-url,
+  .cap-nudge-paused-label,
+  .cap-nudge-progress {
+    color: #9ca3af;
+  }
+
+  .cap-nudge-btn-secondary,
+  .cap-nudge-btn-dismiss {
+    color: #6b7280;
+  }
+
+  .cap-nudge-btn-secondary:hover,
+  .cap-nudge-btn-dismiss:hover {
+    color: #9ca3af;
+  }
+
+  .cap-nudge-btn-cancel {
+    background: #374151;
+    color: #f9fafb;
+  }
+
+  .cap-nudge-btn-cancel:hover { background: #4b5563; }
+
+  .cap-nudge-btn-open {
+    background: #374151;
+    color: #f9fafb;
+  }
+
+  .cap-nudge-btn-open:hover { background: #4b5563; }
+
+  .cap-nudge-pill { background: #111827; }
+
+  .cap-nudge-no-auto { color: #6b7280; }
+  .cap-nudge-no-auto:hover { color: #9ca3af; }
+}
+`;
+
+// ── Inline SVG icon (used in harness instead of chrome.runtime.getURL) ────────
+const ICON_SVG = `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+  <rect width="28" height="28" rx="6" fill="#675FFF"/>
+  <circle cx="14" cy="14" r="7" fill="none" stroke="#fff" stroke-width="2.5"/>
+  <circle cx="14" cy="14" r="3" fill="#fff"/>
+</svg>
+`)}`;
+
+// ── Shadow DOM factory ────────────────────────────────────────────────────────
+
+function mountShadow(hostEl) {
+  const sr = hostEl.attachShadow({ mode: 'open' });
+
+  const style = document.createElement('style');
+  style.textContent = NUDGE_CSS;
+  sr.appendChild(style);
+
+  const container = document.createElement('div');
+  container.className = 'cap-nudge-container';
+  sr.appendChild(container);
+
+  return container;
+}
+
+// ── State 1: Default nudge ────────────────────────────────────────────────────
+
+(function renderDefaultNudge() {
+  const container = mountShadow(document.getElementById('host-default'));
+
+  const card = document.createElement('div');
+  card.className = 'cap-nudge-card';
+
+  // Header with icon + title
+  const header = document.createElement('div');
+  header.className = 'cap-nudge-header';
+
+  const icon = document.createElement('img');
+  icon.src = ICON_SVG;
+  icon.className = 'cap-nudge-icon';
+  icon.alt = 'Cap';
+
+  const titleWrapper = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'cap-nudge-title';
+  title.textContent = 'Want to record this meeting?';
+  titleWrapper.appendChild(title);
+
+  header.append(icon, titleWrapper);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'cap-nudge-subtitle';
+  subtitle.textContent = 'Make sure participants have agreed.';
+
+  const btnRecord = document.createElement('button');
+  btnRecord.className = 'cap-nudge-btn-primary';
+  btnRecord.textContent = 'Record now';
+
+  const buttons = document.createElement('div');
+  buttons.className = 'cap-nudge-buttons';
+
+  const btnLater = document.createElement('button');
+  btnLater.className = 'cap-nudge-btn-secondary';
+  btnLater.textContent = 'Later';
+
+  const btnDismiss = document.createElement('button');
+  btnDismiss.className = 'cap-nudge-btn-dismiss';
+  btnDismiss.textContent = 'Dismiss';
+
+  buttons.append(btnLater, btnDismiss);
+  card.append(header, subtitle, btnRecord, buttons);
+  container.appendChild(card);
+})();
+
+// ── State 2: Recording pill ───────────────────────────────────────────────────
+
+(function renderRecordingPill() {
+  const container = mountShadow(document.getElementById('host-recording'));
+
+  const pill = document.createElement('div');
+  pill.className = 'cap-nudge-pill';
+
+  const dot = document.createElement('span');
+  dot.className = 'cap-nudge-dot';
+
+  const elapsed = document.createElement('span');
+  elapsed.className = 'cap-nudge-elapsed';
+  elapsed.id = 'cap-elapsed-harness';
+  elapsed.textContent = '00:00';
+
+  const btnStop = document.createElement('button');
+  btnStop.className = 'cap-nudge-btn-stop';
+  btnStop.textContent = 'Stop';
+
+  pill.append(dot, elapsed, btnStop);
+  container.appendChild(pill);
+
+  // Live elapsed timer so it animates in the harness
+  const startedAt = Date.now();
+  setInterval(() => {
+    const ms = Date.now() - startedAt;
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    elapsed.textContent = `${pad(m)}:${pad(s)}`;
+  }, 1000);
+})();
+
+// ── State 3: Complete card ────────────────────────────────────────────────────
+
+(function renderCompleteCard() {
+  const container = mountShadow(document.getElementById('host-complete'));
+
+  const SHARE_URL = 'https://cap.so/s/abc123-example-recording';
+
+  const card = document.createElement('div');
+  card.className = 'cap-nudge-complete-card';
+
+  // Header: check + title
+  const header = document.createElement('div');
+  header.className = 'cap-nudge-header';
+
+  const check = document.createElement('div');
+  check.className = 'cap-nudge-complete-check';
+  check.textContent = '✓';
+
+  const title = document.createElement('div');
+  title.className = 'cap-nudge-title';
+  title.textContent = 'Recording saved!';
+
+  header.append(check, title);
+
+  const urlEl = document.createElement('div');
+  urlEl.className = 'cap-nudge-share-url';
+  urlEl.textContent = SHARE_URL;
+
+  const buttons = document.createElement('div');
+  buttons.className = 'cap-nudge-buttons';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'cap-nudge-btn-copy';
+  copyBtn.textContent = 'Copy link';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(SHARE_URL).then(() => {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 2000);
+    });
+  });
+
+  const openBtn = document.createElement('button');
+  openBtn.className = 'cap-nudge-btn-open';
+  openBtn.textContent = 'Open';
+  openBtn.addEventListener('click', () => { window.open(SHARE_URL, '_blank'); });
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'cap-nudge-btn-dismiss';
+  dismissBtn.textContent = 'Dismiss';
+
+  buttons.append(copyBtn, openBtn);
+  card.append(header, urlEl, buttons, dismissBtn);
+  container.appendChild(card);
+})();
+
+// ── State 4: Error card ───────────────────────────────────────────────────────
+
+(function renderErrorCard() {
+  const container = mountShadow(document.getElementById('host-error'));
+
+  const card = document.createElement('div');
+  card.className = 'cap-nudge-error-card';
+
+  const title = document.createElement('div');
+  title.className = 'cap-nudge-title';
+  title.textContent = 'Upload failed';
+
+  const msg = document.createElement('div');
+  msg.className = 'cap-nudge-error-msg';
+  msg.textContent = 'Connection timed out. Check your network and try again.';
+
+  const buttons = document.createElement('div');
+  buttons.className = 'cap-nudge-buttons';
+
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'cap-nudge-btn-primary';
+  retryBtn.textContent = 'Retry';
+  // Inline override: primary in error card isn't full-width, reset to auto
+  retryBtn.style.width = 'auto';
+  retryBtn.style.display = 'inline-block';
+  retryBtn.style.marginBottom = '0';
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'cap-nudge-btn-secondary';
+  dismissBtn.textContent = 'Dismiss';
+
+  buttons.append(retryBtn, dismissBtn);
+  card.append(title, msg, buttons);
+  container.appendChild(card);
+})();
+</script>
+</body>
+</html>
