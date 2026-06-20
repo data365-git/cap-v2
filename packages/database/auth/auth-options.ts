@@ -8,6 +8,7 @@ import { getServerSession as _getServerSession } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
 import { decode, type JWT, type JWTDecodeParams } from "next-auth/jwt";
 import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
 import type { Provider } from "next-auth/providers/index";
 import { db } from "../index.ts";
 import {
@@ -180,34 +181,10 @@ export const authOptions = (): NextAuthOptions => {
 						return user ?? null;
 					},
 				}),
-				CredentialsProvider({
-					id: "email-only",
-					name: "Email",
-					credentials: {
-						email: { label: "Email", type: "email" },
-					},
-					async authorize(credentials) {
-						if (!credentials?.email) return null;
-						const email = credentials.email.trim().toLowerCase();
-
-						const result = await isEmailAllowed(email);
-						if (!result.allowed) return null;
-
-						if (result.existingUser) {
-							return {
-								id: result.user.id,
-								email: result.user.email,
-								name: result.user.name,
-								image: result.user.image,
-							};
-						}
-
-						// New invited user — auto-create atomically
-						const user = await db().transaction(async (tx) => {
-							return createUserFromOrgInvite(email, result.invite, tx);
-						});
-						return { id: user.id, email: user.email, name: user.name, image: null };
-					},
+				GoogleProvider({
+					clientId: serverEnv().GOOGLE_CLIENT_ID ?? "",
+					clientSecret: serverEnv().GOOGLE_CLIENT_SECRET ?? "",
+					allowDangerousEmailAccountLinking: true,
 				}),
 			];
 
@@ -225,22 +202,31 @@ export const authOptions = (): NextAuthOptions => {
 			},
 		},
 		callbacks: {
-			async signIn({ user, account }) {
+			async signIn({ user, account, profile }) {
 				if (account?.provider === "invite-token") return true;
 				if (account?.provider === "credentials") return true;
 				if (account?.provider === "otp") return true;
-				if (account?.provider === "email-only") return true;
 
-				const email = user?.email?.toLowerCase();
-				if (!email) return false;
+				if (account?.provider === "google") {
+					const email = user?.email?.toLowerCase();
+					if (!email) return false;
+					// Require Google-verified email address
+					if (
+						(profile as { email_verified?: boolean })?.email_verified !== true
+					)
+						return false;
+					const result = await isEmailAllowed(email);
+					return result.allowed;
+				}
 
-				const [existing] = await db()
-					.select({ id: users.id })
-					.from(users)
-					.where(eq(users.email, email))
-					.limit(1);
-
-				return !!existing;
+				return false;
+			},
+			async redirect({ url, baseUrl }) {
+				if (url.startsWith("/")) return `${baseUrl}${url}`;
+				try {
+					if (new URL(url).origin === baseUrl) return url;
+				} catch {}
+				return `${baseUrl}/dashboard`;
 			},
 			async session({ token, session }) {
 				if (!session.user) return session;

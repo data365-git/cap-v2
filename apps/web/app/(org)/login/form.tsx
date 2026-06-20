@@ -1,30 +1,22 @@
 "use client";
 
-import { Button, Input, LogoBadge } from "@cap/ui";
+import { LogoBadge } from "@cap/ui";
 import { motion } from "framer-motion";
 import Cookies from "js-cookie";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { useEffect, useId, useState } from "react";
-import type { ChangeEvent } from "react";
-import { checkEmailAllowed } from "@/actions/auth/check-email-allowed";
+import { useEffect, useState } from "react";
 
 const MotionLogoBadge = motion(LogoBadge);
 const MotionLink = motion(Link);
-const MotionButton = motion(Button);
-const MotionInput = motion(Input);
 
 export function LoginForm() {
 	const searchParams = useSearchParams();
 	const next = searchParams?.get("next");
+	const notAllowed = searchParams?.get("error") === "AccessDenied";
 
-	const [email, setEmail] = useState("");
-	const [notAllowed, setNotAllowed] = useState(false);
 	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	const emailInputId = useId();
 
 	const theme = Cookies.get("theme") || "light";
 	useEffect(() => {
@@ -34,43 +26,9 @@ export function LoginForm() {
 		};
 	}, [theme]);
 
-	const redirect = (dest?: string | null) => {
-		window.location.href = dest && dest.length > 0 ? dest : "/dashboard";
-	};
-
-	const handleSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
+	const handleGoogle = async () => {
 		setLoading(true);
-		setError(null);
-		setNotAllowed(false);
-
-		try {
-			const normalized = email.trim().toLowerCase();
-
-			// Pre-check so we can show the "contact admin" message without attempting signIn.
-			// The provider re-checks server-side — the client result is never trusted for auth.
-			const { allowed } = await checkEmailAllowed(normalized);
-			if (!allowed) {
-				setNotAllowed(true);
-				return;
-			}
-
-			const res = await signIn("email-only", {
-				email: normalized,
-				redirect: false,
-			});
-
-			if (res?.ok && !res?.error) {
-				redirect(next);
-				return;
-			}
-
-			setError("Sign-in failed. Please try again or contact your administrator.");
-		} catch (err: any) {
-			setError(err?.message ?? "Something went wrong. Please try again.");
-		} finally {
-			setLoading(false);
-		}
+		await signIn("google", { callbackUrl: next || "/dashboard" });
 	};
 
 	return (
@@ -104,48 +62,37 @@ export function LoginForm() {
 			</motion.div>
 
 			<motion.div layout="position" className="flex flex-col space-y-3">
-				<form onSubmit={handleSubmit} className="flex flex-col space-y-3 px-1">
-					<MotionInput
-						id={emailInputId}
-						name="email"
-						autoFocus
-						type="email"
-						placeholder="tim@apple.com"
-						autoComplete="email"
-						required
-						value={email}
+				{notAllowed && (
+					<div className="rounded-lg bg-gray-2 border border-gray-5 p-3 text-center">
+						<p className="text-sm font-medium text-gray-12 mb-1">
+							This Google account hasn't been invited yet.
+						</p>
+						<p className="text-xs text-gray-10">
+							Please contact your administrator for access.
+						</p>
+					</div>
+				)}
+
+				<div className="px-1">
+					<button
+						type="button"
 						disabled={loading}
-						onChange={(e: ChangeEvent<HTMLInputElement>) => {
-							setEmail(e.target.value);
-							setNotAllowed(false);
-							setError(null);
-						}}
-					/>
-
-					{notAllowed && (
-						<div className="rounded-lg bg-gray-2 border border-gray-5 p-3 text-center">
-							<p className="text-sm font-medium text-gray-12 mb-1">
-								This email hasn't been invited yet.
-							</p>
-							<p className="text-xs text-gray-10">
-								Please contact your administrator for access.
-							</p>
-						</div>
-					)}
-
-					{error && (
-						<p className="text-sm text-red-500 text-center">{error}</p>
-					)}
-
-					<MotionButton
-						variant="dark"
-						type="submit"
-						disabled={loading}
-						spinner={loading}
+						onClick={handleGoogle}
+						className="w-full flex items-center justify-center gap-3 rounded-xl border border-gray-5 bg-white dark:bg-gray-2 px-4 py-2.5 text-sm font-medium text-gray-12 hover:bg-gray-2 dark:hover:bg-gray-3 transition-colors disabled:opacity-50"
 					>
-						{loading ? "Signing in..." : "Sign in"}
-					</MotionButton>
-				</form>
+						<svg
+							className="size-4 shrink-0"
+							viewBox="0 0 24 24"
+							aria-hidden="true"
+						>
+							<path
+								d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"
+								fill="currentColor"
+							/>
+						</svg>
+						{loading ? "Signing in…" : "Sign in with Google"}
+					</button>
+				</div>
 
 				<motion.p
 					layout="position"

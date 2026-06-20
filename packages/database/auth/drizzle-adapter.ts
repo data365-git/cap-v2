@@ -22,7 +22,11 @@ export function DrizzleAdapter(db: MySql2Database): Adapter {
 			const userId = User.UserId.make(nanoId());
 			await db.transaction(async (tx) => {
 				const [pendingInvite] = await tx
-					.select({ id: organizationInvites.id })
+					.select({
+						id: organizationInvites.id,
+						organizationId: organizationInvites.organizationId,
+						role: organizationInvites.role,
+					})
 					.from(organizationInvites)
 					.where(
 						and(
@@ -42,6 +46,27 @@ export function DrizzleAdapter(db: MySql2Database): Adapter {
 				});
 
 				if (pendingInvite) {
+					await tx
+						.update(users)
+						.set({
+							activeOrganizationId: pendingInvite.organizationId,
+							defaultOrgId: pendingInvite.organizationId,
+							inviteQuota: 1,
+						})
+						.where(eq(users.id, userId));
+
+					await tx.insert(organizationMembers).values({
+						id: nanoId(),
+						userId,
+						organizationId: pendingInvite.organizationId,
+						role: pendingInvite.role,
+					});
+
+					await tx
+						.update(organizationInvites)
+						.set({ consumedAt: new Date(), status: "accepted" })
+						.where(eq(organizationInvites.id, pendingInvite.id));
+
 					return;
 				}
 
