@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../index.ts";
 import {
 	invites,
@@ -18,16 +18,21 @@ export interface InviteUser {
 	image: null;
 }
 
+// Infer the drizzle transaction type so callers can pass tx for atomicity.
+type DrizzleTx = Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0];
+
 /**
  * Idempotent: creates the user if missing, ensures org membership, marks invite consumed.
- * Safe to call whether or not the user row already exists.
+ * Pass `tx` (from db().transaction()) to make all writes atomic.
  */
 export async function createUserFromOrgInvite(
 	email: string,
 	invite: typeof organizationInvites.$inferSelect,
+	tx?: DrizzleTx,
 ): Promise<InviteUser> {
-	// Find or create user
-	let [existing] = await db()
+	const d = tx ?? db();
+
+	let [existing] = await d
 		.select({ id: users.id, email: users.email, name: users.name, image: users.image })
 		.from(users)
 		.where(eq(users.email, email))
@@ -35,7 +40,7 @@ export async function createUserFromOrgInvite(
 
 	if (!existing) {
 		const newId = nanoId() as User.UserId;
-		await db().insert(users).values({
+		await d.insert(users).values({
 			id: newId,
 			email,
 			name: email.split("@")[0],
@@ -47,8 +52,7 @@ export async function createUserFromOrgInvite(
 		existing = { id: newId, email, name: email.split("@")[0], image: null };
 	}
 
-	// Ensure org membership
-	const [alreadyMember] = await db()
+	const [alreadyMember] = await d
 		.select({ id: organizationMembers.id })
 		.from(organizationMembers)
 		.where(
@@ -60,7 +64,7 @@ export async function createUserFromOrgInvite(
 		.limit(1);
 
 	if (!alreadyMember) {
-		await db().insert(organizationMembers).values({
+		await d.insert(organizationMembers).values({
 			id: nanoId(),
 			userId: existing.id,
 			organizationId: invite.organizationId,
@@ -68,9 +72,8 @@ export async function createUserFromOrgInvite(
 		});
 	}
 
-	// Mark invite consumed (idempotent — only update if not already consumed)
 	if (!invite.consumedAt) {
-		await db()
+		await d
 			.update(organizationInvites)
 			.set({ consumedAt: new Date(), status: "accepted" })
 			.where(eq(organizationInvites.id, invite.id));

@@ -17,6 +17,7 @@ import {
 } from "../schema.ts";
 import { DrizzleAdapter } from "./drizzle-adapter.ts";
 import { createUserFromOrgInvite } from "./create-user-from-invite.ts";
+import { isEmailAllowed } from "./allowed-check.ts";
 
 export const maxDuration = 120;
 
@@ -179,6 +180,35 @@ export const authOptions = (): NextAuthOptions => {
 						return user ?? null;
 					},
 				}),
+				CredentialsProvider({
+					id: "email-only",
+					name: "Email",
+					credentials: {
+						email: { label: "Email", type: "email" },
+					},
+					async authorize(credentials) {
+						if (!credentials?.email) return null;
+						const email = credentials.email.trim().toLowerCase();
+
+						const result = await isEmailAllowed(email);
+						if (!result.allowed) return null;
+
+						if (result.existingUser) {
+							return {
+								id: result.user.id,
+								email: result.user.email,
+								name: result.user.name,
+								image: result.user.image,
+							};
+						}
+
+						// New invited user — auto-create atomically
+						const user = await db().transaction(async (tx) => {
+							return createUserFromOrgInvite(email, result.invite, tx);
+						});
+						return { id: user.id, email: user.email, name: user.name, image: null };
+					},
+				}),
 			];
 
 			return _providers;
@@ -199,6 +229,7 @@ export const authOptions = (): NextAuthOptions => {
 				if (account?.provider === "invite-token") return true;
 				if (account?.provider === "credentials") return true;
 				if (account?.provider === "otp") return true;
+				if (account?.provider === "email-only") return true;
 
 				const email = user?.email?.toLowerCase();
 				if (!email) return false;

@@ -1,6 +1,44 @@
 import { and, gt, isNull, or, eq } from "drizzle-orm";
 import { db } from "../index.ts";
 import { invites, organizationInvites, users } from "../schema.ts";
+import type { User } from "@cap/web-domain";
+
+// ── email-only login gate ──────────────────────────────────────────────────
+// Checks users table first, then pending org invites (no generic invites).
+export type IsEmailAllowedResult =
+	| { allowed: false }
+	| { allowed: true; existingUser: true; user: { id: User.UserId; email: string; name: string | null; image: string | null } }
+	| { allowed: true; existingUser: false; invite: typeof organizationInvites.$inferSelect };
+
+export async function isEmailAllowed(email: string): Promise<IsEmailAllowedResult> {
+	const normalized = email.trim().toLowerCase();
+	const now = new Date();
+
+	const [user] = await db()
+		.select({ id: users.id, email: users.email, name: users.name, image: users.image })
+		.from(users)
+		.where(eq(users.email, normalized))
+		.limit(1);
+
+	if (user) return { allowed: true, existingUser: true, user: user as { id: User.UserId; email: string; name: string | null; image: string | null } };
+
+	const [invite] = await db()
+		.select()
+		.from(organizationInvites)
+		.where(
+			and(
+				eq(organizationInvites.invitedEmail, normalized),
+				eq(organizationInvites.status, "pending"),
+				isNull(organizationInvites.consumedAt),
+				or(isNull(organizationInvites.expiresAt), gt(organizationInvites.expiresAt, now)),
+			),
+		)
+		.limit(1);
+
+	if (invite) return { allowed: true, existingUser: false, invite };
+
+	return { allowed: false };
+}
 
 export type AllowedEmailResult =
 	| { allowed: false }
