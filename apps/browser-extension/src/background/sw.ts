@@ -186,7 +186,7 @@ async function handleMessage(
 	const type = msg.type as string;
 
 	switch (type) {
-		// ── Popup: start instruction recording ────────────────────────────
+		// ── Popup: start instruction (screen) recording ──────────────────
 		case "START_INSTRUCTION": {
 			const state = await getState();
 			if (state.kind !== "idle" && state.kind !== "error") {
@@ -194,25 +194,8 @@ async function handleMessage(
 			}
 			const settings = await getSettings();
 			await setState({ kind: "arming", mode: "instruction" });
-			let streamId: string;
-			try {
-				streamId = await chooseDesktopMediaAsync(
-					["screen", "window", "tab"],
-					undefined,
-				);
-			} catch {
-				await setState({ kind: "idle" });
-				updateBadge({ kind: "idle" });
-				return { ok: true };
-			}
-			await ensureOffscreenDocument();
-			await sendToOffscreen({
-				type: "START_CAPTURE",
-				mode: "desktop",
-				streamId,
-				micEnabled: settings.micEnabled,
-				...(settings.micEnabled ? { micDeviceId: settings.micDeviceId } : {}),
-			});
+			// Reuse the same desktop-capture path as START_MEET so they cannot drift.
+			await launchMeetCapture(undefined, undefined, settings);
 			return { ok: true };
 		}
 

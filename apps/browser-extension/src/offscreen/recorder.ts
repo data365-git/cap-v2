@@ -71,20 +71,29 @@ async function startCapture(msg: StartCaptureMsg): Promise<void> {
 
 		if (msg.mode === "desktop") {
 			if (!msg.streamId) throw new Error("streamId required for desktop mode");
-			displayStream = await navigator.mediaDevices.getUserMedia({
-				video: {
-					mandatory: {
-						chromeMediaSource: "desktop",
-						chromeMediaSourceId: msg.streamId,
-					},
-				} as unknown as MediaTrackConstraints,
-				audio: {
-					mandatory: {
-						chromeMediaSource: "desktop",
-						chromeMediaSourceId: msg.streamId,
-					},
-				} as unknown as MediaTrackConstraints,
-			});
+			const videoConstraints = {
+				mandatory: {
+					chromeMediaSource: "desktop",
+					chromeMediaSourceId: msg.streamId,
+				},
+			} as unknown as MediaTrackConstraints;
+			// Audio is unavailable for screen/window sources (no system audio).
+			// Try with audio first (works for tab sources); fall back to video-only.
+			try {
+				displayStream = await navigator.mediaDevices.getUserMedia({
+					video: videoConstraints,
+					audio: {
+						mandatory: {
+							chromeMediaSource: "desktop",
+							chromeMediaSourceId: msg.streamId,
+						},
+					} as unknown as MediaTrackConstraints,
+				});
+			} catch {
+				displayStream = await navigator.mediaDevices.getUserMedia({
+					video: videoConstraints,
+				});
+			}
 		} else if (msg.mode === "picker") {
 			displayStream = await navigator.mediaDevices.getDisplayMedia({
 				video: {

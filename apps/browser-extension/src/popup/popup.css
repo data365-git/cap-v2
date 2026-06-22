@@ -7,7 +7,8 @@
 @font-face {
 	font-family: "NeueMontreal";
 	src: url("fonts/NeueMontreal-Medium.otf") format("opentype");
-	font-weight: 500;
+	/* Cover 500 and 600 with the Medium file — no 600 OTF available */
+	font-weight: 500 600;
 	font-style: normal;
 }
 @font-face {
@@ -109,9 +110,10 @@ body {
 	font-weight: 600;
 	font-family: inherit;
 	cursor: pointer;
-	line-height: 1.3;
+	line-height: 1.5;
 	transition: background 0.13s, border-color 0.13s, opacity 0.13s;
 	letter-spacing: -0.01em;
+	overflow: visible;
 }
 
 .action-btn svg {
