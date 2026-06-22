@@ -1,3 +1,22 @@
+@font-face {
+	font-family: "NeueMontreal";
+	src: url("fonts/NeueMontreal-Regular.otf") format("opentype");
+	font-weight: 400;
+	font-style: normal;
+}
+@font-face {
+	font-family: "NeueMontreal";
+	src: url("fonts/NeueMontreal-Medium.otf") format("opentype");
+	font-weight: 500;
+	font-style: normal;
+}
+@font-face {
+	font-family: "NeueMontreal";
+	src: url("fonts/NeueMontreal-Bold.otf") format("opentype");
+	font-weight: 700;
+	font-style: normal;
+}
+
 *,
 *::before,
 *::after {
@@ -7,23 +26,52 @@
 }
 
 body {
-	font-family: system-ui, -apple-system, sans-serif;
+	font-family: "NeueMontreal", system-ui, -apple-system, sans-serif;
 	font-size: 14px;
-	color: #111827;
+	color: #202020;
 	background: #ffffff;
 	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
 }
+
+/* ── Page header ─────────────────────────────────────────────────────── */
+
+.page-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 20px 24px 16px;
+	border-bottom: 1px solid #f0f0f0;
+	max-width: 640px;
+	margin: 0 auto;
+}
+
+.page-header-logo {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.page-header-title {
+	font-size: 16px;
+	font-weight: 700;
+	color: #202020;
+	letter-spacing: -0.02em;
+}
+
+/* ── Settings container ──────────────────────────────────────────────── */
 
 .settings-container {
 	max-width: 640px;
 	margin: 0 auto;
-	padding: 32px 24px 64px;
+	padding: 24px 24px 64px;
 }
 
 .section-header {
 	font-size: 18px;
 	font-weight: 600;
-	color: #111827;
+	color: #202020;
 	margin-bottom: 16px;
 	margin-top: 32px;
 }
@@ -34,7 +82,7 @@ body {
 
 .section-divider {
 	border: none;
-	border-top: 1px solid #e5e7eb;
+	border-top: 1px solid #e0e0e0;
 	margin: 24px 0;
 }
 
@@ -45,25 +93,25 @@ body {
 .field-label {
 	font-size: 14px;
 	font-weight: 500;
-	color: #374151;
+	color: #202020;
 	display: block;
 	margin-bottom: 4px;
 }
 
 .field-description {
 	font-size: 13px;
-	color: #6b7280;
+	color: #646464;
 	margin-top: 2px;
 }
 
 .text-input {
 	width: 100%;
 	padding: 8px 12px;
-	border: 1px solid #d1d5db;
+	border: 1px solid #e0e0e0;
 	border-radius: 6px;
 	font-size: 14px;
 	font-family: inherit;
-	color: #111827;
+	color: #202020;
 	background: #ffffff;
 	appearance: none;
 	transition:
@@ -72,9 +120,9 @@ body {
 }
 
 .text-input:focus {
-	border-color: #675fff;
+	border-color: #4785FF;
 	outline: none;
-	box-shadow: 0 0 0 2px rgba(103, 95, 255, 0.2);
+	box-shadow: 0 0 0 3px rgba(71, 133, 255, 0.2);
 }
 
 .input-with-button {
@@ -113,23 +161,23 @@ body {
 }
 
 .btn--primary {
-	background: #675fff;
-	color: #ffffff;
+	background: #202020;
+	color: #fcfcfc;
 	border: none;
 }
 
 .btn--primary:hover:not(:disabled) {
-	opacity: 0.9;
+	opacity: 0.85;
 }
 
 .btn--secondary {
 	background: #ffffff;
-	color: #374151;
-	border: 1px solid #d1d5db;
+	color: #202020;
+	border: 1px solid #e0e0e0;
 }
 
 .btn--secondary:hover:not(:disabled) {
-	background: #f9fafb;
+	background: #f0f0f0;
 }
 
 .btn--icon {
@@ -142,7 +190,7 @@ body {
 }
 
 .connection-status--loading {
-	color: #6b7280;
+	color: #646464;
 }
 
 .connection-status--success {
@@ -180,12 +228,12 @@ body {
 	width: 44px;
 	height: 24px;
 	border-radius: 12px;
-	background: #d1d5db;
+	background: #e0e0e0;
 	transition: background 0.2s;
 }
 
 .toggle input[type="checkbox"]:checked + .toggle__track {
-	background: #675fff;
+	background: #4785FF;
 }
 
 .toggle__knob {
@@ -226,7 +274,7 @@ body {
 
 .radio-row input[type="radio"] {
 	margin-top: 2px;
-	accent-color: #675fff;
+	accent-color: #4785FF;
 	flex-shrink: 0;
 	width: 16px;
 	height: 16px;
@@ -242,14 +290,14 @@ body {
 
 .range-slider {
 	flex: 1;
-	accent-color: #675fff;
+	accent-color: #4785FF;
 	height: 4px;
 	cursor: pointer;
 }
 
 .slider-value {
 	font-size: 13px;
-	color: #374151;
+	color: #202020;
 	min-width: 72px;
 	text-align: right;
 }
@@ -257,7 +305,7 @@ body {
 .about-version {
 	font-size: 15px;
 	font-weight: 600;
-	color: #111827;
+	color: #202020;
 	margin-bottom: 12px;
 }
 
@@ -270,7 +318,7 @@ body {
 
 .about-link {
 	font-size: 14px;
-	color: #675fff;
+	color: #4785FF;
 	text-decoration: none;
 }
 
@@ -280,7 +328,7 @@ body {
 
 .about-tagline {
 	font-size: 13px;
-	color: #6b7280;
+	color: #646464;
 }
 
 .perm-row {
@@ -305,7 +353,7 @@ body {
 }
 
 .perm-status--unknown {
-	color: #6b7280;
+	color: #646464;
 }
 
 .toast {

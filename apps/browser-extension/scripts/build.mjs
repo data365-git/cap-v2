@@ -45,6 +45,11 @@ const entryPoints = [
 		outfile: join(distDir, "options.js"),
 		format: "esm",
 	},
+	{
+		path: join(srcDir, "grant-permission/grant-permission.ts"),
+		outfile: join(distDir, "grant-permission.js"),
+		format: "esm",
+	},
 ];
 
 async function build() {
@@ -88,6 +93,7 @@ function copyAssets() {
 		{ dir: "popup", files: ["popup.html", "popup.css"] },
 		{ dir: "offscreen", files: ["offscreen.html"] },
 		{ dir: "options", files: ["options.html", "options.css"] },
+		{ dir: "grant-permission", files: ["grant-permission.html", "grant-permission.css"] },
 	];
 	for (const page of pages) {
 		for (const file of page.files) {

@@ -96,44 +96,88 @@ function createToggleEl(id: string, checked: boolean): HTMLElement {
 	return label;
 }
 
-function svgIcon(path: string, size = 16): SVGSVGElement {
-	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+// ── Design-system icons ────────────────────────────────────────────────────
+
+// LogoBadge SVG — exact replica of packages/ui/src/components/icons/LogoBadge.tsx
+function logoBadgeSVG(size = 24): SVGSVGElement {
+	const ns = "http://www.w3.org/2000/svg";
+	const svg = document.createElementNS(ns, "svg");
 	svg.setAttribute("width", String(size));
 	svg.setAttribute("height", String(size));
-	svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+	svg.setAttribute("viewBox", "0 0 40 40");
 	svg.setAttribute("fill", "none");
-	svg.innerHTML = path;
+	svg.innerHTML = `
+    <rect width="40" height="40" fill="#fff" rx="8"/>
+    <path fill="#4785FF" d="M20 36c8.837 0 16-7.163 16-16 0-8.836-7.163-16-16-16-8.836 0-16 7.164-16 16 0 8.837 7.164 16 16 16z"/>
+    <path fill="#ADC9FF" d="M20 33c7.18 0 13-5.82 13-13S27.18 7 20 7 7 12.82 7 20s5.82 13 13 13z"/>
+    <path fill="#fff" d="M20 30c5.523 0 10-4.477 10-10s-4.477-10-10-10-10 4.477-10 10 4.477 10 10 10z"/>
+  `;
 	return svg;
 }
 
-function screenIcon(): SVGSVGElement {
-	return svgIcon(
-		`<rect x="1.5" y="2" width="13" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-		<path d="M5.5 13.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-		<path d="M8 11v2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,
-	);
+// Lucide icons — stroke-based, fill="none", stroke-width="2", linecap/linejoin="round"
+function lucideSVG(
+	paths: string,
+	size = 18,
+	viewBox = "0 0 24 24",
+): SVGSVGElement {
+	const ns = "http://www.w3.org/2000/svg";
+	const svg = document.createElementNS(ns, "svg");
+	svg.setAttribute("width", String(size));
+	svg.setAttribute("height", String(size));
+	svg.setAttribute("viewBox", viewBox);
+	svg.setAttribute("fill", "none");
+	svg.setAttribute("stroke", "currentColor");
+	svg.setAttribute("stroke-width", "2");
+	svg.setAttribute("stroke-linecap", "round");
+	svg.setAttribute("stroke-linejoin", "round");
+	svg.innerHTML = paths;
+	return svg;
 }
 
-function meetIcon(): SVGSVGElement {
-	return svgIcon(
-		`<rect x="1" y="4" width="9" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-		<path d="M10 7l4-2.5v7L10 9V7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>`,
-	);
-}
-
-function micIconSvg(size = 14): SVGSVGElement {
-	return svgIcon(
-		`<rect x="5" y="1" width="4" height="7" rx="2" stroke="currentColor" stroke-width="1.4"/>
-		<path d="M2.5 7a5.5 5.5 0 0 0 9 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-		<path d="M7 12v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
+// lucide Settings (gear)
+function iconSettings(size = 18): SVGSVGElement {
+	return lucideSVG(
+		`<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+    <circle cx="12" cy="12" r="3"/>`,
 		size,
 	);
 }
 
-function cameraIconSvg(size = 14): SVGSVGElement {
-	return svgIcon(
-		`<path d="M1.5 5a1 1 0 0 1 1-1H5L6.5 2h1L9 4h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V5z" stroke="currentColor" stroke-width="1.3"/>
-		<circle cx="6.5" cy="7.5" r="1.8" stroke="currentColor" stroke-width="1.3"/>`,
+// lucide Monitor (screen)
+function iconMonitor(size = 16): SVGSVGElement {
+	return lucideSVG(
+		`<rect width="20" height="14" x="2" y="3" rx="2"/>
+    <path d="M8 21h8"/>
+    <path d="M12 17v4"/>`,
+		size,
+	);
+}
+
+// lucide Video (camera/meeting)
+function iconVideo(size = 16): SVGSVGElement {
+	return lucideSVG(
+		`<path d="m22 8-6 4 6 4V8z"/>
+    <rect width="14" height="12" x="2" y="6" rx="2" ry="2"/>`,
+		size,
+	);
+}
+
+// lucide Mic
+function iconMic(size = 14): SVGSVGElement {
+	return lucideSVG(
+		`<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+    <line x1="12" x2="12" y1="19" y2="22"/>`,
+		size,
+	);
+}
+
+// lucide Camera
+function iconCamera(size = 14): SVGSVGElement {
+	return lucideSVG(
+		`<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+    <circle cx="12" cy="13" r="3"/>`,
 		size,
 	);
 }
@@ -198,10 +242,9 @@ async function checkPermission(name: PermissionName): Promise<PermissionState> {
 	}
 }
 
-// Populates a device select without calling getUserMedia.
-// Returns "granted" if permission was already granted (devices enumerated),
-// "blocked" otherwise. Never shows a permission dialog — that must happen
-// in the options page (a persistent tab that doesn't close on focus loss).
+// Populates a device <select> without calling getUserMedia.
+// Only uses permissions.query + enumerateDevices (no permission dialog in popup).
+// Returns "granted" if permission was already granted, "blocked" otherwise.
 async function populateDeviceSelect(
 	select: HTMLSelectElement,
 	kind: "audioinput" | "videoinput",
@@ -216,7 +259,6 @@ async function populateDeviceSelect(
 		return "blocked";
 	}
 
-	// Permission already granted — enumerate devices directly, no getUserMedia.
 	const devices = await navigator.mediaDevices.enumerateDevices();
 	const filtered = devices.filter((d) => d.kind === kind);
 
@@ -241,6 +283,13 @@ async function populateDeviceSelect(
 	return "granted";
 }
 
+// Opens the dedicated grant-permission tab so Chrome's prompt runs in a
+// persistent page (not the popup, which closes when focus leaves).
+function openGrantTab(type: "mic" | "camera"): void {
+	const url = chrome.runtime.getURL(`grant-permission.html?type=${type}`);
+	chrome.tabs.create({ url });
+}
+
 // ── Idle panel ─────────────────────────────────────────────────────────────
 
 function renderIdlePanel(
@@ -253,13 +302,12 @@ function renderIdlePanel(
 	// ── Header ──
 	const header = el("div", { className: "hdr" });
 	const logoRow = el("div", { className: "hdr-logo" });
-	const logoDot = el("span", { className: "hdr-dot" });
-	const logoText = el("span", { className: "hdr-text" }, "Cap");
-	logoRow.appendChild(logoDot);
-	logoRow.appendChild(logoText);
+	logoRow.appendChild(logoBadgeSVG(22));
+	logoRow.appendChild(el("span", { className: "hdr-text" }, "Cap"));
 
-	const gearBtn = el("button", { className: "hdr-gear" }, "⚙");
+	const gearBtn = el("button", { className: "hdr-gear" });
 	gearBtn.title = "Settings";
+	gearBtn.appendChild(iconSettings(18));
 	gearBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 	header.appendChild(logoRow);
@@ -269,9 +317,8 @@ function renderIdlePanel(
 	// ── Actions ──
 	const actions = el("div", { className: "actions" });
 
-	// Primary: Record Screen
 	const screenBtn = el("button", { className: "action-btn action-btn--primary" });
-	screenBtn.appendChild(screenIcon());
+	screenBtn.appendChild(iconMonitor(16));
 	screenBtn.appendChild(el("span", {}, "Record Screen"));
 	screenBtn.addEventListener("click", () => {
 		sendMsg({ type: "START_INSTRUCTION" });
@@ -279,11 +326,10 @@ function renderIdlePanel(
 	});
 	actions.appendChild(screenBtn);
 
-	// Secondary: Record Meeting
 	const meetBtn = el("button", {
 		className: `action-btn action-btn--secondary${isMeetTab && meetingId ? "" : " action-btn--off"}`,
 	});
-	meetBtn.appendChild(meetIcon());
+	meetBtn.appendChild(iconVideo(16));
 	meetBtn.appendChild(
 		el(
 			"span",
@@ -306,12 +352,13 @@ function renderIdlePanel(
 	actions.appendChild(meetBtn);
 
 	if (!isMeetTab || !meetingId) {
-		const hint = el(
-			"p",
-			{ className: "meet-hint" },
-			"Open a Google Meet to record a meeting",
+		actions.appendChild(
+			el(
+				"p",
+				{ className: "meet-hint" },
+				"Open a Google Meet to record a meeting",
+			),
 		);
-		actions.appendChild(hint);
 	}
 
 	root.appendChild(actions);
@@ -326,22 +373,20 @@ function renderIdlePanel(
 
 	const { meterEl, bars } = buildMicMeter();
 
-	const micToggleId = "mic-toggle-" + Math.random().toString(36).slice(2);
+	const micToggleId = "mic-t-" + Math.random().toString(36).slice(2);
 	const micToggleWrap = createToggleEl(micToggleId, micEnabled);
-	const micToggleInput = micToggleWrap.querySelector(
-		"input",
-	) as HTMLInputElement;
+	const micToggleInput = micToggleWrap.querySelector("input") as HTMLInputElement;
 
 	const micSelect = document.createElement("select");
 	micSelect.className = "device-select";
 	micSelect.disabled = !micEnabled;
 
 	const micGrantBtn = el("button", { className: "grant-btn" }, "Grant access");
-	micGrantBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
+	micGrantBtn.addEventListener("click", () => openGrantTab("mic"));
 
 	const micRow = el("div", { className: "device-row" });
 	const micLabelRow = el("div", { className: "device-label-row" });
-	micLabelRow.appendChild(micIconSvg());
+	micLabelRow.appendChild(iconMic(14));
 	micLabelRow.appendChild(el("span", { className: "device-label" }, "Microphone"));
 	micLabelRow.appendChild(micToggleWrap);
 
@@ -363,6 +408,7 @@ function renderIdlePanel(
 			return;
 		}
 		micGrantBtn.style.display = "none";
+		micToggleWrap.style.display = "";
 		micSelect.style.display = "";
 		meterEl.style.display = "";
 		micSelect.disabled = !micEnabled;
@@ -389,29 +435,27 @@ function renderIdlePanel(
 	});
 
 	populateDeviceSelect(micSelect, "audioinput", micDeviceId)
-		.then((result) => updateMicUI(result === "granted"))
+		.then((r) => updateMicUI(r === "granted"))
 		.catch(() => updateMicUI(false));
 
 	// ── Camera ──
 	let cameraEnabled = settings.cameraOverlay;
 	let cameraDeviceId = settings.cameraDeviceId ?? "";
 
-	const camToggleId = "cam-toggle-" + Math.random().toString(36).slice(2);
+	const camToggleId = "cam-t-" + Math.random().toString(36).slice(2);
 	const camToggleWrap = createToggleEl(camToggleId, cameraEnabled);
-	const camToggleInput = camToggleWrap.querySelector(
-		"input",
-	) as HTMLInputElement;
+	const camToggleInput = camToggleWrap.querySelector("input") as HTMLInputElement;
 
 	const camSelect = document.createElement("select");
 	camSelect.className = "device-select";
 	camSelect.disabled = !cameraEnabled;
 
 	const camGrantBtn = el("button", { className: "grant-btn" }, "Grant access");
-	camGrantBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
+	camGrantBtn.addEventListener("click", () => openGrantTab("camera"));
 
 	const camRow = el("div", { className: "device-row" });
 	const camLabelRow = el("div", { className: "device-label-row" });
-	camLabelRow.appendChild(cameraIconSvg());
+	camLabelRow.appendChild(iconCamera(14));
 	camLabelRow.appendChild(el("span", { className: "device-label" }, "Camera"));
 	camLabelRow.appendChild(camToggleWrap);
 
@@ -431,6 +475,7 @@ function renderIdlePanel(
 			return;
 		}
 		camGrantBtn.style.display = "none";
+		camToggleWrap.style.display = "";
 		camSelect.style.display = "";
 		camSelect.disabled = !cameraEnabled;
 	}
@@ -438,10 +483,7 @@ function renderIdlePanel(
 	camToggleInput.addEventListener("change", () => {
 		cameraEnabled = camToggleInput.checked;
 		camSelect.disabled = !cameraEnabled;
-		sendMsg({
-			type: "SAVE_SETTINGS",
-			settings: { cameraOverlay: cameraEnabled },
-		});
+		sendMsg({ type: "SAVE_SETTINGS", settings: { cameraOverlay: cameraEnabled } });
 	});
 
 	camSelect.addEventListener("change", () => {
@@ -450,7 +492,7 @@ function renderIdlePanel(
 	});
 
 	populateDeviceSelect(camSelect, "videoinput", cameraDeviceId)
-		.then((result) => updateCamUI(result === "granted"))
+		.then((r) => updateCamUI(r === "granted"))
 		.catch(() => updateCamUI(false));
 
 	root.appendChild(devicesSection);
@@ -464,16 +506,11 @@ function renderNotSignedIn(
 ): void {
 	const wrap = el("div", { className: "auth-wrap" });
 
-	const logoMark = el("div", { className: "auth-logo" });
-	const dot = el("span", { className: "auth-dot" });
-	logoMark.appendChild(dot);
+	const logoWrap = el("div", { className: "auth-logo" });
+	logoWrap.appendChild(logoBadgeSVG(48));
 
 	const heading = el("h1", { className: "auth-heading" }, "Cap Recorder");
-	const sub = el(
-		"p",
-		{ className: "auth-sub" },
-		"Sign in to start recording",
-	);
+	const sub = el("p", { className: "auth-sub" }, "Sign in to start recording");
 
 	const signInBtn = el(
 		"button",
@@ -486,7 +523,7 @@ function renderNotSignedIn(
 		window.close();
 	});
 
-	wrap.appendChild(logoMark);
+	wrap.appendChild(logoWrap);
 	wrap.appendChild(heading);
 	wrap.appendChild(sub);
 	wrap.appendChild(signInBtn);
@@ -502,10 +539,8 @@ function renderRecording(
 	stopTimer();
 
 	const header = el("div", { className: "rec-header" });
-	const dot = el("span", { className: "rec-dot" });
-	const label = el("span", { className: "rec-label" }, "Recording");
-	header.appendChild(dot);
-	header.appendChild(label);
+	header.appendChild(el("span", { className: "rec-dot" }));
+	header.appendChild(el("span", { className: "rec-label" }, "Recording"));
 
 	const timerEl = el(
 		"div",
@@ -527,9 +562,7 @@ function renderRecording(
 	pauseBtn.addEventListener("click", () => {
 		pauseBtn.disabled = true;
 		sendMsg({ type: state.paused ? "RESUME" : "PAUSE" });
-		setTimeout(() => {
-			pauseBtn.disabled = false;
-		}, 200);
+		setTimeout(() => (pauseBtn.disabled = false), 200);
 	});
 
 	const stopBtn = el(
@@ -544,9 +577,7 @@ function renderRecording(
 		sendMsg({ type: "STOP" });
 	});
 
-	const btnRow = el("div", { className: "btn-row" });
-	btnRow.appendChild(pauseBtn);
-	btnRow.appendChild(stopBtn);
+	const btnRow = el("div", { className: "btn-row" }, pauseBtn, stopBtn);
 
 	root.appendChild(header);
 	root.appendChild(timerEl);
@@ -608,7 +639,7 @@ function renderComplete(
 
 	const check = el("div", { className: "complete-icon" }, "✓");
 	const title = el("p", { className: "status-title" }, "Recording saved!");
-	const url = el("p", { className: "share-url" }, state.shareUrl);
+	const urlEl = el("p", { className: "share-url" }, state.shareUrl);
 
 	const copyBtn = el(
 		"button",
@@ -634,13 +665,11 @@ function renderComplete(
 	const doneBtn = el("button", { className: "link-btn" }, "Done");
 	doneBtn.addEventListener("click", () => sendMsg({ type: "CANCEL" }));
 
-	const btnRow = el("div", { className: "btn-row" });
-	btnRow.appendChild(copyBtn);
-	btnRow.appendChild(openBtn);
+	const btnRow = el("div", { className: "btn-row" }, copyBtn, openBtn);
 
 	wrap.appendChild(check);
 	wrap.appendChild(title);
-	wrap.appendChild(url);
+	wrap.appendChild(urlEl);
 	wrap.appendChild(btnRow);
 	wrap.appendChild(doneBtn);
 	root.appendChild(wrap);
@@ -653,7 +682,7 @@ function renderError(
 	state: Extract<ExtensionState, { kind: "error" }>,
 ): void {
 	const wrap = el("div", { className: "error-wrap" });
-	wrap.appendChild(el("div", { className: "error-icon" }, "⚠️"));
+	wrap.appendChild(el("div", { className: "error-icon" }, "⚠"));
 	wrap.appendChild(el("p", { className: "error-msg" }, state.reason));
 
 	if (state.recoverable) {
@@ -688,7 +717,9 @@ function renderArming(root: HTMLElement): void {
 function renderOnboarding(root: HTMLElement, onDone: () => void): void {
 	const wrap = el("div", { className: "onboarding" });
 
-	const dot = el("span", { className: "onboarding-dot" });
+	const logoWrap = el("div", { className: "onboarding-logo" });
+	logoWrap.appendChild(logoBadgeSVG(40));
+
 	const heading = el("h1", { className: "onboarding-heading" }, "Welcome to Cap");
 	const list = el(
 		"ul",
@@ -707,7 +738,7 @@ function renderOnboarding(root: HTMLElement, onDone: () => void): void {
 		chrome.storage.local.set({ capExtFirstRun: false }, onDone);
 	});
 
-	wrap.appendChild(dot);
+	wrap.appendChild(logoWrap);
 	wrap.appendChild(heading);
 	wrap.appendChild(list);
 	wrap.appendChild(gotItBtn);
@@ -787,14 +818,7 @@ async function getSettingsFromStorage(): Promise<ExtensionSettings> {
 	const result = await chrome.storage.local.get("capExtSettings");
 	const stored =
 		(result["capExtSettings"] as Partial<ExtensionSettings> | undefined) ?? {};
-	const merged = { ...DEFAULT_SETTINGS, ...stored };
-	console.log(
-		"[popup] settings — apiKey set:",
-		merged.apiKey.length > 0,
-		"apiBaseUrl:",
-		merged.apiBaseUrl,
-	);
-	return merged;
+	return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 async function getStateFromSW(): Promise<ExtensionState> {
@@ -825,12 +849,11 @@ async function init(): Promise<void> {
 	const activeTab = tabs[0];
 	const tabUrl = activeTab?.url ?? "";
 	const meetingId = getMeetingId(tabUrl);
-	const isMeetTab = meetingId !== null;
 
 	let currentData: PopupData = {
 		state,
 		settings,
-		isMeetTab,
+		isMeetTab: meetingId !== null,
 		meetingId,
 		activeTabId: activeTab?.id,
 	};
@@ -864,13 +887,17 @@ async function init(): Promise<void> {
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== "local") return;
 		if (changes.capExtState?.newValue) {
-			const newState = changes.capExtState.newValue as ExtensionState;
-			currentData = { ...currentData, state: newState };
+			currentData = {
+				...currentData,
+				state: changes.capExtState.newValue as ExtensionState,
+			};
 			render(currentData);
 		}
 		if (changes.capExtSettings?.newValue) {
-			const newSettings = changes.capExtSettings.newValue as ExtensionSettings;
-			currentData = { ...currentData, settings: newSettings };
+			currentData = {
+				...currentData,
+				settings: changes.capExtSettings.newValue as ExtensionSettings,
+			};
 			render(currentData);
 		}
 	});
