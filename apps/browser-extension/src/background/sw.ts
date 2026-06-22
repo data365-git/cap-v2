@@ -8,87 +8,32 @@ import {
 	retryPendingUploads,
 } from "./upload";
 
-// ── Capture-page relay ────────────────────────────────────────────────────
+// ── Capture tab ───────────────────────────────────────────────────────────
 //
-// chrome.desktopCapture.chooseDesktopMedia CANNOT be called from a service
-// worker without a targetTab (Chrome MV3 throws "A target tab is required").
-// If a targetTab IS supplied, the resulting streamId is bound to that tab and
-// cannot be used in the offscreen document ("Error starting tab capture").
-//
-// Solution: open a dedicated extension page (capture.html).  Extension pages
-// are NOT service workers, so chooseDesktopMedia works there without targetTab,
-// and the returned streamId is valid for any extension context including the
-// offscreen document.
+// capture.html runs the full pipeline: chooseDesktopMedia → getUserMedia →
+// MediaRecorder, all in the same extension-page context so the streamId
+// never crosses contexts ("Error starting tab capture" is eliminated).
+// The tab sends RECORDER_STARTED/CHUNK/STOPPED to SW just like the old
+// offscreen document did.
 
-interface PendingCapture {
-	resolve: (streamId: string) => void;
-	reject: (err: Error) => void;
-	tabId: number | null;
-}
+let captureTabId: number | null = null;
 
-let pendingCapture: PendingCapture | null = null;
-
-function openCapturePage(): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		if (pendingCapture) {
-			pendingCapture.reject(new Error("superseded"));
-			pendingCapture = null;
-		}
-		pendingCapture = { resolve, reject, tabId: null };
-		chrome.tabs.create(
-			{ url: chrome.runtime.getURL("capture.html"), active: true },
-			(tab) => {
-				if (chrome.runtime.lastError) {
-					if (pendingCapture) {
-						pendingCapture.reject(
-							new Error(
-								chrome.runtime.lastError.message ?? "could not open capture tab",
-							),
-						);
-						pendingCapture = null;
-					}
-					return;
-				}
-				if (pendingCapture) {
-					pendingCapture.tabId = tab?.id ?? null;
-				}
-			},
-		);
-	});
-}
-
-// If the user closes the capture tab before picking, reject the pending promise.
+// Detect capture tab closed before picking (arming → idle).
 chrome.tabs.onRemoved.addListener((removedTabId: number) => {
-	if (pendingCapture && pendingCapture.tabId === removedTabId) {
-		pendingCapture.reject(new Error("cancelled"));
-		pendingCapture = null;
-	}
+	if (captureTabId !== removedTabId) return;
+	captureTabId = null;
+	getState().then(async (st) => {
+		if (st.kind === "arming") {
+			await setState({ kind: "idle" });
+			updateBadge({ kind: "idle" });
+		}
+	});
 });
 
-// ── Offscreen document ─────────────────────────────────────────────────────
+// ── Broadcast to capture tab ───────────────────────────────────────────────
+// capture.ts listens via chrome.runtime.onMessage; this is a plain broadcast.
 
-async function ensureOffscreenDocument(): Promise<void> {
-	const existingContexts = await chrome.runtime.getContexts({
-		contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-	});
-	if (existingContexts.length > 0) return;
-	await chrome.offscreen.createDocument({
-		url: "offscreen.html",
-		reasons: [chrome.offscreen.Reason.USER_MEDIA],
-		justification: "Recording screen/tab media",
-	});
-}
-
-async function closeOffscreenDocument(): Promise<void> {
-	const existingContexts = await chrome.runtime.getContexts({
-		contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-	});
-	if (existingContexts.length > 0) {
-		await chrome.offscreen.closeDocument();
-	}
-}
-
-function sendToOffscreen(message: Record<string, unknown>): Promise<unknown> {
+function sendToCapturePage(message: Record<string, unknown>): Promise<unknown> {
 	return new Promise((resolve, reject) => {
 		chrome.runtime.sendMessage(message, (response: unknown) => {
 			if (chrome.runtime.lastError) {
@@ -169,45 +114,31 @@ function _getBoolean(
 // ── Shared capture helper (Record Screen + Record Meeting) ────────────────
 
 async function launchMeetCapture(
-	meetingId: string | undefined,
-	tabId: number | undefined,
-	settings: ExtensionSettings,
+	_meetingId: string | undefined,
+	_tabId: number | undefined,
+	_settings: ExtensionSettings,
 ): Promise<void> {
-	// Create the offscreen document BEFORE showing the picker so the streamId
-	// is never stale by the time getUserMedia runs inside the offscreen doc.
-	await ensureOffscreenDocument();
+	// capture.ts handles picker + getUserMedia + MediaRecorder in one context.
+	// It reads mic settings from storage directly, so we only need to open it.
+	const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+		chrome.tabs.create(
+			{ url: chrome.runtime.getURL("capture.html"), active: true },
+			(t) => resolve(chrome.runtime.lastError ? null : (t ?? null)),
+		);
+	});
 
-	let streamId: string;
-	try {
-		streamId = await openCapturePage();
-	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
-		// Close the offscreen doc we just pre-created.
-		await closeOffscreenDocument().catch(() => {});
-		if (reason === "cancelled" || reason === "superseded") {
-			await setState({ kind: "idle" });
-			updateBadge({ kind: "idle" });
-		} else {
-			const errState: ExtensionState = {
-				kind: "error",
-				reason: `Couldn't start screen capture: ${reason}`,
-				recoverable: true,
-			};
-			await setState(errState);
-			updateBadge(errState);
-		}
+	if (!tab?.id) {
+		const errState: ExtensionState = {
+			kind: "error",
+			reason: "Couldn't open capture page",
+			recoverable: true,
+		};
+		await setState(errState);
+		updateBadge(errState);
 		return;
 	}
 
-	await sendToOffscreen({
-		type: "START_CAPTURE",
-		mode: "desktop",
-		streamId,
-		meetingId,
-		tabId,
-		micEnabled: settings.micEnabled,
-		...(settings.micEnabled ? { micDeviceId: settings.micDeviceId } : {}),
-	});
+	captureTabId = tab.id;
 }
 
 async function handleMessage(
@@ -249,50 +180,40 @@ async function handleMessage(
 
 		// ── Popup: stop ───────────────────────────────────────────────────
 		case "STOP": {
-			await sendToOffscreen({ type: "STOP_CAPTURE" });
+			await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
 			return { ok: true };
 		}
 
 		// ── Popup: pause ──────────────────────────────────────────────────
 		case "PAUSE": {
-			await sendToOffscreen({ type: "PAUSE_CAPTURE" });
+			await sendToCapturePage({ type: "PAUSE_CAPTURE" }).catch(() => {});
 			return { ok: true };
 		}
 
 		// ── Popup: resume ─────────────────────────────────────────────────
 		case "RESUME": {
-			await sendToOffscreen({ type: "RESUME_CAPTURE" });
+			await sendToCapturePage({ type: "RESUME_CAPTURE" }).catch(() => {});
 			return { ok: true };
 		}
 
-		// ── Capture page: relay streamId from capture.html back to SW ────
-		case "CAPTURE_RESULT": {
-			const streamId = getString(msg, "streamId");
-			const captureError = getString(msg, "error");
-			if (pendingCapture) {
-				if (streamId) {
-					pendingCapture.resolve(streamId);
-				} else {
-					pendingCapture.reject(
-						new Error(captureError ?? "cancelled"),
-					);
-				}
-				pendingCapture = null;
+		// ── Capture page: user cancelled picker ───────────────────────────
+		case "CAPTURE_CANCELLED": {
+			captureTabId = null;
+			const cancelState = await getState();
+			if (cancelState.kind === "arming") {
+				await setState({ kind: "idle" });
+				updateBadge({ kind: "idle" });
 			}
 			return { ok: true };
 		}
 
 		// ── Popup: cancel ─────────────────────────────────────────────────
 		case "CANCEL": {
-			if (pendingCapture) {
-				if (pendingCapture.tabId !== null) {
-					chrome.tabs.remove(pendingCapture.tabId);
-				}
-				pendingCapture.reject(new Error("cancelled"));
-				pendingCapture = null;
+			if (captureTabId !== null) {
+				chrome.tabs.remove(captureTabId).catch(() => {});
+				captureTabId = null;
 			}
-			await sendToOffscreen({ type: "STOP_CAPTURE" }).catch(() => {});
-			await closeOffscreenDocument();
+			await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
 			return { ok: true };
@@ -324,7 +245,7 @@ async function handleMessage(
 				state.mode === "meeting" &&
 				state.meetingId === meetingId
 			) {
-				await sendToOffscreen({ type: "STOP_CAPTURE" });
+				await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
 			}
 			return { ok: true };
 		}
@@ -380,7 +301,6 @@ async function handleMessage(
 				};
 				await setState(errState);
 				updateBadge(errState);
-				await closeOffscreenDocument().catch(() => {});
 				return { ok: false, error: "initializeUpload failed" };
 			}
 
@@ -416,34 +336,31 @@ async function handleMessage(
 			return { ok: true };
 		}
 
-		// ── Offscreen: recorder stopped ───────────────────────────────────
+		// ── Capture page: recorder stopped ───────────────────────────────
 		case "RECORDER_STOPPED": {
+			captureTabId = null;
 			const state = await getState();
-			const videoId = state.kind === "recording" ? state.videoId : "stub";
-			const uploadId = state.kind === "recording" ? state.uploadId : "stub";
-			const parts = state.kind === "recording" ? state.parts : [];
-			const totalBytes = state.kind === "recording" ? state.totalBytes : 0;
-			const uploadedBytes =
-				state.kind === "recording" ? state.uploadedBytes : 0;
+			// If CANCEL already moved us to idle, do not attempt to upload.
+			if (state.kind !== "recording") return { ok: true };
 
 			const nextState: ExtensionState = {
 				kind: "uploading",
-				videoId,
-				uploadId,
-				parts,
-				totalBytes,
-				uploadedBytes,
+				videoId: state.videoId,
+				uploadId: state.uploadId,
+				parts: state.parts,
+				totalBytes: state.totalBytes,
+				uploadedBytes: state.uploadedBytes,
 			};
 			await setState(nextState);
 			stopKeepAlive();
 			updateBadge(nextState);
-			await closeOffscreenDocument();
 			await finalizeUpload();
 			return { ok: true };
 		}
 
-		// ── Offscreen: recorder error ─────────────────────────────────────
+		// ── Capture page: recorder error ─────────────────────────────────
 		case "RECORDER_ERROR": {
+			captureTabId = null;
 			const error = getString(msg, "error") ?? "Unknown recorder error";
 			const state = await getState();
 			const previousVideoId =
@@ -458,7 +375,6 @@ async function handleMessage(
 			await setState(nextState);
 			stopKeepAlive();
 			updateBadge(nextState);
-			await closeOffscreenDocument().catch(() => {});
 
 			chrome.notifications.create("recorder-error", {
 				type: "basic",
