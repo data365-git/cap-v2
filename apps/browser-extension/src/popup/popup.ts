@@ -68,10 +68,7 @@ function formatElapsed(ms: number): string {
 	const h = Math.floor(totalSec / 3600);
 	const m = Math.floor((totalSec % 3600) / 60);
 	const s = totalSec % 60;
-	const hh = String(h).padStart(2, "0");
-	const mm = String(m).padStart(2, "0");
-	const ss = String(s).padStart(2, "0");
-	return `${hh}:${mm}:${ss}`;
+	return [h, m, s].map((v) => String(v).padStart(2, "0")).join(":");
 }
 
 function sendMsg(msg: Record<string, unknown>): void {
@@ -99,9 +96,63 @@ function createToggleEl(id: string, checked: boolean): HTMLElement {
 	return label;
 }
 
+function svgIcon(path: string, size = 16): SVGSVGElement {
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("width", String(size));
+	svg.setAttribute("height", String(size));
+	svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+	svg.setAttribute("fill", "none");
+	svg.innerHTML = path;
+	return svg;
+}
+
+function screenIcon(): SVGSVGElement {
+	return svgIcon(
+		`<rect x="1.5" y="2" width="13" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+		<path d="M5.5 13.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+		<path d="M8 11v2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>`,
+	);
+}
+
+function meetIcon(): SVGSVGElement {
+	return svgIcon(
+		`<rect x="1" y="4" width="9" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+		<path d="M10 7l4-2.5v7L10 9V7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>`,
+	);
+}
+
+function micIconSvg(size = 14): SVGSVGElement {
+	return svgIcon(
+		`<rect x="5" y="1" width="4" height="7" rx="2" stroke="currentColor" stroke-width="1.4"/>
+		<path d="M2.5 7a5.5 5.5 0 0 0 9 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+		<path d="M7 12v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
+		size,
+	);
+}
+
+function cameraIconSvg(size = 14): SVGSVGElement {
+	return svgIcon(
+		`<path d="M1.5 5a1 1 0 0 1 1-1H5L6.5 2h1L9 4h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V5z" stroke="currentColor" stroke-width="1.3"/>
+		<circle cx="6.5" cy="7.5" r="1.8" stroke="currentColor" stroke-width="1.3"/>`,
+		size,
+	);
+}
+
+// ── Mic level meter ────────────────────────────────────────────────────────
+
+function buildMicMeter(): { meterEl: HTMLElement; bars: HTMLElement[] } {
+	const meterEl = el("div", { className: "mic-meter" });
+	const bars: HTMLElement[] = [];
+	for (let i = 0; i < 8; i++) {
+		const bar = el("span", { className: "mic-bar" });
+		meterEl.appendChild(bar);
+		bars.push(bar);
+	}
+	return { meterEl, bars };
+}
+
 function startMicMeter(deviceId: string, bars: HTMLElement[]): void {
 	teardownMic();
-
 	const constraints: MediaStreamConstraints = deviceId
 		? { audio: { deviceId: { exact: deviceId } } }
 		: { audio: true };
@@ -113,8 +164,7 @@ function startMicMeter(deviceId: string, bars: HTMLElement[]): void {
 			audioCtx = new AudioContext();
 			analyser = audioCtx.createAnalyser();
 			analyser.fftSize = 256;
-			const source = audioCtx.createMediaStreamSource(stream);
-			source.connect(analyser);
+			audioCtx.createMediaStreamSource(stream).connect(analyser);
 			const data = new Uint8Array(analyser.frequencyBinCount);
 
 			function tick(): void {
@@ -122,8 +172,7 @@ function startMicMeter(deviceId: string, bars: HTMLElement[]): void {
 				analyser.getByteFrequencyData(data);
 				let sum = 0;
 				for (let i = 0; i < data.length; i++) sum += data[i];
-				const avg = sum / data.length;
-				const level = Math.min(1, avg / 80);
+				const level = Math.min(1, sum / data.length / 80);
 				const lit = Math.round(level * bars.length);
 				for (let i = 0; i < bars.length; i++) {
 					bars[i].classList.toggle("mic-bar--active", i < lit);
@@ -138,16 +187,7 @@ function startMicMeter(deviceId: string, bars: HTMLElement[]): void {
 		});
 }
 
-function buildMicMeter(): { meterEl: HTMLElement; bars: HTMLElement[] } {
-	const meterEl = el("div", { className: "mic-meter" });
-	const bars: HTMLElement[] = [];
-	for (let i = 0; i < 7; i++) {
-		const bar = el("span", { className: "mic-bar" });
-		meterEl.appendChild(bar);
-		bars.push(bar);
-	}
-	return { meterEl, bars };
-}
+// ── Device select ──────────────────────────────────────────────────────────
 
 async function checkPermission(name: PermissionName): Promise<PermissionState> {
 	try {
@@ -158,28 +198,25 @@ async function checkPermission(name: PermissionName): Promise<PermissionState> {
 	}
 }
 
+// Populates a device select without calling getUserMedia.
+// Returns "granted" if permission was already granted (devices enumerated),
+// "blocked" otherwise. Never shows a permission dialog — that must happen
+// in the options page (a persistent tab that doesn't close on focus loss).
 async function populateDeviceSelect(
 	select: HTMLSelectElement,
 	kind: "audioinput" | "videoinput",
 	currentDeviceId: string,
-	permissionConstraint: MediaStreamConstraints,
 ): Promise<"granted" | "blocked"> {
 	const permName = (
 		kind === "audioinput" ? "microphone" : "camera"
 	) as PermissionName;
-	let permState = await checkPermission(permName);
+	const permState = await checkPermission(permName);
 
 	if (permState !== "granted") {
-		try {
-			const testStream =
-				await navigator.mediaDevices.getUserMedia(permissionConstraint);
-			for (const t of testStream.getTracks()) t.stop();
-			permState = "granted";
-		} catch {
-			return "blocked";
-		}
+		return "blocked";
 	}
 
+	// Permission already granted — enumerate devices directly, no getUserMedia.
 	const devices = await navigator.mediaDevices.enumerateDevices();
 	const filtered = devices.filter((d) => d.kind === kind);
 
@@ -204,6 +241,8 @@ async function populateDeviceSelect(
 	return "granted";
 }
 
+// ── Idle panel ─────────────────────────────────────────────────────────────
+
 function renderIdlePanel(
 	root: HTMLElement,
 	settings: ExtensionSettings,
@@ -211,27 +250,50 @@ function renderIdlePanel(
 	meetingId: string | null,
 	activeTabId: number | undefined,
 ): void {
-	const logo = document.createElement("img");
-	logo.src = "icons/icon-128.png";
-	logo.width = 28;
-	logo.height = 28;
-	logo.alt = "Cap";
+	// ── Header ──
+	const header = el("div", { className: "hdr" });
+	const logoRow = el("div", { className: "hdr-logo" });
+	const logoDot = el("span", { className: "hdr-dot" });
+	const logoText = el("span", { className: "hdr-text" }, "Cap");
+	logoRow.appendChild(logoDot);
+	logoRow.appendChild(logoText);
 
-	const logoLabel = el(
-		"span",
-		{ className: "panel-logo-label" },
-		"Cap Recorder",
+	const gearBtn = el("button", { className: "hdr-gear" }, "⚙");
+	gearBtn.title = "Settings";
+	gearBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
+
+	header.appendChild(logoRow);
+	header.appendChild(gearBtn);
+	root.appendChild(header);
+
+	// ── Actions ──
+	const actions = el("div", { className: "actions" });
+
+	// Primary: Record Screen
+	const screenBtn = el("button", { className: "action-btn action-btn--primary" });
+	screenBtn.appendChild(screenIcon());
+	screenBtn.appendChild(el("span", {}, "Record Screen"));
+	screenBtn.addEventListener("click", () => {
+		sendMsg({ type: "START_INSTRUCTION" });
+		window.close();
+	});
+	actions.appendChild(screenBtn);
+
+	// Secondary: Record Meeting
+	const meetBtn = el("button", {
+		className: `action-btn action-btn--secondary${isMeetTab && meetingId ? "" : " action-btn--off"}`,
+	});
+	meetBtn.appendChild(meetIcon());
+	meetBtn.appendChild(
+		el(
+			"span",
+			{},
+			isMeetTab && meetingId
+				? `Record Meeting · ${meetingId}`
+				: "Record Meeting",
+		),
 	);
-	const logoRow = el("div", { className: "panel-logo-row" }, logo, logoLabel);
-	root.appendChild(logoRow);
-
-	const actionsSection = el("div", { className: "panel-section" });
-
-	const meetBtn = document.createElement("button");
-	meetBtn.className = "btn btn-primary";
-
 	if (isMeetTab && meetingId) {
-		meetBtn.textContent = `Record Meeting · ${meetingId}`;
 		meetBtn.addEventListener("click", () => {
 			const msg: Record<string, unknown> = { type: "START_MEET", meetingId };
 			if (activeTabId !== undefined) msg.tabId = activeTabId;
@@ -239,77 +301,70 @@ function renderIdlePanel(
 			window.close();
 		});
 	} else {
-		meetBtn.textContent = "Record Meeting";
 		meetBtn.disabled = true;
-		meetBtn.classList.add("btn--disabled");
 	}
-
-	const instrBtn = el(
-		"button",
-		{ className: "btn btn-secondary" },
-		"Record Instruction",
-	);
-	instrBtn.addEventListener("click", () => {
-		sendMsg({ type: "START_INSTRUCTION" });
-		window.close();
-	});
-
-	actionsSection.appendChild(meetBtn);
-	actionsSection.appendChild(instrBtn);
+	actions.appendChild(meetBtn);
 
 	if (!isMeetTab || !meetingId) {
 		const hint = el(
 			"p",
-			{ className: "panel-hint" },
-			"Join a Google Meet to record a meeting",
+			{ className: "meet-hint" },
+			"Open a Google Meet to record a meeting",
 		);
-		actionsSection.appendChild(hint);
+		actions.appendChild(hint);
 	}
 
-	root.appendChild(actionsSection);
-	root.appendChild(el("div", { className: "panel-divider" }));
+	root.appendChild(actions);
+	root.appendChild(el("hr", { className: "popup-divider" }));
 
-	const devicesSection = el("div", { className: "panel-section" });
-	devicesSection.appendChild(
-		el("p", { className: "panel-section-label" }, "Devices"),
-	);
+	// ── Devices ──
+	const devicesSection = el("div", { className: "devices" });
 
+	// ── Mic ──
 	let micEnabled = settings.micEnabled !== false;
 	let micDeviceId = settings.micDeviceId ?? "";
 
 	const { meterEl, bars } = buildMicMeter();
 
-	const micSelect = document.createElement("select");
-	micSelect.className = "device-select";
-	micSelect.disabled = !micEnabled;
-
-	const micToggleWrap = createToggleEl("mic-toggle", micEnabled);
+	const micToggleId = "mic-toggle-" + Math.random().toString(36).slice(2);
+	const micToggleWrap = createToggleEl(micToggleId, micEnabled);
 	const micToggleInput = micToggleWrap.querySelector(
 		"input",
 	) as HTMLInputElement;
 
-	const micEnableBtn = el(
-		"button",
-		{ className: "btn btn-secondary perm-btn" },
-		"Enable microphone",
-	);
-	micEnableBtn.style.display = "none";
-	micEnableBtn.addEventListener("click", () => {
-		chrome.runtime.openOptionsPage();
-	});
+	const micSelect = document.createElement("select");
+	micSelect.className = "device-select";
+	micSelect.disabled = !micEnabled;
 
-	const micRow = el(
-		"div",
-		{ className: "device-row" },
-		el("span", { className: "device-row-label" }, "Mic"),
-		micToggleWrap,
-		micSelect,
-		micEnableBtn,
-		meterEl,
-	);
+	const micGrantBtn = el("button", { className: "grant-btn" }, "Grant access");
+	micGrantBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
+
+	const micRow = el("div", { className: "device-row" });
+	const micLabelRow = el("div", { className: "device-label-row" });
+	micLabelRow.appendChild(micIconSvg());
+	micLabelRow.appendChild(el("span", { className: "device-label" }, "Microphone"));
+	micLabelRow.appendChild(micToggleWrap);
+
+	const micControls = el("div", { className: "device-controls" });
+	micControls.appendChild(micSelect);
+	micControls.appendChild(micGrantBtn);
+	micControls.appendChild(meterEl);
+
+	micRow.appendChild(micLabelRow);
+	micRow.appendChild(micControls);
 	devicesSection.appendChild(micRow);
 
-	function updateMicState(): void {
+	function updateMicUI(granted: boolean): void {
+		if (!granted) {
+			micSelect.style.display = "none";
+			meterEl.style.display = "none";
+			micToggleWrap.style.display = "none";
+			micGrantBtn.style.display = "";
+			return;
+		}
+		micGrantBtn.style.display = "none";
+		micSelect.style.display = "";
+		meterEl.style.display = "";
 		micSelect.disabled = !micEnabled;
 		if (micEnabled) {
 			meterEl.classList.remove("mic-meter--off");
@@ -324,7 +379,7 @@ function renderIdlePanel(
 	micToggleInput.addEventListener("change", () => {
 		micEnabled = micToggleInput.checked;
 		sendMsg({ type: "SAVE_SETTINGS", settings: { micEnabled } });
-		updateMicState();
+		updateMicUI(true);
 	});
 
 	micSelect.addEventListener("change", () => {
@@ -333,110 +388,96 @@ function renderIdlePanel(
 		if (micEnabled) startMicMeter(micDeviceId, bars);
 	});
 
-	populateDeviceSelect(micSelect, "audioinput", micDeviceId, { audio: true })
-		.then((result) => {
-			if (result === "blocked") {
-				micSelect.style.display = "none";
-				meterEl.style.display = "none";
-				micToggleWrap.style.display = "none";
-				micEnableBtn.style.display = "";
-			} else {
-				updateMicState();
-			}
-		})
-		.catch(() => {
-			meterEl.classList.add("mic-meter--off");
-		});
+	populateDeviceSelect(micSelect, "audioinput", micDeviceId)
+		.then((result) => updateMicUI(result === "granted"))
+		.catch(() => updateMicUI(false));
 
+	// ── Camera ──
 	let cameraEnabled = settings.cameraOverlay;
 	let cameraDeviceId = settings.cameraDeviceId ?? "";
 
-	const cameraSelect = document.createElement("select");
-	cameraSelect.className = "device-select";
-	cameraSelect.disabled = !cameraEnabled;
-
-	const cameraToggleWrap = createToggleEl("camera-toggle", cameraEnabled);
-	const cameraToggleInput = cameraToggleWrap.querySelector(
+	const camToggleId = "cam-toggle-" + Math.random().toString(36).slice(2);
+	const camToggleWrap = createToggleEl(camToggleId, cameraEnabled);
+	const camToggleInput = camToggleWrap.querySelector(
 		"input",
 	) as HTMLInputElement;
 
-	const cameraEnableBtn = el(
-		"button",
-		{ className: "btn btn-secondary perm-btn" },
-		"Enable camera",
-	);
-	cameraEnableBtn.style.display = "none";
-	cameraEnableBtn.addEventListener("click", () => {
-		chrome.runtime.openOptionsPage();
-	});
+	const camSelect = document.createElement("select");
+	camSelect.className = "device-select";
+	camSelect.disabled = !cameraEnabled;
 
-	const cameraRow = el(
-		"div",
-		{ className: "device-row" },
-		el("span", { className: "device-row-label" }, "Camera"),
-		cameraToggleWrap,
-		cameraSelect,
-		cameraEnableBtn,
-	);
-	devicesSection.appendChild(cameraRow);
+	const camGrantBtn = el("button", { className: "grant-btn" }, "Grant access");
+	camGrantBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-	cameraToggleInput.addEventListener("change", () => {
-		cameraEnabled = cameraToggleInput.checked;
-		cameraSelect.disabled = !cameraEnabled;
+	const camRow = el("div", { className: "device-row" });
+	const camLabelRow = el("div", { className: "device-label-row" });
+	camLabelRow.appendChild(cameraIconSvg());
+	camLabelRow.appendChild(el("span", { className: "device-label" }, "Camera"));
+	camLabelRow.appendChild(camToggleWrap);
+
+	const camControls = el("div", { className: "device-controls" });
+	camControls.appendChild(camSelect);
+	camControls.appendChild(camGrantBtn);
+
+	camRow.appendChild(camLabelRow);
+	camRow.appendChild(camControls);
+	devicesSection.appendChild(camRow);
+
+	function updateCamUI(granted: boolean): void {
+		if (!granted) {
+			camSelect.style.display = "none";
+			camToggleWrap.style.display = "none";
+			camGrantBtn.style.display = "";
+			return;
+		}
+		camGrantBtn.style.display = "none";
+		camSelect.style.display = "";
+		camSelect.disabled = !cameraEnabled;
+	}
+
+	camToggleInput.addEventListener("change", () => {
+		cameraEnabled = camToggleInput.checked;
+		camSelect.disabled = !cameraEnabled;
 		sendMsg({
 			type: "SAVE_SETTINGS",
 			settings: { cameraOverlay: cameraEnabled },
 		});
 	});
 
-	cameraSelect.addEventListener("change", () => {
-		cameraDeviceId = cameraSelect.value;
+	camSelect.addEventListener("change", () => {
+		cameraDeviceId = camSelect.value;
 		sendMsg({ type: "SAVE_SETTINGS", settings: { cameraDeviceId } });
 	});
 
-	populateDeviceSelect(cameraSelect, "videoinput", cameraDeviceId, {
-		video: true,
-	})
-		.then((result) => {
-			if (result === "blocked") {
-				cameraSelect.style.display = "none";
-				cameraToggleWrap.style.display = "none";
-				cameraEnableBtn.style.display = "";
-			}
-		})
-		.catch(() => {});
+	populateDeviceSelect(camSelect, "videoinput", cameraDeviceId)
+		.then((result) => updateCamUI(result === "granted"))
+		.catch(() => updateCamUI(false));
 
 	root.appendChild(devicesSection);
-	root.appendChild(el("div", { className: "panel-divider" }));
-
-	const footer = el("div", { className: "panel-footer" });
-	const settingsLink = el("button", { className: "link-btn" }, "Settings");
-	settingsLink.addEventListener("click", () => {
-		chrome.runtime.openOptionsPage();
-	});
-	footer.appendChild(settingsLink);
-	root.appendChild(footer);
 }
+
+// ── Not signed-in ──────────────────────────────────────────────────────────
 
 function renderNotSignedIn(
 	root: HTMLElement,
 	settings: ExtensionSettings,
 ): void {
-	const logoWrap = el(
-		"div",
-		{ className: "logo-wrap" },
-		el("img", {
-			src: "icons/icon-128.png",
-			width: 48,
-			height: 48,
-			alt: "Cap",
-		} as unknown as Partial<HTMLImageElement>),
-		el("h1", {}, "Cap Recorder"),
+	const wrap = el("div", { className: "auth-wrap" });
+
+	const logoMark = el("div", { className: "auth-logo" });
+	const dot = el("span", { className: "auth-dot" });
+	logoMark.appendChild(dot);
+
+	const heading = el("h1", { className: "auth-heading" }, "Cap Recorder");
+	const sub = el(
+		"p",
+		{ className: "auth-sub" },
+		"Sign in to start recording",
 	);
 
 	const signInBtn = el(
 		"button",
-		{ className: "btn btn-primary" },
+		{ className: "action-btn action-btn--primary" },
 		"Sign in to Cap",
 	);
 	signInBtn.addEventListener("click", () => {
@@ -445,9 +486,14 @@ function renderNotSignedIn(
 		window.close();
 	});
 
-	root.appendChild(logoWrap);
-	root.appendChild(signInBtn);
+	wrap.appendChild(logoMark);
+	wrap.appendChild(heading);
+	wrap.appendChild(sub);
+	wrap.appendChild(signInBtn);
+	root.appendChild(wrap);
 }
+
+// ── Recording ──────────────────────────────────────────────────────────────
 
 function renderRecording(
 	root: HTMLElement,
@@ -455,46 +501,52 @@ function renderRecording(
 ): void {
 	stopTimer();
 
-	const header = el(
-		"div",
-		{ className: "recording-header" },
-		el("span", { className: "rec-dot" }),
-		el("span", { className: "rec-label" }, "Recording"),
-	);
+	const header = el("div", { className: "rec-header" });
+	const dot = el("span", { className: "rec-dot" });
+	const label = el("span", { className: "rec-label" }, "Recording");
+	header.appendChild(dot);
+	header.appendChild(label);
 
 	const timerEl = el(
 		"div",
-		{ className: "timer" },
+		{ className: "rec-timer" },
 		formatElapsed(Date.now() - state.startedAt),
 	);
 
 	const modeEl = el(
 		"p",
-		{ className: "mode-label" },
-		state.mode === "meeting" ? "Meeting" : "Instruction",
+		{ className: "rec-mode" },
+		state.mode === "meeting" ? "Meeting" : "Screen",
 	);
 
-	const pauseLabel = state.paused ? "Resume" : "Pause";
-	const pauseBtn = el("button", { className: "btn btn-secondary" }, pauseLabel);
+	const pauseBtn = el(
+		"button",
+		{ className: "action-btn action-btn--secondary" },
+		state.paused ? "Resume" : "Pause",
+	);
 	pauseBtn.addEventListener("click", () => {
 		pauseBtn.disabled = true;
-		pauseBtn.textContent = state.paused ? "Resuming..." : "Pausing...";
 		sendMsg({ type: state.paused ? "RESUME" : "PAUSE" });
 		setTimeout(() => {
 			pauseBtn.disabled = false;
-			pauseBtn.textContent = state.paused ? "Resume" : "Pause";
 		}, 200);
 	});
 
-	const stopBtn = el("button", { className: "btn btn-danger" }, "Stop");
+	const stopBtn = el(
+		"button",
+		{ className: "action-btn action-btn--danger" },
+		"Stop",
+	);
 	stopBtn.addEventListener("click", () => {
 		stopBtn.disabled = true;
-		stopBtn.textContent = "Finishing...";
+		stopBtn.textContent = "Finishing…";
 		pauseBtn.disabled = true;
 		sendMsg({ type: "STOP" });
 	});
 
-	const btnRow = el("div", { className: "btn-row" }, pauseBtn, stopBtn);
+	const btnRow = el("div", { className: "btn-row" });
+	btnRow.appendChild(pauseBtn);
+	btnRow.appendChild(stopBtn);
 
 	root.appendChild(header);
 	root.appendChild(timerEl);
@@ -507,6 +559,8 @@ function renderRecording(
 	}, 1000);
 }
 
+// ── Uploading ──────────────────────────────────────────────────────────────
+
 function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -517,38 +571,34 @@ function renderUploading(
 	root: HTMLElement,
 	state: Extract<ExtensionState, { kind: "uploading" }>,
 ): void {
-	const wrap = el("div", { className: "uploading-wrap" });
-
-	const title = el("p", { className: "uploading-title" }, "Uploading...");
-	const spinner = el("div", { className: "spinner" });
-
+	const wrap = el("div", { className: "status-wrap" });
 	const pct =
 		state.totalBytes > 0
 			? Math.round((state.uploadedBytes / state.totalBytes) * 100)
 			: 0;
-	const progressText = `${formatBytes(state.uploadedBytes)} uploaded (${pct}%)`;
-	const partsEl = el("p", { className: "parts-count" }, progressText);
-
-	const cancelLink = el("button", { className: "link-btn" }, "Cancel upload");
-	cancelLink.addEventListener("click", () => {
-		sendMsg({ type: "CANCEL" });
-	});
-
-	wrap.appendChild(title);
-	wrap.appendChild(spinner);
-	wrap.appendChild(partsEl);
-	wrap.appendChild(cancelLink);
+	wrap.appendChild(el("div", { className: "spinner" }));
+	wrap.appendChild(el("p", { className: "status-title" }, "Uploading…"));
+	wrap.appendChild(
+		el(
+			"p",
+			{ className: "status-sub" },
+			`${formatBytes(state.uploadedBytes)} · ${pct}%`,
+		),
+	);
+	const cancelBtn = el("button", { className: "link-btn" }, "Cancel");
+	cancelBtn.addEventListener("click", () => sendMsg({ type: "CANCEL" }));
+	wrap.appendChild(cancelBtn);
 	root.appendChild(wrap);
 }
 
 function renderFinishing(root: HTMLElement): void {
-	const wrap = el("div", { className: "uploading-wrap" });
-	const title = el("p", { className: "uploading-title" }, "Finishing up...");
-	const spinner = el("div", { className: "spinner" });
-	wrap.appendChild(title);
-	wrap.appendChild(spinner);
+	const wrap = el("div", { className: "status-wrap" });
+	wrap.appendChild(el("div", { className: "spinner" }));
+	wrap.appendChild(el("p", { className: "status-title" }, "Finishing up…"));
 	root.appendChild(wrap);
 }
+
+// ── Complete ───────────────────────────────────────────────────────────────
 
 function renderComplete(
 	root: HTMLElement,
@@ -557,80 +607,114 @@ function renderComplete(
 	const wrap = el("div", { className: "complete-wrap" });
 
 	const check = el("div", { className: "complete-icon" }, "✓");
-	const title = el("p", { className: "complete-title" }, "Recording saved!");
+	const title = el("p", { className: "status-title" }, "Recording saved!");
+	const url = el("p", { className: "share-url" }, state.shareUrl);
 
-	const linkEl = el("p", { className: "share-url" }, state.shareUrl);
-
-	const btnRow = el("div", { className: "btn-row" });
-
-	const copyBtn = el("button", { className: "btn btn-primary" }, "Copy link");
+	const copyBtn = el(
+		"button",
+		{ className: "action-btn action-btn--primary" },
+		"Copy link",
+	);
 	copyBtn.addEventListener("click", () => {
 		navigator.clipboard.writeText(state.shareUrl).then(() => {
 			copyBtn.textContent = "Copied!";
-			setTimeout(() => {
-				copyBtn.textContent = "Copy link";
-			}, 2000);
+			setTimeout(() => (copyBtn.textContent = "Copy link"), 2000);
 		});
 	});
 
-	const openBtn = el("button", { className: "btn btn-secondary" }, "Open");
-	openBtn.addEventListener("click", () => {
-		chrome.tabs.create({ url: state.shareUrl });
-	});
+	const openBtn = el(
+		"button",
+		{ className: "action-btn action-btn--secondary" },
+		"Open",
+	);
+	openBtn.addEventListener("click", () =>
+		chrome.tabs.create({ url: state.shareUrl }),
+	);
 
 	const doneBtn = el("button", { className: "link-btn" }, "Done");
-	doneBtn.addEventListener("click", () => {
-		sendMsg({ type: "CANCEL" });
-	});
+	doneBtn.addEventListener("click", () => sendMsg({ type: "CANCEL" }));
 
+	const btnRow = el("div", { className: "btn-row" });
 	btnRow.appendChild(copyBtn);
 	btnRow.appendChild(openBtn);
 
 	wrap.appendChild(check);
 	wrap.appendChild(title);
-	wrap.appendChild(linkEl);
+	wrap.appendChild(url);
 	wrap.appendChild(btnRow);
 	wrap.appendChild(doneBtn);
 	root.appendChild(wrap);
 }
+
+// ── Error ──────────────────────────────────────────────────────────────────
 
 function renderError(
 	root: HTMLElement,
 	state: Extract<ExtensionState, { kind: "error" }>,
 ): void {
 	const wrap = el("div", { className: "error-wrap" });
-
-	const icon = el("div", { className: "error-icon" }, "⚠️");
-	const msg = el("p", { className: "error-msg" }, state.reason);
-
-	wrap.appendChild(icon);
-	wrap.appendChild(msg);
+	wrap.appendChild(el("div", { className: "error-icon" }, "⚠️"));
+	wrap.appendChild(el("p", { className: "error-msg" }, state.reason));
 
 	if (state.recoverable) {
-		const retryBtn = el("button", { className: "btn btn-primary" }, "Retry");
-		retryBtn.addEventListener("click", () => {
-			sendMsg({ type: "RETRY" });
-		});
+		const retryBtn = el(
+			"button",
+			{ className: "action-btn action-btn--primary" },
+			"Retry",
+		);
+		retryBtn.addEventListener("click", () => sendMsg({ type: "RETRY" }));
 		wrap.appendChild(retryBtn);
 	}
 
 	const dismissBtn = el(
 		"button",
-		{ className: "btn btn-secondary" },
+		{ className: "action-btn action-btn--secondary" },
 		"Dismiss",
 	);
-	dismissBtn.addEventListener("click", () => {
-		sendMsg({ type: "CANCEL" });
-	});
+	dismissBtn.addEventListener("click", () => sendMsg({ type: "CANCEL" }));
 	wrap.appendChild(dismissBtn);
-
 	root.appendChild(wrap);
 }
 
 function renderArming(root: HTMLElement): void {
-	const msg = el("p", { className: "footnote" }, "Starting recording...");
-	root.appendChild(msg);
+	const wrap = el("div", { className: "status-wrap" });
+	wrap.appendChild(el("div", { className: "spinner" }));
+	wrap.appendChild(el("p", { className: "status-title" }, "Starting…"));
+	root.appendChild(wrap);
 }
+
+// ── Onboarding ─────────────────────────────────────────────────────────────
+
+function renderOnboarding(root: HTMLElement, onDone: () => void): void {
+	const wrap = el("div", { className: "onboarding" });
+
+	const dot = el("span", { className: "onboarding-dot" });
+	const heading = el("h1", { className: "onboarding-heading" }, "Welcome to Cap");
+	const list = el(
+		"ul",
+		{ className: "onboarding-list" },
+		el("li", {}, "Records screen, window, or tab — your choice"),
+		el("li", {}, "Visible countdown before every recording starts"),
+		el("li", {}, "Google Meet auto-record is off by default"),
+	);
+
+	const gotItBtn = el(
+		"button",
+		{ className: "action-btn action-btn--primary" },
+		"Got it",
+	);
+	gotItBtn.addEventListener("click", () => {
+		chrome.storage.local.set({ capExtFirstRun: false }, onDone);
+	});
+
+	wrap.appendChild(dot);
+	wrap.appendChild(heading);
+	wrap.appendChild(list);
+	wrap.appendChild(gotItBtn);
+	root.appendChild(wrap);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
 
 function render(data: PopupData): void {
 	stopTimer();
@@ -638,10 +722,11 @@ function render(data: PopupData): void {
 
 	const root = document.getElementById("root");
 	if (!root) return;
-
 	root.innerHTML = "";
 
-	const popup = el("div", { className: "popup popup-content popup-content--entering" });
+	const popup = el("div", {
+		className: "popup popup-content popup-content--entering",
+	});
 
 	const { state, settings, isMeetTab, meetingId, activeTabId } = data;
 	const signedIn = settings.apiKey.length > 0;
@@ -672,6 +757,8 @@ function render(data: PopupData): void {
 	});
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
 function getMeetingId(url: string): string | null {
 	try {
 		const parsed = new URL(url);
@@ -696,16 +783,13 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
 	cameraDeviceId: "",
 };
 
-// Read directly from chrome.storage.local — never routes through the service
-// worker, so MV3 SW eviction cannot cause the popup to fall back to an empty
-// apiKey after the user has signed in.
 async function getSettingsFromStorage(): Promise<ExtensionSettings> {
 	const result = await chrome.storage.local.get("capExtSettings");
 	const stored =
 		(result["capExtSettings"] as Partial<ExtensionSettings> | undefined) ?? {};
 	const merged = { ...DEFAULT_SETTINGS, ...stored };
 	console.log(
-		"[popup] getSettingsFromStorage — apiKey set:",
+		"[popup] settings — apiKey set:",
 		merged.apiKey.length > 0,
 		"apiBaseUrl:",
 		merged.apiBaseUrl,
@@ -729,42 +813,7 @@ async function getStateFromSW(): Promise<ExtensionState> {
 	});
 }
 
-function renderOnboarding(root: HTMLElement, onDone: () => void): void {
-	const wrap = el("div", { className: "onboarding" });
-
-	const logo = document.createElement("img");
-	logo.src = "icons/icon-128.png";
-	logo.width = 48;
-	logo.height = 48;
-	logo.alt = "Cap";
-
-	const heading = el("h1", {}, "Welcome to Cap");
-
-	const list = el(
-		"ul",
-		{ className: "onboarding-list" },
-		el("li", {}, "Cap records what you choose — screen, window, or tab"),
-		el(
-			"li",
-			{},
-			"We never start recording without showing a visible countdown",
-		),
-		el("li", {}, "Auto-record on Google Meet is off by default"),
-	);
-
-	const gotItBtn = el("button", { className: "btn btn-primary" }, "Got it");
-	gotItBtn.addEventListener("click", () => {
-		chrome.storage.local.set({ capExtFirstRun: false }, () => {
-			onDone();
-		});
-	});
-
-	wrap.appendChild(logo);
-	wrap.appendChild(heading);
-	wrap.appendChild(list);
-	wrap.appendChild(gotItBtn);
-	root.appendChild(wrap);
-}
+// ── Init ───────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
 	const [tabs, state, settings] = await Promise.all([
