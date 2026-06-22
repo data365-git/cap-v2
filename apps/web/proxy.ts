@@ -52,6 +52,7 @@ export async function proxy(request: NextRequest) {
 				path.startsWith("/login") ||
 				path.startsWith("/signup") ||
 				path.startsWith("/invite") ||
+				path.startsWith("/extension") ||
 				path.startsWith("/self-hosting") ||
 				path.startsWith("/download") ||
 				path.startsWith("/terms") ||
