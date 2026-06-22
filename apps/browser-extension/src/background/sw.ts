@@ -453,7 +453,9 @@ async function handleMessage(
 
 		// ── Options: get all settings ─────────────────────────────────────
 		case "GET_ALL_SETTINGS": {
-			return await getSettings();
+			const s = await getSettings();
+			console.log("[sw] GET_ALL_SETTINGS — apiKey set:", s.apiKey.length > 0);
+			return s;
 		}
 
 		// ── Sign-in-with-Cap token from options page ──────────────────────
@@ -486,10 +488,24 @@ chrome.runtime.onMessageExternal.addListener(
 		if (msg.type === "CAP_EXTENSION_TOKEN") {
 			const token = getString(msg, "token");
 			const apiBaseUrl = getString(msg, "apiBaseUrl");
+			console.log(
+				"[sw:ext] CAP_EXTENSION_TOKEN — apiBaseUrl:",
+				apiBaseUrl,
+				"tokenLen:",
+				token?.length ?? 0,
+			);
 			setSettings({
 				apiKey: token ?? "",
 				...(apiBaseUrl ? { apiBaseUrl } : {}),
-			}).then(() => sendResponse({ ok: true }));
+			})
+				.then(() => {
+					console.log("[sw:ext] CAP_EXTENSION_TOKEN — written to storage ✓");
+					sendResponse({ ok: true });
+				})
+				.catch((err: unknown) => {
+					console.error("[sw:ext] CAP_EXTENSION_TOKEN — write failed:", err);
+					sendResponse({ ok: false });
+				});
 			return true;
 		}
 		sendResponse({ ok: false });

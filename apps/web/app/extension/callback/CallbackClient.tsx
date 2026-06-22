@@ -39,6 +39,12 @@ export function CallbackClient({
 					token: string;
 					email: string;
 				};
+				console.log(
+					"[callback] mint-key 200 — tokenLen:",
+					token.length,
+					"extensionId:",
+					extensionId,
+				);
 
 				if (cancelled) return;
 
@@ -54,6 +60,12 @@ export function CallbackClient({
 							).runtime
 						: undefined;
 
+				console.log(
+					"[callback] chromeRuntime:",
+					!!chromeRuntime,
+					"extensionId:",
+					extensionId,
+				);
 				if (
 					chromeRuntime &&
 					typeof (chromeRuntime as Record<string, unknown>).sendMessage ===
@@ -83,8 +95,13 @@ export function CallbackClient({
 										lastError?: { message: string };
 									};
 									if (rt.lastError) {
+										console.error(
+											"[callback] sendMessage lastError:",
+											rt.lastError.message,
+										);
 										reject(new Error(rt.lastError.message));
 									} else {
+										console.log("[callback] sendMessage resolved OK");
 										resolve();
 									}
 								},

@@ -683,34 +683,34 @@ function getMeetingId(url: string): string | null {
 	}
 }
 
-async function getSettingsFromSW(): Promise<ExtensionSettings> {
-	return new Promise((resolve) => {
-		chrome.runtime.sendMessage(
-			{ type: "GET_ALL_SETTINGS" },
-			(response: unknown) => {
-				if (
-					chrome.runtime.lastError ||
-					!response ||
-					typeof response !== "object"
-				) {
-					resolve({
-						apiBaseUrl: "https://web-production-e6fe4.up.railway.app",
-						apiKey: "",
-						autoRecordOnMeet: false,
-						autoRecordCountdownSec: 5,
-						micDeviceId: "",
-						micEnabled: true,
-						captureMode: "picker",
-						soundEnabled: true,
-						cameraOverlay: false,
-						cameraDeviceId: "",
-					});
-					return;
-				}
-				resolve(response as ExtensionSettings);
-			},
-		);
-	});
+const DEFAULT_SETTINGS: ExtensionSettings = {
+	apiBaseUrl: "https://web-production-e6fe4.up.railway.app",
+	apiKey: "",
+	autoRecordOnMeet: false,
+	autoRecordCountdownSec: 5,
+	micDeviceId: "",
+	micEnabled: true,
+	captureMode: "picker",
+	soundEnabled: true,
+	cameraOverlay: false,
+	cameraDeviceId: "",
+};
+
+// Read directly from chrome.storage.local — never routes through the service
+// worker, so MV3 SW eviction cannot cause the popup to fall back to an empty
+// apiKey after the user has signed in.
+async function getSettingsFromStorage(): Promise<ExtensionSettings> {
+	const result = await chrome.storage.local.get("capExtSettings");
+	const stored =
+		(result["capExtSettings"] as Partial<ExtensionSettings> | undefined) ?? {};
+	const merged = { ...DEFAULT_SETTINGS, ...stored };
+	console.log(
+		"[popup] getSettingsFromStorage — apiKey set:",
+		merged.apiKey.length > 0,
+		"apiBaseUrl:",
+		merged.apiBaseUrl,
+	);
+	return merged;
 }
 
 async function getStateFromSW(): Promise<ExtensionState> {
@@ -770,7 +770,7 @@ async function init(): Promise<void> {
 	const [tabs, state, settings] = await Promise.all([
 		chrome.tabs.query({ active: true, currentWindow: true }),
 		getStateFromSW(),
-		getSettingsFromSW(),
+		getSettingsFromStorage(),
 	]);
 
 	const activeTab = tabs[0];
