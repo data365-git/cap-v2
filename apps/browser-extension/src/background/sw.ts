@@ -18,14 +18,19 @@ import {
 
 let captureTabId: number | null = null;
 
-// Detect capture tab closed before picking (arming → idle).
+// Detect capture tab closed before recording ends.
 chrome.tabs.onRemoved.addListener((removedTabId: number) => {
 	if (captureTabId !== removedTabId) return;
 	captureTabId = null;
 	getState().then(async (st) => {
 		if (st.kind === "arming") {
+			// Closed before picking — go idle.
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
+		} else if (st.kind === "recording") {
+			// Closed mid-recording — finalize with whatever chunks arrived.
+			stopKeepAlive();
+			await finalizeUpload();
 		}
 	});
 });

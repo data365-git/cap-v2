@@ -99,7 +99,7 @@ function copyAssets() {
 		{ dir: "offscreen", files: ["offscreen.html"] },
 		{ dir: "options", files: ["options.html", "options.css"] },
 		{ dir: "grant-permission", files: ["grant-permission.html", "grant-permission.css"] },
-		{ dir: "capture", files: ["capture.html"] },
+		{ dir: "capture", files: ["capture.html", "capture.css"] },
 	];
 	for (const page of pages) {
 		for (const file of page.files) {
