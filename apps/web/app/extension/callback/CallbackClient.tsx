@@ -9,8 +9,12 @@ type Status =
 
 export function CallbackClient({
 	extensionId,
+	email,
+	token,
 }: {
 	extensionId: string | undefined;
+	email: string;
+	token: string;
 }) {
 	const [status, setStatus] = useState<Status>({ kind: "loading" });
 	const [copied, setCopied] = useState(false);
@@ -19,131 +23,102 @@ export function CallbackClient({
 		let cancelled = false;
 
 		async function run() {
-			try {
-				const res = await fetch("/api/extension/mint-key", {
-					method: "POST",
-					credentials: "include",
-				});
-				if (res.status === 401) {
-					const here = window.location.pathname + window.location.search;
-					window.location.href = `/login?next=${encodeURIComponent(here)}`;
+			// Token is minted server-side; we only need to deliver it to the extension.
+			console.log(
+				"[callback] token ready — tokenLen:",
+				token.length,
+				"extensionId:",
+				extensionId,
+			);
+
+			if (cancelled) return;
+
+			const chromeRuntime =
+				typeof globalThis !== "undefined" &&
+				typeof (globalThis as Record<string, unknown>).chrome === "object" &&
+				(globalThis as Record<string, unknown>).chrome !== null
+					? (
+							(globalThis as Record<string, unknown>).chrome as Record<
+								string,
+								unknown
+							>
+						).runtime
+					: undefined;
+
+			console.log(
+				"[callback] chromeRuntime:",
+				!!chromeRuntime,
+				"extensionId:",
+				extensionId,
+			);
+
+			if (
+				chromeRuntime &&
+				typeof (chromeRuntime as Record<string, unknown>).sendMessage ===
+					"function" &&
+				extensionId
+			) {
+				try {
+					await new Promise<void>((resolve, reject) => {
+						(
+							chromeRuntime as {
+								sendMessage: (
+									extensionId: string,
+									message: Record<string, unknown>,
+									callback: (response: unknown) => void,
+								) => void;
+								lastError?: { message: string };
+							}
+						).sendMessage(
+							extensionId,
+							{
+								type: "CAP_EXTENSION_TOKEN",
+								token,
+								apiBaseUrl: window.location.origin,
+							},
+							(_response: unknown) => {
+								const rt = chromeRuntime as {
+									lastError?: { message: string };
+								};
+								if (rt.lastError) {
+									console.error(
+										"[callback] sendMessage lastError:",
+										rt.lastError.message,
+									);
+									reject(new Error(rt.lastError.message));
+								} else {
+									console.log("[callback] sendMessage resolved OK");
+									resolve();
+								}
+							},
+						);
+					});
+					if (!cancelled)
+						setStatus({ kind: "success", email, fallbackToken: token });
+					return;
+				} catch (err) {
+					if (cancelled) return;
+					const raw =
+						err instanceof Error
+							? err.message
+							: "Failed to connect to extension";
+					const errorMsg =
+						raw.includes("not included") || raw.includes("origin")
+							? `This page's origin (${window.location.origin}) is not allowed to message the extension. Copy the key below and paste it into the extension's Options page instead.`
+							: raw;
+					setStatus({ kind: "error", message: errorMsg, token });
 					return;
 				}
-				if (!res.ok) {
-					const body = await res.json().catch(() => ({}));
-					throw new Error(
-						(body as { error?: string }).error ?? "Failed to mint key",
-					);
-				}
-				const { token, email } = (await res.json()) as {
-					token: string;
-					email: string;
-				};
-				console.log(
-					"[callback] mint-key 200 — tokenLen:",
-					token.length,
-					"extensionId:",
-					extensionId,
-				);
-
-				if (cancelled) return;
-
-				const chromeRuntime =
-					typeof globalThis !== "undefined" &&
-					typeof (globalThis as Record<string, unknown>).chrome === "object" &&
-					(globalThis as Record<string, unknown>).chrome !== null
-						? (
-								(globalThis as Record<string, unknown>).chrome as Record<
-									string,
-									unknown
-								>
-							).runtime
-						: undefined;
-
-				console.log(
-					"[callback] chromeRuntime:",
-					!!chromeRuntime,
-					"extensionId:",
-					extensionId,
-				);
-				if (
-					chromeRuntime &&
-					typeof (chromeRuntime as Record<string, unknown>).sendMessage ===
-						"function" &&
-					extensionId
-				) {
-					try {
-						await new Promise<void>((resolve, reject) => {
-							(
-								chromeRuntime as {
-									sendMessage: (
-										extensionId: string,
-										message: Record<string, unknown>,
-										callback: (response: unknown) => void,
-									) => void;
-									lastError?: { message: string };
-								}
-							).sendMessage(
-								extensionId,
-								{
-									type: "CAP_EXTENSION_TOKEN",
-									token,
-									apiBaseUrl: window.location.origin,
-								},
-								(_response: unknown) => {
-									const rt = chromeRuntime as {
-										lastError?: { message: string };
-									};
-									if (rt.lastError) {
-										console.error(
-											"[callback] sendMessage lastError:",
-											rt.lastError.message,
-										);
-										reject(new Error(rt.lastError.message));
-									} else {
-										console.log("[callback] sendMessage resolved OK");
-										resolve();
-									}
-								},
-							);
-						});
-						setStatus({ kind: "success", email, fallbackToken: token });
-						return;
-					} catch (err) {
-						if (cancelled) return;
-						const raw =
-							err instanceof Error
-								? err.message
-								: "Failed to connect to extension";
-						const errorMsg =
-							raw.includes("not included") || raw.includes("origin")
-								? `This page's origin (${window.location.origin}) is not allowed to message the extension. Copy the key below and paste it into the extension's Options page instead.`
-								: raw;
-						setStatus({
-							kind: "error",
-							message: errorMsg,
-							token,
-						});
-						return;
-					}
-				}
-
-				setStatus({ kind: "success", email, fallbackToken: token });
-			} catch (err) {
-				if (cancelled) return;
-				setStatus({
-					kind: "error",
-					message: err instanceof Error ? err.message : "Something went wrong",
-					token: "",
-				});
 			}
+
+			if (!cancelled) setStatus({ kind: "success", email, fallbackToken: token });
 		}
 
 		run();
 		return () => {
 			cancelled = true;
 		};
-	}, [extensionId]);
+	}, [token, extensionId, email]);
 
 	if (status.kind === "loading") {
 		return (
