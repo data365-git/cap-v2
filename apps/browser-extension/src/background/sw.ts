@@ -8,37 +8,62 @@ import {
 	retryPendingUploads,
 } from "./upload";
 
-// ── Pending desktop-capture picker ────────────────────────────────────────
+// ── Capture-page relay ────────────────────────────────────────────────────
+//
+// chrome.desktopCapture.chooseDesktopMedia CANNOT be called from a service
+// worker without a targetTab (Chrome MV3 throws "A target tab is required").
+// If a targetTab IS supplied, the resulting streamId is bound to that tab and
+// cannot be used in the offscreen document ("Error starting tab capture").
+//
+// Solution: open a dedicated extension page (capture.html).  Extension pages
+// are NOT service workers, so chooseDesktopMedia works there without targetTab,
+// and the returned streamId is valid for any extension context including the
+// offscreen document.
 
-let pendingPickerId: number | null = null;
+interface PendingCapture {
+	resolve: (streamId: string) => void;
+	reject: (err: Error) => void;
+	tabId: number | null;
+}
 
-function chooseDesktopMediaAsync(
-	sources: chrome.desktopCapture.DesktopCaptureSourceType[],
-	tab: chrome.tabs.Tab | undefined,
-): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const callback = (streamId: string) => {
-			pendingPickerId = null;
-			if (!streamId) {
-				reject(new Error("cancelled"));
-			} else {
-				resolve(streamId);
-			}
-		};
-		if (tab) {
-			pendingPickerId = chrome.desktopCapture.chooseDesktopMedia(
-				sources,
-				tab,
-				callback,
-			);
-		} else {
-			pendingPickerId = chrome.desktopCapture.chooseDesktopMedia(
-				sources,
-				callback,
-			);
+let pendingCapture: PendingCapture | null = null;
+
+function openCapturePage(): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		if (pendingCapture) {
+			pendingCapture.reject(new Error("superseded"));
+			pendingCapture = null;
 		}
+		pendingCapture = { resolve, reject, tabId: null };
+		chrome.tabs.create(
+			{ url: chrome.runtime.getURL("capture.html"), active: true },
+			(tab) => {
+				if (chrome.runtime.lastError) {
+					if (pendingCapture) {
+						pendingCapture.reject(
+							new Error(
+								chrome.runtime.lastError.message ?? "could not open capture tab",
+							),
+						);
+						pendingCapture = null;
+					}
+					return;
+				}
+				if (pendingCapture) {
+					pendingCapture.tabId = tab?.id ?? null;
+				}
+			},
+		);
 	});
 }
+
+// If the user closes the capture tab before picking, reject the pending promise.
+chrome.tabs.onRemoved.addListener((removedTabId: number) => {
+	if (pendingCapture && pendingCapture.tabId === removedTabId) {
+		pendingCapture.reject(new Error("cancelled"));
+		pendingCapture = null;
+	}
+});
 
 // ── Offscreen document ─────────────────────────────────────────────────────
 
@@ -141,30 +166,39 @@ function _getBoolean(
 	return typeof v === "boolean" ? v : undefined;
 }
 
-// ── Shared meeting-capture helper ─────────────────────────────────────────────
+// ── Shared capture helper (Record Screen + Record Meeting) ────────────────
 
-// Do NOT pass targetTab to chooseDesktopMedia. Chrome docs: a targetTab-
-// restricted streamId "can only be used by frames in the given tab." The
-// offscreen document is a separate extension page, so getUserMedia would throw
-// "Error starting tab capture." Omitting targetTab makes the streamId valid in
-// any extension context including the offscreen document.
 async function launchMeetCapture(
 	meetingId: string | undefined,
 	tabId: number | undefined,
 	settings: ExtensionSettings,
 ): Promise<void> {
+	// Create the offscreen document BEFORE showing the picker so the streamId
+	// is never stale by the time getUserMedia runs inside the offscreen doc.
+	await ensureOffscreenDocument();
+
 	let streamId: string;
 	try {
-		streamId = await chooseDesktopMediaAsync(
-			["screen", "window", "tab"],
-			undefined,
-		);
-	} catch {
-		await setState({ kind: "idle" });
-		updateBadge({ kind: "idle" });
+		streamId = await openCapturePage();
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		// Close the offscreen doc we just pre-created.
+		await closeOffscreenDocument().catch(() => {});
+		if (reason === "cancelled" || reason === "superseded") {
+			await setState({ kind: "idle" });
+			updateBadge({ kind: "idle" });
+		} else {
+			const errState: ExtensionState = {
+				kind: "error",
+				reason: `Couldn't start screen capture: ${reason}`,
+				recoverable: true,
+			};
+			await setState(errState);
+			updateBadge(errState);
+		}
 		return;
 	}
-	await ensureOffscreenDocument();
+
 	await sendToOffscreen({
 		type: "START_CAPTURE",
 		mode: "desktop",
@@ -231,11 +265,31 @@ async function handleMessage(
 			return { ok: true };
 		}
 
+		// ── Capture page: relay streamId from capture.html back to SW ────
+		case "CAPTURE_RESULT": {
+			const streamId = getString(msg, "streamId");
+			const captureError = getString(msg, "error");
+			if (pendingCapture) {
+				if (streamId) {
+					pendingCapture.resolve(streamId);
+				} else {
+					pendingCapture.reject(
+						new Error(captureError ?? "cancelled"),
+					);
+				}
+				pendingCapture = null;
+			}
+			return { ok: true };
+		}
+
 		// ── Popup: cancel ─────────────────────────────────────────────────
 		case "CANCEL": {
-			if (pendingPickerId !== null) {
-				chrome.desktopCapture.cancelChooseDesktopMedia(pendingPickerId);
-				pendingPickerId = null;
+			if (pendingCapture) {
+				if (pendingCapture.tabId !== null) {
+					chrome.tabs.remove(pendingCapture.tabId);
+				}
+				pendingCapture.reject(new Error("cancelled"));
+				pendingCapture = null;
 			}
 			await sendToOffscreen({ type: "STOP_CAPTURE" }).catch(() => {});
 			await closeOffscreenDocument();
