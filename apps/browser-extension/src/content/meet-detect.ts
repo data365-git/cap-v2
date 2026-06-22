@@ -183,11 +183,9 @@ const NUDGE_CSS = `
 
 .cap-nudge-container {
 	position: fixed;
-	bottom: 88px;
-	right: 16px;
-	left: auto;
-	top: auto;
-	transform: none;
+	top: 16px;
+	left: 50%;
+	transform: translateX(-50%);
 	z-index: 2147483647;
 	font-family: system-ui, sans-serif;
 	font-size: 14px;
@@ -197,13 +195,13 @@ const NUDGE_CSS = `
 }
 
 @keyframes cap-nudge-in {
-	from { opacity: 0; transform: translateY(8px) scale(0.97); }
-	to   { opacity: 1; transform: translateY(0) scale(1); }
+	from { opacity: 0; transform: translateY(-12px); }
+	to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes cap-nudge-out {
-	from { opacity: 1; transform: translateY(0) scale(1); }
-	to   { opacity: 0; transform: translateY(6px) scale(0.97); }
+	from { opacity: 1; transform: translateY(0); }
+	to   { opacity: 0; transform: translateY(-8px); }
 }
 
 @keyframes cap-nudge-pulse {
@@ -213,51 +211,32 @@ const NUDGE_CSS = `
 
 .cap-nudge-card {
 	background: #ffffff;
-	border-radius: 14px;
-	box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-	border: 1px solid rgba(0,0,0,.06);
-	padding: 14px 16px;
-	min-width: 320px;
-	max-width: 480px;
-	width: auto;
+	border-radius: 12px;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+	padding: 16px;
+	width: 320px;
 	box-sizing: border-box;
 	animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
 
 .cap-nudge-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
 
-.cap-nudge-header {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-bottom: 10px;
-}
-
-.cap-nudge-icon {
-	width: 28px;
-	height: 28px;
-	border-radius: 6px;
-	flex-shrink: 0;
-	display: block;
-}
-
 .cap-nudge-title {
 	font-weight: 700;
-	font-size: 14px;
-	margin: 0;
+	font-size: 15px;
+	margin: 0 0 4px 0;
 	color: #111;
 }
 
 .cap-nudge-subtitle {
 	font-size: 12px;
 	color: #666;
-	margin: 0;
+	margin: 0 0 14px 0;
 }
 
 .cap-nudge-buttons {
 	display: flex;
-	justify-content: center;
-	gap: 16px;
+	gap: 8px;
 	align-items: center;
 }
 
@@ -265,15 +244,14 @@ const NUDGE_CSS = `
 	background: #675FFF;
 	color: #fff;
 	border: none;
-	border-radius: 10px;
-	padding: 9px 14px;
+	border-radius: 8px;
+	padding: 8px 16px;
 	font-size: 13px;
 	font-weight: 600;
 	cursor: pointer;
 	font-family: inherit;
 	transition: filter .15s, transform .1s, outline .1s;
 	white-space: nowrap;
-	flex-shrink: 0;
 }
 
 .cap-nudge-btn-primary:hover { filter: brightness(1.1); }
@@ -289,21 +267,20 @@ const NUDGE_CSS = `
 }
 
 .cap-nudge-btn-secondary {
-	background: transparent;
-	color: #6b7280;
+	background: #f3f4f6;
+	color: #374151;
 	border: none;
-	border-radius: 6px;
-	padding: 4px 6px;
-	font-size: 12px;
+	border-radius: 8px;
+	padding: 8px 14px;
+	font-size: 13px;
 	font-weight: 500;
 	cursor: pointer;
 	font-family: inherit;
-	transition: color .15s, transform .1s, outline .1s;
+	transition: background .15s, transform .1s, outline .1s;
 	white-space: nowrap;
-	text-decoration: none;
 }
 
-.cap-nudge-btn-secondary:hover { color: #374151; }
+.cap-nudge-btn-secondary:hover { background: #e5e7eb; }
 
 .cap-nudge-btn-secondary:active {
 	transform: scale(0.97);
@@ -318,17 +295,17 @@ const NUDGE_CSS = `
 .cap-nudge-btn-dismiss {
 	background: transparent;
 	border: none;
-	color: #6b7280;
+	color: #9ca3af;
 	font-size: 12px;
 	cursor: pointer;
 	font-family: inherit;
-	padding: 4px 6px;
-	text-decoration: none;
+	padding: 4px 8px;
+	text-decoration: underline;
 	white-space: nowrap;
 	transition: color .15s, opacity .1s;
 }
 
-.cap-nudge-btn-dismiss:hover { color: #374151; }
+.cap-nudge-btn-dismiss:hover { color: #6b7280; }
 
 .cap-nudge-btn-dismiss:active { opacity: 0.5; }
 
@@ -432,11 +409,10 @@ const NUDGE_CSS = `
 
 .cap-nudge-complete-card {
 	background: #ffffff;
-	border-radius: 14px;
-	box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-	border: 1px solid rgba(0,0,0,.06);
+	border-radius: 12px;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.18);
 	padding: 16px;
-	width: 288px;
+	width: 320px;
 	box-sizing: border-box;
 	animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -444,17 +420,16 @@ const NUDGE_CSS = `
 .cap-nudge-complete-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
 
 .cap-nudge-complete-check {
-	font-size: 22px;
-	color: #16a34a;
-	margin: 0;
-	line-height: 1;
+	font-size: 28px;
+	color: #38a169;
+	margin: 0 0 4px 0;
 }
 
 .cap-nudge-share-url {
 	font-size: 11px;
-	color: #6b7280;
+	color: #666;
 	word-break: break-all;
-	margin: 4px 0 12px 0;
+	margin: 4px 0 10px 0;
 }
 
 .cap-nudge-btn-copy {
@@ -501,11 +476,10 @@ const NUDGE_CSS = `
 
 .cap-nudge-error-card {
 	background: #ffffff;
-	border-radius: 14px;
-	box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-	border: 1px solid rgba(0,0,0,.06);
+	border-radius: 12px;
+	box-shadow: 0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.08);
 	padding: 16px;
-	width: 288px;
+	width: 320px;
 	box-sizing: border-box;
 	animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -514,124 +488,8 @@ const NUDGE_CSS = `
 
 .cap-nudge-error-msg {
 	font-size: 12px;
-	color: #dc2626;
-	margin: 4px 0 12px 0;
-}
-
-.cap-nudge-main-row {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-}
-
-.cap-nudge-text {
-	flex: 1;
-	min-width: 0;
-}
-
-.cap-nudge-footer {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	margin-top: 10px;
-	gap: 8px;
-}
-
-.cap-nudge-consent {
-	font-size: 10px;
-	color: #9ca3af;
-	line-height: 1.4;
-	flex: 1;
-}
-
-.cap-nudge-btn-x {
-	flex-shrink: 0;
-	background: transparent;
-	border: none;
-	color: #9ca3af;
-	font-size: 14px;
-	cursor: pointer;
-	font-family: inherit;
-	padding: 2px 5px;
-	line-height: 1;
-	border-radius: 4px;
-	transition: color .15s, opacity .1s;
-}
-
-.cap-nudge-btn-x:hover { color: #374151; }
-.cap-nudge-btn-x:active { opacity: 0.5; }
-
-.cap-nudge-btn-later {
-	flex-shrink: 0;
-	background: transparent;
-	border: none;
-	color: #9ca3af;
-	font-size: 10px;
-	cursor: pointer;
-	font-family: inherit;
-	padding: 0;
-	white-space: nowrap;
-	text-decoration: underline;
-	text-underline-offset: 2px;
-	transition: color .15s;
-}
-
-.cap-nudge-btn-later:hover { color: #6b7280; }
-
-@media (prefers-color-scheme: dark) {
-	.cap-nudge-card,
-	.cap-nudge-complete-card,
-	.cap-nudge-error-card {
-		background: #1f2937;
-		border-color: rgba(255,255,255,.08);
-	}
-
-	.cap-nudge-title { color: #f9fafb; }
-
-	.cap-nudge-subtitle,
-	.cap-nudge-elapsed,
-	.cap-nudge-share-url,
-	.cap-nudge-paused-label,
-	.cap-nudge-progress {
-		color: #9ca3af;
-	}
-
-	.cap-nudge-btn-secondary,
-	.cap-nudge-btn-dismiss {
-		color: #6b7280;
-	}
-
-	.cap-nudge-btn-secondary:hover,
-	.cap-nudge-btn-dismiss:hover {
-		color: #9ca3af;
-	}
-
-	.cap-nudge-btn-cancel {
-		background: #374151;
-		color: #f9fafb;
-	}
-
-	.cap-nudge-btn-cancel:hover { background: #4b5563; }
-
-	.cap-nudge-btn-open {
-		background: #374151;
-		color: #f9fafb;
-	}
-
-	.cap-nudge-btn-open:hover { background: #4b5563; }
-
-	.cap-nudge-pill { background: #111827; }
-
-	.cap-nudge-no-auto { color: #6b7280; }
-	.cap-nudge-no-auto:hover { color: #9ca3af; }
-
-	.cap-nudge-consent { color: #6b7280; }
-
-	.cap-nudge-btn-x { color: #6b7280; }
-	.cap-nudge-btn-x:hover { color: #9ca3af; }
-
-	.cap-nudge-btn-later { color: #6b7280; }
-	.cap-nudge-btn-later:hover { color: #9ca3af; }
+	color: #e53e3e;
+	margin: 4px 0 10px 0;
 }
 `;
 
@@ -716,39 +574,20 @@ function renderDefaultNudge(): void {
 	container.textContent = "";
 	const card = makeEl("div", "cap-nudge-card");
 
-	// ── Main row: icon | text | Record | ✕ ──────────────────────────────
-	const mainRow = makeEl("div", "cap-nudge-main-row");
-
-	const icon = document.createElement("img");
-	icon.src = chrome.runtime.getURL("icons/icon-48.png");
-	icon.className = "cap-nudge-icon";
-	icon.alt = "Cap";
-
-	const textBlock = makeEl("div", "cap-nudge-text");
 	const title = makeEl("div", "cap-nudge-title", "Record this meeting?");
 	const subtitle = makeEl(
 		"div",
 		"cap-nudge-subtitle",
 		"Make sure participants have agreed.",
 	);
-	textBlock.append(title, subtitle);
+	const buttons = makeEl("div", "cap-nudge-buttons");
 
-	const btnRecord = makeBtn("cap-nudge-btn-primary", "Record");
-	const btnX = makeBtn("cap-nudge-btn-x", "✕");
+	const btnRecord = makeBtn("cap-nudge-btn-primary", "Record now");
+	const btnLater = makeBtn("cap-nudge-btn-secondary", "Later");
+	const btnDismiss = makeBtn("cap-nudge-btn-dismiss", "Dismiss");
 
-	mainRow.append(icon, textBlock, btnRecord, btnX);
-
-	// ── Footer: consent text | Later link ────────────────────────────────
-	const footer = makeEl("div", "cap-nudge-footer");
-	const consent = makeEl(
-		"span",
-		"cap-nudge-consent",
-		"By recording you confirm all participants have consented.",
-	);
-	const btnLater = makeBtn("cap-nudge-btn-later", "Later");
-	footer.append(consent, btnLater);
-
-	card.append(mainRow, footer);
+	buttons.append(btnRecord, btnLater, btnDismiss);
+	card.append(title, subtitle, buttons);
 	container.appendChild(card);
 	nudgeState = "default";
 
@@ -761,16 +600,16 @@ function renderDefaultNudge(): void {
 		nudgeState = "hidden";
 	});
 
-	btnX.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
-		dismissed = true;
+	btnLater.addEventListener("click", () => {
+		sendToBackground({ type: "MEET_NUDGE_LATER" });
+		laterUntil = Date.now() + LATER_MS;
 		clearNudge();
 		nudgeState = "hidden";
 	});
 
-	btnLater.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_LATER" });
-		laterUntil = Date.now() + LATER_MS;
+	btnDismiss.addEventListener("click", () => {
+		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
+		dismissed = true;
 		clearNudge();
 		nudgeState = "hidden";
 	});
@@ -912,12 +751,8 @@ function renderCompletePill(shareUrl: string): void {
 
 	const card = makeEl("div", "cap-nudge-complete-card");
 
-	// Header: check icon + title
-	const header = makeEl("div", "cap-nudge-header");
 	const check = makeEl("div", "cap-nudge-complete-check", "✓");
 	const title = makeEl("div", "cap-nudge-title", "Recording saved!");
-	header.append(check, title);
-
 	const urlEl = makeEl("div", "cap-nudge-share-url", shareUrl);
 
 	const buttons = makeEl("div", "cap-nudge-buttons");
@@ -945,7 +780,7 @@ function renderCompletePill(shareUrl: string): void {
 	});
 
 	buttons.append(copyBtn, openBtn);
-	card.append(header, urlEl, buttons, dismissBtn);
+	card.append(check, title, urlEl, buttons, dismissBtn);
 	container.appendChild(card);
 	nudgeState = "complete";
 }

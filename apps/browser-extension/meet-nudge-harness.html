@@ -14,14 +14,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-end;
-    padding-bottom: 88px; /* same offset as bottom:88px in widget */
+    justify-content: flex-start;
+    padding-top: 80px;
     gap: 0;
   }
 
   .harness-row {
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: center;
     gap: 32px;
     width: 100%;
@@ -44,10 +44,8 @@
     padding-left: 2px;
   }
 
-  /* The shadow host just needs to be a plain block so the fixed-inside-shadow
-     container renders relative to its own stacking context. We override
-     .cap-nudge-container to position:relative inside the harness so cards
-     stack naturally in the flow rather than going fixed to the viewport. */
+  /* Override .cap-nudge-container to position:relative so cards render
+     in-flow inside the harness rather than fixed to the viewport. */
   .nudge-host {
     display: block;
   }
@@ -83,8 +81,8 @@
 
 <script>
 // ── Shared CSS (kept in sync with NUDGE_CSS in meet-detect.ts) ───────────────
-// Only addition: override .cap-nudge-container to position:relative so
-// cards render in-flow in the harness rather than fixed to the viewport.
+// Only addition: override .cap-nudge-container to position:relative so cards
+// render in-flow in the harness rather than fixed to the viewport.
 
 const NUDGE_CSS = `
 :host { all: initial; }
@@ -92,10 +90,8 @@ const NUDGE_CSS = `
 .cap-nudge-container {
   /* harness override: render in-flow, not fixed */
   position: relative;
-  bottom: auto;
-  right: auto;
-  left: auto;
   top: auto;
+  left: auto;
   transform: none;
   z-index: 1;
   font-family: system-ui, sans-serif;
@@ -106,13 +102,13 @@ const NUDGE_CSS = `
 }
 
 @keyframes cap-nudge-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes cap-nudge-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(6px) scale(0.97); }
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-8px); }
 }
 
 @keyframes cap-nudge-pulse {
@@ -122,51 +118,32 @@ const NUDGE_CSS = `
 
 .cap-nudge-card {
   background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-  border: 1px solid rgba(0,0,0,.06);
-  padding: 14px 16px;
-  min-width: 320px;
-  max-width: 480px;
-  width: auto;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  padding: 16px;
+  width: 320px;
   box-sizing: border-box;
   animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
 
 .cap-nudge-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
 
-.cap-nudge-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.cap-nudge-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  flex-shrink: 0;
-  display: block;
-}
-
 .cap-nudge-title {
   font-weight: 700;
-  font-size: 14px;
-  margin: 0;
+  font-size: 15px;
+  margin: 0 0 4px 0;
   color: #111;
 }
 
 .cap-nudge-subtitle {
   font-size: 12px;
   color: #666;
-  margin: 0;
+  margin: 0 0 14px 0;
 }
 
 .cap-nudge-buttons {
   display: flex;
-  justify-content: center;
-  gap: 16px;
+  gap: 8px;
   align-items: center;
 }
 
@@ -174,15 +151,14 @@ const NUDGE_CSS = `
   background: #675FFF;
   color: #fff;
   border: none;
-  border-radius: 10px;
-  padding: 9px 14px;
+  border-radius: 8px;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
   transition: filter .15s, transform .1s, outline .1s;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .cap-nudge-btn-primary:hover { filter: brightness(1.1); }
@@ -198,21 +174,20 @@ const NUDGE_CSS = `
 }
 
 .cap-nudge-btn-secondary {
-  background: transparent;
-  color: #6b7280;
+  background: #f3f4f6;
+  color: #374151;
   border: none;
-  border-radius: 6px;
-  padding: 4px 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: color .15s, transform .1s, outline .1s;
+  transition: background .15s, transform .1s, outline .1s;
   white-space: nowrap;
-  text-decoration: none;
 }
 
-.cap-nudge-btn-secondary:hover { color: #374151; }
+.cap-nudge-btn-secondary:hover { background: #e5e7eb; }
 
 .cap-nudge-btn-secondary:active {
   transform: scale(0.97);
@@ -227,17 +202,17 @@ const NUDGE_CSS = `
 .cap-nudge-btn-dismiss {
   background: transparent;
   border: none;
-  color: #6b7280;
+  color: #9ca3af;
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
-  padding: 4px 6px;
-  text-decoration: none;
+  padding: 4px 8px;
+  text-decoration: underline;
   white-space: nowrap;
   transition: color .15s, opacity .1s;
 }
 
-.cap-nudge-btn-dismiss:hover { color: #374151; }
+.cap-nudge-btn-dismiss:hover { color: #6b7280; }
 .cap-nudge-btn-dismiss:active { opacity: 0.5; }
 
 .cap-nudge-btn-cancel {
@@ -246,7 +221,7 @@ const NUDGE_CSS = `
   background: #f3f4f6;
   color: #374151;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 9px 0;
   font-size: 13px;
   font-weight: 600;
@@ -279,7 +254,7 @@ const NUDGE_CSS = `
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
 
@@ -340,11 +315,10 @@ const NUDGE_CSS = `
 
 .cap-nudge-complete-card {
   background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
   padding: 16px;
-  width: 288px;
+  width: 320px;
   box-sizing: border-box;
   animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -352,17 +326,16 @@ const NUDGE_CSS = `
 .cap-nudge-complete-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
 
 .cap-nudge-complete-check {
-  font-size: 22px;
-  color: #16a34a;
-  margin: 0;
-  line-height: 1;
+  font-size: 28px;
+  color: #38a169;
+  margin: 0 0 4px 0;
 }
 
 .cap-nudge-share-url {
   font-size: 11px;
-  color: #6b7280;
+  color: #666;
   word-break: break-all;
-  margin: 4px 0 12px 0;
+  margin: 4px 0 10px 0;
 }
 
 .cap-nudge-btn-copy {
@@ -409,11 +382,10 @@ const NUDGE_CSS = `
 
 .cap-nudge-error-card {
   background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 4px 24px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.18), 0 1px 4px rgba(0,0,0,.08);
   padding: 16px;
-  width: 288px;
+  width: 320px;
   box-sizing: border-box;
   animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
@@ -422,173 +394,31 @@ const NUDGE_CSS = `
 
 .cap-nudge-error-msg {
   font-size: 12px;
-  color: #dc2626;
-  margin: 4px 0 12px 0;
-}
-
-/* ── New: horizontal pill layout (Phase 2) ── */
-
-.cap-nudge-main-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.cap-nudge-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.cap-nudge-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  gap: 8px;
-}
-
-.cap-nudge-consent {
-  font-size: 10px;
-  color: #9ca3af;
-  line-height: 1.4;
-  flex: 1;
-}
-
-.cap-nudge-btn-x {
-  flex-shrink: 0;
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  font-size: 14px;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 2px 5px;
-  line-height: 1;
-  border-radius: 4px;
-  transition: color .15s, opacity .1s;
-}
-
-.cap-nudge-btn-x:hover { color: #374151; }
-.cap-nudge-btn-x:active { opacity: 0.5; }
-
-.cap-nudge-btn-later {
-  flex-shrink: 0;
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  font-size: 10px;
-  cursor: pointer;
-  font-family: inherit;
-  padding: 0;
-  white-space: nowrap;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  transition: color .15s;
-}
-
-.cap-nudge-btn-later:hover { color: #6b7280; }
-
-@media (prefers-color-scheme: dark) {
-  .cap-nudge-card,
-  .cap-nudge-complete-card,
-  .cap-nudge-error-card {
-    background: #1f2937;
-    border-color: rgba(255,255,255,.08);
-  }
-
-  .cap-nudge-title { color: #f9fafb; }
-
-  .cap-nudge-subtitle,
-  .cap-nudge-elapsed,
-  .cap-nudge-share-url,
-  .cap-nudge-paused-label,
-  .cap-nudge-progress {
-    color: #9ca3af;
-  }
-
-  .cap-nudge-btn-secondary,
-  .cap-nudge-btn-dismiss {
-    color: #6b7280;
-  }
-
-  .cap-nudge-btn-secondary:hover,
-  .cap-nudge-btn-dismiss:hover {
-    color: #9ca3af;
-  }
-
-  .cap-nudge-btn-cancel {
-    background: #374151;
-    color: #f9fafb;
-  }
-
-  .cap-nudge-btn-cancel:hover { background: #4b5563; }
-
-  .cap-nudge-btn-open {
-    background: #374151;
-    color: #f9fafb;
-  }
-
-  .cap-nudge-btn-open:hover { background: #4b5563; }
-
-  .cap-nudge-pill { background: #111827; }
-
-  .cap-nudge-no-auto { color: #6b7280; }
-  .cap-nudge-no-auto:hover { color: #9ca3af; }
-
-  .cap-nudge-consent { color: #6b7280; }
-
-  .cap-nudge-btn-x { color: #6b7280; }
-  .cap-nudge-btn-x:hover { color: #9ca3af; }
-
-  .cap-nudge-btn-later { color: #6b7280; }
-  .cap-nudge-btn-later:hover { color: #9ca3af; }
+  color: #e53e3e;
+  margin: 4px 0 10px 0;
 }
 `;
-
-// ── Inline SVG icon (used in harness instead of chrome.runtime.getURL) ────────
-const ICON_SVG = `data:image/svg+xml,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-  <rect width="28" height="28" rx="6" fill="#675FFF"/>
-  <circle cx="14" cy="14" r="7" fill="none" stroke="#fff" stroke-width="2.5"/>
-  <circle cx="14" cy="14" r="3" fill="#fff"/>
-</svg>
-`)}`;
 
 // ── Shadow DOM factory ────────────────────────────────────────────────────────
 
 function mountShadow(hostEl) {
   const sr = hostEl.attachShadow({ mode: 'open' });
-
   const style = document.createElement('style');
   style.textContent = NUDGE_CSS;
   sr.appendChild(style);
-
   const container = document.createElement('div');
   container.className = 'cap-nudge-container';
   sr.appendChild(container);
-
   return container;
 }
 
-// ── State 1: Default nudge (horizontal pill — Phase 2) ───────────────────────
+// ── State 1: Default nudge (original top-center card) ────────────────────────
 
 (function renderDefaultNudge() {
   const container = mountShadow(document.getElementById('host-default'));
 
   const card = document.createElement('div');
   card.className = 'cap-nudge-card';
-
-  // Main row: icon | text block | Record button | ✕
-  const mainRow = document.createElement('div');
-  mainRow.className = 'cap-nudge-main-row';
-
-  const icon = document.createElement('img');
-  icon.src = ICON_SVG;
-  icon.className = 'cap-nudge-icon';
-  icon.alt = 'Cap';
-
-  const textBlock = document.createElement('div');
-  textBlock.className = 'cap-nudge-text';
 
   const title = document.createElement('div');
   title.className = 'cap-nudge-title';
@@ -598,33 +428,23 @@ function mountShadow(hostEl) {
   subtitle.className = 'cap-nudge-subtitle';
   subtitle.textContent = 'Make sure participants have agreed.';
 
-  textBlock.append(title, subtitle);
+  const buttons = document.createElement('div');
+  buttons.className = 'cap-nudge-buttons';
 
   const btnRecord = document.createElement('button');
   btnRecord.className = 'cap-nudge-btn-primary';
-  btnRecord.textContent = 'Record';
-
-  const btnX = document.createElement('button');
-  btnX.className = 'cap-nudge-btn-x';
-  btnX.textContent = '✕';
-
-  mainRow.append(icon, textBlock, btnRecord, btnX);
-
-  // Footer: consent fine print | Later link
-  const footer = document.createElement('div');
-  footer.className = 'cap-nudge-footer';
-
-  const consent = document.createElement('span');
-  consent.className = 'cap-nudge-consent';
-  consent.textContent = 'By recording you confirm all participants have consented.';
+  btnRecord.textContent = 'Record now';
 
   const btnLater = document.createElement('button');
-  btnLater.className = 'cap-nudge-btn-later';
+  btnLater.className = 'cap-nudge-btn-secondary';
   btnLater.textContent = 'Later';
 
-  footer.append(consent, btnLater);
+  const btnDismiss = document.createElement('button');
+  btnDismiss.className = 'cap-nudge-btn-dismiss';
+  btnDismiss.textContent = 'Dismiss';
 
-  card.append(mainRow, footer);
+  buttons.append(btnRecord, btnLater, btnDismiss);
+  card.append(title, subtitle, buttons);
   container.appendChild(card);
 })();
 
@@ -641,7 +461,6 @@ function mountShadow(hostEl) {
 
   const elapsed = document.createElement('span');
   elapsed.className = 'cap-nudge-elapsed';
-  elapsed.id = 'cap-elapsed-harness';
   elapsed.textContent = '00:00';
 
   const btnStop = document.createElement('button');
@@ -651,7 +470,6 @@ function mountShadow(hostEl) {
   pill.append(dot, elapsed, btnStop);
   container.appendChild(pill);
 
-  // Live elapsed timer so it animates in the harness
   const startedAt = Date.now();
   setInterval(() => {
     const ms = Date.now() - startedAt;
@@ -673,10 +491,6 @@ function mountShadow(hostEl) {
   const card = document.createElement('div');
   card.className = 'cap-nudge-complete-card';
 
-  // Header: check + title
-  const header = document.createElement('div');
-  header.className = 'cap-nudge-header';
-
   const check = document.createElement('div');
   check.className = 'cap-nudge-complete-check';
   check.textContent = '✓';
@@ -684,8 +498,6 @@ function mountShadow(hostEl) {
   const title = document.createElement('div');
   title.className = 'cap-nudge-title';
   title.textContent = 'Recording saved!';
-
-  header.append(check, title);
 
   const urlEl = document.createElement('div');
   urlEl.className = 'cap-nudge-share-url';
@@ -714,7 +526,7 @@ function mountShadow(hostEl) {
   dismissBtn.textContent = 'Dismiss';
 
   buttons.append(copyBtn, openBtn);
-  card.append(header, urlEl, buttons, dismissBtn);
+  card.append(check, title, urlEl, buttons, dismissBtn);
   container.appendChild(card);
 })();
 
