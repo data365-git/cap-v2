@@ -20,9 +20,10 @@ import {
 let captureTabId: number | null = null;
 // When true, RECORDER_DISCARDED should go to idle (delete) instead of restarting.
 let pendingDeleteAfterDiscard = false;
-// Tabs that currently have overlay.js injected — used to re-inject on switch/reload.
+// Bookkeeping only — which tabs we've injected into. NOT used to gate re-injection:
+// de-duplication is handled inside each content script by its in-page HOST_ID guard,
+// so we can always re-inject safely. (A Set can go stale if a script self-removed.)
 const overlayInjectedTabs = new Set<number>();
-// Mirrors overlayInjectedTabs for camera-bubble.js — same lifecycle, separate dedup.
 const cameraBubbleTabs = new Set<number>();
 
 // Promise chain that serializes RECORDER_CHUNK processing relative to
@@ -32,8 +33,8 @@ const cameraBubbleTabs = new Set<number>();
 let chunkTail: Promise<void> = Promise.resolve();
 
 // Inject camera-bubble.js into a tab (only when cameraOverlay is on).
+// Idempotent: the script's CAM_HOST_ID guard no-ops if already present.
 async function injectCameraBubble(tabId: number): Promise<void> {
-	if (cameraBubbleTabs.has(tabId)) return;
 	try {
 		const tab = await chrome.tabs.get(tabId);
 		const url = tab.url ?? "";
@@ -46,9 +47,9 @@ async function injectCameraBubble(tabId: number): Promise<void> {
 	} catch { /* non-injectable page */ }
 }
 
-// Inject overlay.js into a tab if not already there; silently skip non-injectable pages.
+// Inject overlay.js into a tab; silently skip non-injectable pages.
+// Idempotent: the script's HOST_ID guard no-ops if already present.
 async function injectOverlay(tabId: number): Promise<void> {
-	if (overlayInjectedTabs.has(tabId)) return;
 	try {
 		const tab = await chrome.tabs.get(tabId);
 		const url = tab.url ?? "";
@@ -89,27 +90,18 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 // Re-inject overlay (and camera bubble) after a tab navigation wipes content scripts.
+// Navigation clears all content scripts, so the bookkeeping Sets are stale here —
+// we always re-inject and let each script's in-page guard de-duplicate.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 	if (changeInfo.status !== "complete") return;
-	const wasOverlayInjected = overlayInjectedTabs.has(tabId);
-	overlayInjectedTabs.delete(tabId); // Navigation clears all content scripts
-	const wasCamInjected = cameraBubbleTabs.has(tabId);
+	overlayInjectedTabs.delete(tabId);
 	cameraBubbleTabs.delete(tabId);
 
 	getState().then(async (st) => {
 		if (st.kind !== "recording" && st.kind !== "arming") return;
+		await injectOverlay(tabId);
 		const settings = await getSettings();
-		if (wasOverlayInjected) {
-			await injectOverlay(tabId);
-			if (wasCamInjected && settings.cameraOverlay) void injectCameraBubble(tabId);
-			return;
-		}
-		// Also cover the case where the active tab navigates before ever getting the overlay.
-		const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-		if (active?.id === tabId) {
-			await injectOverlay(tabId);
-			if (settings.cameraOverlay) void injectCameraBubble(tabId);
-		}
+		if (settings.cameraOverlay) void injectCameraBubble(tabId);
 	});
 });
 

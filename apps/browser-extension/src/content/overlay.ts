@@ -121,17 +121,23 @@ if (!document.getElementById(HOST_ID)) {
 .cap-ov-icon-btn--danger:hover { background: rgba(239,68,68,0.18) !important; color: #f87171 !important; }
 
 /* Hover-expand wrapper for Restart + Delete.
-   Always in flow (no max-width animation) so Stop button never shifts position.
-   Opacity-only fade: invisible when not hovered, pointer-events off to prevent
-   transparent buttons intercepting clicks on adjacent Pause / Stop buttons. */
+   COMPACT by default (max-width:0 → zero footprint, pill shows only Pause+Stop).
+   On pill hover: expands to reveal Restart+Delete with a smooth slide+fade.
+   pointer-events:none while collapsed prevents the hidden buttons from
+   intercepting clicks meant for Pause/Stop. The pill grows rightward only, so
+   the cursor stays within the pill during expansion — no hover flicker/jitter. */
 .cap-ov-hover-wrap {
   display: flex;
+  align-items: center;
   gap: 2px;
+  max-width: 0;
   opacity: 0;
+  overflow: hidden;
   pointer-events: none;
-  transition: opacity .15s ease;
+  transition: max-width .18s ease, opacity .18s ease;
 }
 .cap-ov-pill:hover .cap-ov-hover-wrap {
+  max-width: 90px;   /* Restart (38) + gap (2) + Delete (38) = 78, +slack */
   opacity: 1;
   pointer-events: all;
 }

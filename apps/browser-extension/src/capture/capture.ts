@@ -352,8 +352,12 @@ async function run(): Promise<void> {
 
 	// Phase 1: native screen/window/tab picker
 	const streamId = await new Promise<string | null>((resolve) => {
+		// "screen"/"window"/"tab" → record whole screen, any app window, or a tab.
+		// "audio" → shows the "Share system audio" checkbox in the picker; when
+		// checked, the desktop-audio track is delivered via the audio getUserMedia
+		// constraint below and mixed with the mic in Phase 4.
 		chrome.desktopCapture.chooseDesktopMedia(
-			["screen", "window", "tab"],
+			["screen", "window", "tab", "audio"],
 			(id: string) => {
 				const err = chrome.runtime.lastError;
 				resolve(err || !id ? null : id);
