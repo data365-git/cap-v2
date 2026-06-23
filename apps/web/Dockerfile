@@ -58,6 +58,11 @@ ARG NEXT_PUBLIC_WEB_URL=https://web-production-e6fe4.up.railway.app
 ENV WEB_URL=$WEB_URL
 ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
 
+# Cache-bust: bump this value to force a fresh `next build` when the Railway
+# builder over-caches the build layer (source-only changes weren't rebuilding).
+ARG BUILD_REV=2026-06-23-c
+RUN echo "build rev: $BUILD_REV"
+
 # Build upstream packages first (database, env, utils, web-backend, web-domain)
 # Then build Next.js app using standard webpack (not turbopack) for lower memory usage
 RUN pnpm --filter @cap/database build && \
