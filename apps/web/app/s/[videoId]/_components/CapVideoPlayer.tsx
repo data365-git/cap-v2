@@ -303,22 +303,28 @@ export function CapVideoPlayer({
 		const video = videoRef.current;
 		if (!video) return;
 
-		const handleLoadedMetadata = () => {
-			if (Number.isFinite(video.duration) && video.duration > 0) {
-				setPlayerDuration(video.duration);
-			}
+		// Trust the DB duration. The file's own duration can be wrong — unseekable
+		// WebM from MediaRecorder often reports Infinity or an absurd value (hours
+		// for a few-second clip). Only adopt the file duration when it's finite,
+		// positive, and not implausibly larger than a known DB duration.
+		const adoptFileDuration = () => {
+			const dbDuration = fallbackDuration ?? 0;
+			const fileDuration = video.duration;
+			if (!Number.isFinite(fileDuration) || fileDuration <= 0) return;
+			if (dbDuration > 0 && fileDuration > dbDuration * 2 + 5) return;
+			setPlayerDuration(fileDuration);
 		};
 
-		if (Number.isFinite(video.duration) && video.duration > 0) {
-			setPlayerDuration(video.duration);
-		}
+		const handleLoadedMetadata = () => adoptFileDuration();
+
+		adoptFileDuration();
 
 		video.addEventListener("loadedmetadata", handleLoadedMetadata);
 
 		return () => {
 			video.removeEventListener("loadedmetadata", handleLoadedMetadata);
 		};
-	}, [videoRef]);
+	}, [videoRef, fallbackDuration]);
 
 	// Track when all data is ready for comment markers
 	const [markersReady, setMarkersReady] = useState(false);

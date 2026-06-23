@@ -209,6 +209,22 @@ const getPlaylistResponse = (
 				});
 			});
 
+		// The single-file recording is stored under a key that reflects its real
+		// container: extension/web MediaRecorder uploads are usually WebM
+		// (result.webm); desktop MP4 is result.mp4. Resolve whichever actually
+		// exists so the key and the upload agree (fixes the result.mp4 404).
+		const resolveResultKey = (v: Video.Video) =>
+			Effect.gen(function* () {
+				const base = `${v.ownerId}/${v.id}`;
+				for (const key of [`${base}/result.mp4`, `${base}/result.webm`]) {
+					const head = yield* bucket.headObject(key).pipe(Effect.option);
+					if (Option.isSome(head) && (head.value.ContentLength ?? 0) > 0) {
+						return Option.some(key);
+					}
+				}
+				return Option.none<string>();
+			});
+
 		if (urlParams.videoType === "raw-preview") {
 			const rawFileKey = yield* resolveRawPreviewKey(video);
 			return yield* proxyObject(rawFileKey);
@@ -342,32 +358,31 @@ const getPlaylistResponse = (
 		}
 
 		if (bucket.provider === "s3" && Option.isNone(customBucket)) {
-			let redirect = `${video.ownerId}/${video.id}/combined-source/stream.m3u8`;
-
-			if (isMp4Source || urlParams.videoType === "mp4")
-				redirect = `${video.ownerId}/${video.id}/result.mp4`;
-			else if (video.source.type === "MediaConvert")
-				redirect = `${video.ownerId}/${video.id}/output/video_recording_000.m3u8`;
-
-			if (urlParams.videoType === "mp4") {
-				const head = yield* bucket.headObject(redirect).pipe(Effect.option);
-				const hasResult =
-					Option.isSome(head) && (head.value.ContentLength ?? 0) > 0;
-				if (!hasResult) {
-					const rawKey = yield* resolveRawPreviewKey(video).pipe(Effect.option);
-					if (Option.isSome(rawKey)) {
-						return yield* proxyObject(rawKey.value);
-					}
+			// Single-file recordings (desktop MP4, web/extension uploads) — proxy the
+			// actual stored object (result.mp4 OR result.webm) same-origin, so there
+			// is no CORS dependency and the browser receives the real Content-Type.
+			if (isMp4Source || urlParams.videoType === "mp4") {
+				const resultKey = yield* resolveResultKey(video);
+				if (Option.isSome(resultKey)) {
+					return yield* proxyObject(resultKey.value);
 				}
+				// result.* not present — fall back to the raw preview if available.
+				const rawKey = yield* resolveRawPreviewKey(video).pipe(Effect.option);
+				if (Option.isSome(rawKey)) {
+					return yield* proxyObject(rawKey.value);
+				}
+				return yield* Effect.fail(new HttpApiError.NotFound());
 			}
 
-			// Proxy mp4 bytes same-origin (no CORS); leave HLS .m3u8 as a redirect
-			// since its embedded segment URLs are resolved by the player directly.
-			return redirect.endsWith(".mp4")
-				? yield* proxyObject(redirect)
-				: HttpServerResponse.redirect(
-						yield* bucket.getSignedObjectUrl(redirect),
-					);
+			// HLS sources keep redirecting to the bucket (the player resolves the
+			// segment URLs embedded in the .m3u8 directly).
+			const redirect =
+				video.source.type === "MediaConvert"
+					? `${video.ownerId}/${video.id}/output/video_recording_000.m3u8`
+					: `${video.ownerId}/${video.id}/combined-source/stream.m3u8`;
+			return HttpServerResponse.redirect(
+				yield* bucket.getSignedObjectUrl(redirect),
+			);
 		}
 
 		if (
@@ -408,10 +423,12 @@ const getPlaylistResponse = (
 		yield* Effect.log("Resolving path with custom bucket");
 
 		if (isMp4Source) {
-			yield* Effect.log(
-				`Returning path ${`${video.ownerId}/${video.id}/result.mp4`}`,
-			);
-			return yield* proxyObject(`${video.ownerId}/${video.id}/result.mp4`);
+			const resultKey = yield* resolveResultKey(video);
+			if (Option.isSome(resultKey)) {
+				yield* Effect.log(`Returning path ${resultKey.value}`);
+				return yield* proxyObject(resultKey.value);
+			}
+			return yield* Effect.fail(new HttpApiError.NotFound());
 		}
 
 		return yield* Effect.fail(new HttpApiError.NotFound());

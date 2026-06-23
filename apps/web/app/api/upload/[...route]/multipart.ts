@@ -495,13 +495,19 @@ app.post(
 					}
 
 					if (bucket.provider === "s3") {
+						// Preserve the REAL container type — extension/web recordings are
+						// often WebM (result.webm). Forcing video/mp4 here would mislabel
+						// WebM bytes and the browser would refuse to play them.
+						const completedContentType = fileKey.endsWith(".webm")
+							? "video/webm"
+							: "video/mp4";
 						console.log(
-							"Performing metadata fix by copying the object to itself...",
+							`Performing metadata fix by copying the object to itself (Content-Type: ${completedContentType})...`,
 						);
 
 						yield* bucket
 							.copyObject(`${bucket.bucketName}/${fileKey}`, fileKey, {
-								ContentType: "video/mp4",
+								ContentType: completedContentType,
 								MetadataDirective: "REPLACE",
 							})
 							.pipe(

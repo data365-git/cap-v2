@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+dist-ssr
+target
+target-agent
+target-phase8
+**/target
+crates
+.git
+**/*.log
+.turbo
+**/.turbo

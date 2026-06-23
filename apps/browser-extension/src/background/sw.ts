@@ -78,14 +78,22 @@ function clearOverlayTabs(): void {
 	cameraBubbleTabs.clear();
 }
 
+// Meeting recordings use Meet's own controls — the Cap overlay + camera bubble
+// are ONLY for instruction (Record Screen) mode, never for meeting mode.
+function isInstructionMode(st: ExtensionState): boolean {
+	return (
+		(st.kind === "recording" || st.kind === "arming") &&
+		st.mode === "instruction"
+	);
+}
+
 // Re-inject overlay (and camera bubble) when user switches to any tab while recording.
 chrome.tabs.onActivated.addListener(({ tabId }) => {
 	getState().then(async (st) => {
-		if (st.kind === "recording" || st.kind === "arming") {
-			await injectOverlay(tabId);
-			const settings = await getSettings();
-			if (settings.cameraOverlay) void injectCameraBubble(tabId);
-		}
+		if (!isInstructionMode(st)) return;
+		await injectOverlay(tabId);
+		const settings = await getSettings();
+		if (settings.cameraOverlay) void injectCameraBubble(tabId);
 	});
 });
 
@@ -98,7 +106,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 	cameraBubbleTabs.delete(tabId);
 
 	getState().then(async (st) => {
-		if (st.kind !== "recording" && st.kind !== "arming") return;
+		if (!isInstructionMode(st)) return;
 		await injectOverlay(tabId);
 		const settings = await getSettings();
 		if (settings.cameraOverlay) void injectCameraBubble(tabId);
@@ -217,12 +225,16 @@ async function launchMeetCapture(
 	chunkTail = Promise.resolve();
 
 	// Pre-inject overlay into the active tab NOW (during arming/countdown) so
-	// it is already in the page and appears instantly when recording starts.
+	// it is already in the page and appears instantly when recording starts —
+	// but ONLY for instruction (Record Screen) mode. Meeting mode relies on
+	// Meet's own nudge control, so we inject neither overlay nor camera bubble.
+	const armingState = await getState();
+	const isInstruction = isInstructionMode(armingState);
 	const [activeTab] = await chrome.tabs.query({
 		active: true,
 		lastFocusedWindow: true,
 	});
-	if (activeTab?.id != null) {
+	if (activeTab?.id != null && isInstruction) {
 		void injectOverlay(activeTab.id);
 		// Inject camera preview bubble if camera overlay is enabled
 		if (_settings.cameraOverlay) void injectCameraBubble(activeTab.id);

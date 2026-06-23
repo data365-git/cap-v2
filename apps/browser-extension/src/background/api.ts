@@ -47,6 +47,7 @@ export interface CapApi {
 		parts: Array<{ partNumber: number; etag: string; size: number }>;
 		videoId: string;
 		subpath?: string;
+		durationInSecs?: number;
 	}): Promise<CompleteMultipartResponse>;
 	recordingComplete(params: { videoId: string }): Promise<void>;
 }
@@ -108,9 +109,10 @@ export function createCapApi(baseUrl: string, apiKey: string): CapApi {
 			return handleResponse<PresignPartResponse>(res, "presignPart");
 		},
 
-		async completeMultipart({ uploadId, parts, videoId, subpath }) {
+		async completeMultipart({ uploadId, parts, videoId, subpath, durationInSecs }) {
 			const body: Record<string, unknown> = { uploadId, parts, videoId };
 			if (subpath) body.subpath = subpath;
+			if (typeof durationInSecs === "number") body.durationInSecs = durationInSecs;
 
 			const res = await fetch(`${baseUrl}/api/upload/multipart/complete`, {
 				method: "POST",
