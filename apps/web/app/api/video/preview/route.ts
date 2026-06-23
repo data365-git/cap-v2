@@ -12,6 +12,10 @@ function getPreviewGifKey(ownerId: string, videoId: string) {
 	return `${ownerId}/${videoId}/preview/animated-preview.gif`;
 }
 
+function getScreenshotKey(ownerId: string, videoId: string) {
+	return `${ownerId}/${videoId}/screenshot/screen-capture.jpg`;
+}
+
 function getFallbackResponse(request: NextRequest, videoId: string) {
 	if (request.nextUrl.searchParams.get("fallback") !== "og") {
 		return new NextResponse(null, { status: 404 });
@@ -40,17 +44,26 @@ export async function GET(request: NextRequest) {
 
 			const [video] = maybeVideo.value;
 			const [bucket] = yield* Storage.getAccessForVideo(video);
-			const previewKey = getPreviewGifKey(video.ownerId, video.id);
-			const hasPreview = yield* bucket.headObject(previewKey).pipe(
-				Effect.as(true),
-				Effect.catchAll(() => Effect.succeed(false)),
-			);
 
-			if (!hasPreview) return null;
+			// Prefer the animated GIF preview; fall back to the static screenshot
+			// (screen-capture.jpg) when no GIF exists. Recordings with neither
+			// return null → the client renders a frame via VideoFrameFallback.
+			for (const key of [
+				getPreviewGifKey(video.ownerId, video.id),
+				getScreenshotKey(video.ownerId, video.id),
+			]) {
+				const exists = yield* bucket.headObject(key).pipe(
+					Effect.as(true),
+					Effect.catchAll(() => Effect.succeed(false)),
+				);
+				if (exists) {
+					return yield* bucket.getSignedObjectUrl(key, {
+						expiresIn: PREVIEW_GIF_EXPIRES_SECONDS,
+					});
+				}
+			}
 
-			return yield* bucket.getSignedObjectUrl(previewKey, {
-				expiresIn: PREVIEW_GIF_EXPIRES_SECONDS,
-			});
+			return null;
 		}).pipe(provideOptionalAuth, runPromise);
 	} catch (error) {
 		console.warn("[video/preview] Failed to resolve preview GIF:", error);
