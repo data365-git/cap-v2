@@ -120,20 +120,18 @@ if (!document.getElementById(HOST_ID)) {
 .cap-ov-icon-btn--danger { color: rgba(248,113,113,0.75); }
 .cap-ov-icon-btn--danger:hover { background: rgba(239,68,68,0.18) !important; color: #f87171 !important; }
 
-/* Hover-expand wrapper for restart button.
-   Compact state: max-width:0 + opacity:0 hides restart.
-   pointer-events:none prevents invisible buttons intercepting clicks on Stop.
-   Hover state (pill:hover): slides in. */
+/* Hover-expand wrapper for Restart + Delete.
+   Always in flow (no max-width animation) so Stop button never shifts position.
+   Opacity-only fade: invisible when not hovered, pointer-events off to prevent
+   transparent buttons intercepting clicks on adjacent Pause / Stop buttons. */
 .cap-ov-hover-wrap {
-  overflow: hidden;
-  max-width: 0;
+  display: flex;
+  gap: 2px;
   opacity: 0;
   pointer-events: none;
-  transition: max-width .2s ease, opacity .15s ease;
-  display: flex;
+  transition: opacity .15s ease;
 }
 .cap-ov-pill:hover .cap-ov-hover-wrap {
-  max-width: 84px;   /* room for Restart (38px) + Delete (38px) + gap (8px) */
   opacity: 1;
   pointer-events: all;
 }

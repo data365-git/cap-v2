@@ -22,6 +22,8 @@ let captureTabId: number | null = null;
 let pendingDeleteAfterDiscard = false;
 // Tabs that currently have overlay.js injected — used to re-inject on switch/reload.
 const overlayInjectedTabs = new Set<number>();
+// Mirrors overlayInjectedTabs for camera-bubble.js — same lifecycle, separate dedup.
+const cameraBubbleTabs = new Set<number>();
 
 // Promise chain that serializes RECORDER_CHUNK processing relative to
 // RECORDER_STOPPED. Each CHUNK chains handleChunk() onto this tail; STOPPED
@@ -31,6 +33,7 @@ let chunkTail: Promise<void> = Promise.resolve();
 
 // Inject camera-bubble.js into a tab (only when cameraOverlay is on).
 async function injectCameraBubble(tabId: number): Promise<void> {
+	if (cameraBubbleTabs.has(tabId)) return;
 	try {
 		const tab = await chrome.tabs.get(tabId);
 		const url = tab.url ?? "";
@@ -39,6 +42,7 @@ async function injectCameraBubble(tabId: number): Promise<void> {
 	} catch { return; }
 	try {
 		await chrome.scripting.executeScript({ target: { tabId }, files: ["camera-bubble.js"] });
+		cameraBubbleTabs.add(tabId);
 	} catch { /* non-injectable page */ }
 }
 
@@ -67,41 +71,52 @@ async function injectOverlay(tabId: number): Promise<void> {
 	}
 }
 
-// Clear tracking set when recording ends; overlay self-removes via state→idle.
+// Clear tracking sets when recording ends; scripts self-remove via state→idle.
 function clearOverlayTabs(): void {
 	overlayInjectedTabs.clear();
+	cameraBubbleTabs.clear();
 }
 
-// Re-inject overlay when user switches to any tab while recording.
+// Re-inject overlay (and camera bubble) when user switches to any tab while recording.
 chrome.tabs.onActivated.addListener(({ tabId }) => {
 	getState().then(async (st) => {
 		if (st.kind === "recording" || st.kind === "arming") {
 			await injectOverlay(tabId);
+			const settings = await getSettings();
+			if (settings.cameraOverlay) void injectCameraBubble(tabId);
 		}
 	});
 });
 
-// Re-inject overlay after a tab navigation wipes the content script.
+// Re-inject overlay (and camera bubble) after a tab navigation wipes content scripts.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 	if (changeInfo.status !== "complete") return;
-	const wasInjected = overlayInjectedTabs.has(tabId);
+	const wasOverlayInjected = overlayInjectedTabs.has(tabId);
 	overlayInjectedTabs.delete(tabId); // Navigation clears all content scripts
+	const wasCamInjected = cameraBubbleTabs.has(tabId);
+	cameraBubbleTabs.delete(tabId);
 
 	getState().then(async (st) => {
 		if (st.kind !== "recording" && st.kind !== "arming") return;
-		if (wasInjected) {
+		const settings = await getSettings();
+		if (wasOverlayInjected) {
 			await injectOverlay(tabId);
+			if (wasCamInjected && settings.cameraOverlay) void injectCameraBubble(tabId);
 			return;
 		}
 		// Also cover the case where the active tab navigates before ever getting the overlay.
 		const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-		if (active?.id === tabId) await injectOverlay(tabId);
+		if (active?.id === tabId) {
+			await injectOverlay(tabId);
+			if (settings.cameraOverlay) void injectCameraBubble(tabId);
+		}
 	});
 });
 
 // Detect capture tab closed before recording ends.
 chrome.tabs.onRemoved.addListener((removedTabId: number) => {
 	overlayInjectedTabs.delete(removedTabId);
+	cameraBubbleTabs.delete(removedTabId);
 	if (captureTabId !== removedTabId) return;
 	captureTabId = null;
 	getState().then(async (st) => {

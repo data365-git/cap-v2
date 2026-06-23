@@ -18,6 +18,8 @@ if (!document.getElementById(CAM_HOST_ID)) {
 		height: size + "px",
 		zIndex: "2147483646",
 		userSelect: "none",
+		borderRadius: "50%",
+		overflow: "hidden",
 	});
 	document.body.appendChild(host);
 
@@ -35,9 +37,12 @@ if (!document.getElementById(CAM_HOST_ID)) {
 		Object.assign(iframe.style, {
 			width: "100%",
 			height: "100%",
-			border: "none",
+			border: "0",
+			borderRadius: "50%",
+			overflow: "hidden",
 			display: "block",
 			background: "transparent",
+			outline: "none",
 		});
 		iframe.setAttribute("scrolling", "no");
 		iframe.setAttribute("frameborder", "0");
