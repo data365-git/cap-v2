@@ -18,11 +18,69 @@ import {
 // offscreen document did.
 
 let captureTabId: number | null = null;
-// Tab that was active before capture.html opened — overlay injected here.
-let overlayTargetTabId: number | null = null;
+// Tabs that currently have overlay.js injected — used to re-inject on switch/reload.
+const overlayInjectedTabs = new Set<number>();
+
+// Inject overlay.js into a tab if not already there; silently skip non-injectable pages.
+async function injectOverlay(tabId: number): Promise<void> {
+	if (overlayInjectedTabs.has(tabId)) return;
+	try {
+		const tab = await chrome.tabs.get(tabId);
+		const url = tab.url ?? "";
+		if (
+			!url ||
+			url.startsWith("chrome://") ||
+			url.startsWith("chrome-extension://") ||
+			url.startsWith("edge://") ||
+			url.startsWith("about:") ||
+			url.startsWith("data:")
+		) return;
+	} catch {
+		return; // Tab no longer exists
+	}
+	try {
+		await chrome.scripting.executeScript({ target: { tabId }, files: ["overlay.js"] });
+		overlayInjectedTabs.add(tabId);
+	} catch {
+		// Non-injectable page (PDF viewer, extension store, etc.) — ignore
+	}
+}
+
+// Clear tracking set when recording ends; overlay self-removes via state→idle.
+function clearOverlayTabs(): void {
+	overlayInjectedTabs.clear();
+}
+
+// Re-inject overlay when user switches to any tab while recording.
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+	getState().then(async (st) => {
+		if (st.kind === "recording" || st.kind === "arming") {
+			await injectOverlay(tabId);
+		}
+	});
+});
+
+// Re-inject overlay after a tab navigation wipes the content script.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+	if (changeInfo.status !== "complete") return;
+	const wasInjected = overlayInjectedTabs.has(tabId);
+	overlayInjectedTabs.delete(tabId); // Navigation clears all content scripts
+
+	getState().then(async (st) => {
+		if (st.kind !== "recording" && st.kind !== "arming") return;
+		if (wasInjected) {
+			await injectOverlay(tabId);
+			return;
+		}
+		// Also cover the case where the active tab navigates before ever getting the overlay.
+		const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+		if (active?.id === tabId) await injectOverlay(tabId);
+	});
+});
 
 // Detect capture tab closed before recording ends.
 chrome.tabs.onRemoved.addListener((removedTabId: number) => {
+	overlayInjectedTabs.delete(removedTabId);
 	if (captureTabId !== removedTabId) return;
 	captureTabId = null;
 	getState().then(async (st) => {
@@ -126,20 +184,15 @@ async function launchMeetCapture(
 	_tabId: number | undefined,
 	_settings: ExtensionSettings,
 ): Promise<void> {
-	// Remember the active tab so we can inject the floating overlay there.
+	// Pre-inject overlay into the active tab NOW (during arming/countdown) so
+	// it is already in the page and appears instantly when recording starts.
 	const [activeTab] = await chrome.tabs.query({
 		active: true,
 		lastFocusedWindow: true,
 	});
-	const prevUrl = activeTab?.url ?? "";
-	overlayTargetTabId =
-		activeTab?.id != null &&
-		!prevUrl.startsWith("chrome://") &&
-		!prevUrl.startsWith("chrome-extension://") &&
-		!prevUrl.startsWith("about:") &&
-		!prevUrl.startsWith("edge://")
-			? activeTab.id
-			: null;
+	if (activeTab?.id != null) {
+		void injectOverlay(activeTab.id);
+	}
 
 	// capture.ts handles picker + getUserMedia + MediaRecorder in one context.
 	// It reads mic settings from storage directly, so we only need to open it.
@@ -254,7 +307,7 @@ async function handleMessage(
 				chrome.tabs.remove(captureTabId).catch(() => {});
 				captureTabId = null;
 			}
-			overlayTargetTabId = null;
+			clearOverlayTabs(); // Overlay self-removes via state→idle
 			await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
@@ -364,19 +417,8 @@ async function handleMessage(
 			await setState(nextState);
 			startKeepAlive();
 			updateBadge(nextState);
-
-			// Inject the floating overlay into the tab that was active before recording.
-			if (overlayTargetTabId !== null) {
-				chrome.scripting
-					.executeScript({
-						target: { tabId: overlayTargetTabId },
-						files: ["overlay.js"],
-					})
-					.catch(() => {
-						// Tab may be gone or non-injectable (chrome://, PDF, etc.) — ok.
-						overlayTargetTabId = null;
-					});
-			}
+			// Overlay is already pre-injected (launchMeetCapture) and listening to
+			// chrome.storage.onChanged — it will show the recording pill automatically.
 
 			return { ok: true };
 		}
@@ -395,7 +437,7 @@ async function handleMessage(
 		// ── Capture page: recorder stopped ───────────────────────────────
 		case "RECORDER_STOPPED": {
 			captureTabId = null;
-			overlayTargetTabId = null;
+			clearOverlayTabs(); // Overlay self-removes via state→uploading/complete
 			const state = await getState();
 			// If CANCEL already moved us to idle, do not attempt to upload.
 			if (state.kind !== "recording") return { ok: true };
@@ -423,7 +465,7 @@ async function handleMessage(
 			const restartTabId = discardSt.kind === "recording" ? discardSt.tabId : undefined;
 
 			captureTabId = null;
-			overlayTargetTabId = null;
+			clearOverlayTabs(); // Overlay self-removes via state→idle
 
 			discardUpload();
 			stopKeepAlive();
@@ -440,7 +482,7 @@ async function handleMessage(
 		// ── Capture page: recorder error ─────────────────────────────────
 		case "RECORDER_ERROR": {
 			captureTabId = null;
-			overlayTargetTabId = null;
+			clearOverlayTabs();
 			const error = getString(msg, "error") ?? "Unknown recorder error";
 			const state = await getState();
 			const previousVideoId =

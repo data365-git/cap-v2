@@ -251,6 +251,9 @@ if (!document.getElementById(HOST_ID)) {
 		clearElapsed();
 		recStart = startedAt;
 		container.innerHTML = "";
+		// Force re-trigger entrance animation (container may already be in the DOM).
+		container.classList.remove("cap-ov-anim");
+		void (container as HTMLElement).offsetWidth;
 		container.classList.add("cap-ov-anim");
 
 		const pill = mk("div", "cap-ov-pill");
