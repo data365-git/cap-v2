@@ -29,13 +29,10 @@ export function discardUpload(): void {
 	inMemoryBuffer = new Uint8Array(0);
 }
 
-// Store the recording under a key that reflects its REAL container format, so the
-// stored object, its Content-Type, and the playback lookup all agree. MediaRecorder
-// on Chrome usually produces WebM (mp4 is often unsupported) → result.webm.
-function resultSubpath(mime: string): string {
-	const base = (mime || "").split(";")[0].trim().toLowerCase();
-	return base.includes("webm") ? "result.webm" : "result.mp4";
-}
+// The recording is always stored at result.mp4 (the proven multipart key). The
+// REAL container may be WebM — correctness of playback comes from the stored
+// Content-Type (set at initiate, preserved on complete), not the key extension.
+const RESULT_SUBPATH = "result.mp4";
 
 // ── Duration patching ─────────────────────────────────────────────────────
 // MediaRecorder produces WebM with Duration=0 and fragmented MP4 with
@@ -203,7 +200,6 @@ async function uploadPart(
 	videoId: string,
 	uploadId: string,
 	settings: ExtensionSettings,
-	subpath: string,
 ): Promise<CompletedPart> {
 	const api = createCapApi(settings.apiBaseUrl, settings.apiKey);
 
@@ -211,7 +207,7 @@ async function uploadPart(
 		uploadId,
 		partNumber,
 		videoId,
-		subpath,
+		subpath: RESULT_SUBPATH,
 	});
 
 	const putRes = await fetch(presignedUrl, {
@@ -268,7 +264,7 @@ export async function initializeUpload(
 	const { uploadId } = await api.initiateMultipart({
 		contentType: baseContentType,
 		videoId,
-		subpath: resultSubpath(baseContentType),
+		subpath: RESULT_SUBPATH,
 	});
 
 	inMemoryBuffer = new Uint8Array(0);
@@ -300,7 +296,6 @@ export async function handleChunk(
 				state.videoId,
 				state.uploadId,
 				settings,
-				resultSubpath(state.mime),
 			);
 
 			const freshState = await getState();
@@ -349,9 +344,6 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 		"uploadedBytes" in state ? (state.uploadedBytes as number) : 0;
 	const { videoId, uploadId } = state;
 
-	// Key/format must match what initiateMultipart used (derived from the recorder
-	// MIME). On resume (uploading state has no mime) default to webm.
-	const subpath = resultSubpath(state.kind === "recording" ? state.mime : "video/webm");
 	// Real measured recording length → stored server-side as videos.duration so the
 	// player shows the true duration even if the WebM header is unreliable.
 	const durationInSecs = durationMs > 0 ? durationMs / 1000 : undefined;
@@ -377,7 +369,6 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 				videoId,
 				uploadId,
 				settings,
-				subpath,
 			);
 			parts = [...parts, completedPart];
 			nextPartNumber += 1;
@@ -423,7 +414,7 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 			uploadId,
 			parts: apiParts,
 			videoId,
-			subpath,
+			subpath: RESULT_SUBPATH,
 			durationInSecs,
 		});
 	} catch (err) {
@@ -433,7 +424,6 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 			payload: {
 				uploadId,
 				videoId,
-				subpath,
 				durationInSecs,
 				parts: parts.map((p) => ({
 					partNumber: p.PartNumber,

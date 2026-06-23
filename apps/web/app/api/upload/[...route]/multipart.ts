@@ -429,18 +429,21 @@ app.post(
 					);
 					console.log(`Complete response: ${JSON.stringify(result, null, 2)}`);
 
-					yield* bucket.headObject(fileKey).pipe(
+					const verifiedContentType = yield* bucket.headObject(fileKey).pipe(
 						Effect.tap((headResult) =>
 							Effect.log(
 								`Object verification successful: ContentType=${headResult.ContentType}, ContentLength=${headResult.ContentLength}`,
 							),
 						),
+						Effect.map((headResult) => headResult.ContentType),
 						Effect.retry({
 							times: 3,
 							schedule: Schedule.exponential("50 millis"),
 						}),
 						Effect.catchAll((headError) =>
-							Effect.logError(`Warning: Unable to verify object: ${headError}`),
+							Effect.logError(
+								`Warning: Unable to verify object: ${headError}`,
+							).pipe(Effect.as(undefined)),
 						),
 					);
 
@@ -495,12 +498,14 @@ app.post(
 					}
 
 					if (bucket.provider === "s3") {
-						// Preserve the REAL container type — extension/web recordings are
-						// often WebM (result.webm). Forcing video/mp4 here would mislabel
-						// WebM bytes and the browser would refuse to play them.
-						const completedContentType = fileKey.endsWith(".webm")
-							? "video/webm"
-							: "video/mp4";
+						// Preserve the REAL container type set at initiate. Extension
+						// recordings are often WebM bytes stored at result.mp4 — forcing
+						// video/mp4 here would mislabel them and the browser would refuse
+						// to play. Prefer the verified Content-Type; fall back to the key
+						// extension, then video/mp4.
+						const completedContentType =
+							verifiedContentType ??
+							(fileKey.endsWith(".webm") ? "video/webm" : "video/mp4");
 						console.log(
 							`Performing metadata fix by copying the object to itself (Content-Type: ${completedContentType})...`,
 						);
