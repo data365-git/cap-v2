@@ -127,9 +127,17 @@ function soundTick(ac: AudioContext, t: number): void {
 	osc.start(t); osc.stop(t + 0.12);
 }
 
-function soundChime(ac: AudioContext, t: number): void {
-	_sine(ac, 880,  t, 0,    0.38, 0.22);
-	_sine(ac, 1318, t, 0.16, 0.5,  0.18);
+function soundRecordStart(ac: AudioContext, t: number): void {
+	// Ascending major arpeggio: C5 → E5 → G5  ("here we go!")
+	_sine(ac, 523, t, 0.00, 0.18, 0.22);
+	_sine(ac, 659, t, 0.13, 0.18, 0.25);
+	_sine(ac, 784, t, 0.26, 0.42, 0.28);
+}
+
+function soundRecordStop(ac: AudioContext, t: number): void {
+	// Descending resolution: G5 → C5  (conclusive finish)
+	_sine(ac, 784, t, 0.00, 0.18, 0.22);
+	_sine(ac, 523, t, 0.15, 0.42, 0.20);
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
@@ -465,6 +473,7 @@ async function run(): Promise<void> {
 
 	recorder.onstop = () => {
 		releaseStreams();
+		if (settings.soundEnabled) playSound(soundRecordStop);
 		sendStopped();
 		showUploading(0);
 	};
@@ -482,7 +491,7 @@ async function run(): Promise<void> {
 	const localStartedAt = Date.now();
 
 	// Play start chime and show recording UI.
-	if (settings.soundEnabled) playSound(soundChime);
+	if (settings.soundEnabled) playSound(soundRecordStart);
 	showRecording(localStartedAt);
 	tell({ type: "RECORDER_STARTED", mime });
 }
@@ -514,6 +523,26 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 			if (ctx && ctx.recorder.state === "paused") ctx.recorder.resume();
 			sendResponse({ ok: true });
 			return true;
+
+		case "DISCARD_RECORDING": {
+			// Stop recorder without uploading — sends RECORDER_DISCARDED instead of RECORDER_STOPPED.
+			countdownCancelled = true;
+			stoppedSent = true; // Prevent the normal onstop from sending RECORDER_STOPPED.
+			if (ctx && ctx.recorder.state !== "inactive") {
+				ctx.recorder.onstop = () => {
+					releaseStreams();
+					tell({ type: "RECORDER_DISCARDED" });
+					closeSelf().catch(() => {});
+				};
+				ctx.recorder.stop();
+			} else {
+				releaseStreams();
+				tell({ type: "RECORDER_DISCARDED" });
+				closeSelf().catch(() => {});
+			}
+			sendResponse({ ok: true });
+			return true;
+		}
 
 		case "STATE_CHANGED": {
 			const state = msg.state as { kind: string; [k: string]: unknown } | undefined;

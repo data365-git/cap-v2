@@ -25,6 +25,10 @@ function appendToBuffer(chunk: Uint8Array): void {
 	inMemoryBuffer = merged;
 }
 
+export function discardUpload(): void {
+	inMemoryBuffer = new Uint8Array(0);
+}
+
 function drainBuffer(): Uint8Array {
 	const drained = inMemoryBuffer;
 	inMemoryBuffer = new Uint8Array(0);

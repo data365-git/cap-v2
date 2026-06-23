@@ -15,8 +15,8 @@ if (!document.getElementById(HOST_ID)) {
 
 .cap-ov {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  bottom: 16px;
+  left: 16px;
   z-index: 2147483647;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
@@ -27,88 +27,139 @@ if (!document.getElementById(HOST_ID)) {
 .cap-ov:active { cursor: grabbing; }
 
 @keyframes ov-in {
-  from { opacity:0; transform:translateY(-8px); }
+  from { opacity:0; transform:translateY(8px); }
   to   { opacity:1; transform:translateY(0); }
 }
-.cap-ov-anim { animation: ov-in .25s cubic-bezier(.2,.8,.4,1) both; }
+.cap-ov-anim { animation: ov-in .28s cubic-bezier(.2,.8,.4,1) both; }
 
 @keyframes ov-pulse {
-  0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,.65); }
-  55%     { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.25; }
 }
 
 /* pill */
 .cap-ov-pill {
-  background: #111827;
+  background: rgba(14,18,27,0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 999px;
-  padding: 8px 14px;
+  padding: 10px 10px 10px 18px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  gap: 4px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
 }
+
+.cap-ov-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 10px;
+}
+
 .cap-ov-dot {
-  width: 8px; height: 8px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   background: #ef4444;
   flex-shrink: 0;
-  animation: ov-pulse 1.9s ease-out infinite;
+  animation: ov-pulse 1.5s ease-in-out infinite;
 }
-.cap-ov-dot--blue { background:#3b82f6; animation:none; }
+.cap-ov-dot--paused { background: #6b7280; animation: none; }
+.cap-ov-dot--blue   { background: #3b82f6; animation: none; }
+
 .cap-ov-elapsed {
-  font-size: 13px; font-weight: 600;
+  font-size: 16px; font-weight: 600;
   color: #f9fafb;
   font-variant-numeric: tabular-nums;
-  min-width: 42px;
+  letter-spacing: -0.01em;
+  min-width: 54px;
 }
+
+.cap-ov-divider {
+  width: 1px; height: 26px;
+  background: rgba(255,255,255,0.12);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.cap-ov-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* icon ghost button */
+.cap-ov-icon-btn {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: rgba(249,250,251,0.65);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  flex-shrink: 0;
+}
+.cap-ov-icon-btn:hover  { background: rgba(255,255,255,0.1); color: #f9fafb; }
+.cap-ov-icon-btn:active { background: rgba(255,255,255,0.16); }
+.cap-ov-icon-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* stop button */
 .cap-ov-btn-stop {
   background: #ef4444; color: #fff;
-  border: none; border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px; font-weight: 600;
+  border: none; border-radius: 10px;
+  padding: 7px 15px;
+  font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: inherit;
   transition: filter .15s;
+  white-space: nowrap;
+  display: flex; align-items: center; gap: 6px;
+  margin-left: 4px;
 }
-.cap-ov-btn-stop:hover { filter: brightness(1.12); }
-.cap-ov-btn-stop:disabled { opacity:.5; cursor:not-allowed; }
+.cap-ov-btn-stop:hover    { filter: brightness(1.1); }
+.cap-ov-btn-stop:disabled { opacity: .4; cursor: not-allowed; }
 
 /* card (complete / error) */
 .cap-ov-card {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 28px rgba(0,0,0,.22);
-  padding: 16px;
-  width: 280px;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.28);
+  padding: 20px;
+  width: 300px;
   box-sizing: border-box;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: 10px;
 }
-.cap-ov-check { font-size: 22px; color: #16a34a; }
-.cap-ov-card-title { font-weight: 700; font-size: 14px; color: #111; }
+.cap-ov-check { font-size: 26px; color: #16a34a; }
+.cap-ov-card-title { font-weight: 700; font-size: 15px; color: #111; }
 .cap-ov-url {
   font-size: 11px; color: #555;
   word-break: break-all;
   background: #f3f4f6;
-  border-radius: 4px;
-  padding: 4px 8px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.5;
 }
-.cap-ov-row { display: flex; gap: 6px; }
+.cap-ov-row { display: flex; gap: 8px; }
 .cap-ov-btn-primary {
+  flex: 1;
   background: #111827; color: #fff;
-  border: none; border-radius: 6px;
-  padding: 6px 12px; font-size: 12px; font-weight: 600;
+  border: none; border-radius: 8px;
+  padding: 9px 14px; font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: inherit; transition: filter .15s;
 }
 .cap-ov-btn-primary:hover { filter: brightness(1.2); }
 .cap-ov-btn-secondary {
+  flex: 1;
   background: #f3f4f6; color: #374151;
-  border: none; border-radius: 6px;
-  padding: 6px 12px; font-size: 12px; font-weight: 500;
+  border: none; border-radius: 8px;
+  padding: 9px 14px; font-size: 13px; font-weight: 500;
   cursor: pointer; font-family: inherit; transition: background .15s;
 }
 .cap-ov-btn-secondary:hover { background: #e5e7eb; }
 .cap-ov-btn-dismiss {
   background: none; border: none;
-  color: #9ca3af; font-size: 11px;
+  color: #9ca3af; font-size: 12px;
   cursor: pointer; font-family: inherit;
   text-align: center; text-decoration: underline;
   transition: color .15s;
@@ -131,7 +182,8 @@ if (!document.getElementById(HOST_ID)) {
 		const rect = container.getBoundingClientRect();
 		startX = e.clientX; startY = e.clientY;
 		startLeft = rect.left; startTop = rect.top;
-		container.style.right = "auto";
+		container.style.bottom = "auto";
+		container.style.right  = "auto";
 		container.style.left = rect.left + "px";
 		container.style.top  = rect.top  + "px";
 		dragging = true;
@@ -143,9 +195,11 @@ if (!document.getElementById(HOST_ID)) {
 	});
 	document.addEventListener("mouseup", () => { dragging = false; });
 
-	// ── Helpers ─────────────────────────────────────────────────────────────
+	// ── Helpers ────────────────────────────────────────────────────────────
 	let elapsedIv: ReturnType<typeof setInterval> | null = null;
 	let recStart = 0;
+	let lastStartedAt = 0;
+	let pauseBtnEl: HTMLButtonElement | null = null;
 
 	function clearElapsed() {
 		if (elapsedIv !== null) { clearInterval(elapsedIv); elapsedIv = null; }
@@ -165,47 +219,115 @@ if (!document.getElementById(HOST_ID)) {
 		return el;
 	}
 
-	// ── Phase renderers ──────────────────────────────────────────────────────
+	// SVG icon strings (Lucide-style, 18×18 viewport)
+	const IC = {
+		pause:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/></svg>`,
+		play:    `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21"/></svg>`,
+		restart: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><polyline points="3 3 3 8 8 8"/></svg>`,
+		stop:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`,
+	};
 
-	function showRecording(startedAt: number) {
+	function setPauseIcon(btn: HTMLButtonElement, paused: boolean) {
+		btn.innerHTML = paused ? IC.play : IC.pause;
+		btn.title = paused ? "Resume recording" : "Pause recording";
+	}
+
+	// ── Phase renderers ────────────────────────────────────────────────────
+
+	function showRecording(startedAt: number, paused: boolean) {
+		// If same recording already displayed, just update pause button.
+		if (lastStartedAt === startedAt && pauseBtnEl) {
+			setPauseIcon(pauseBtnEl, paused);
+			const dot = shadow.querySelector<HTMLElement>(".cap-ov-dot");
+			if (dot) {
+				dot.className = "cap-ov-dot" + (paused ? " cap-ov-dot--paused" : "");
+			}
+			return;
+		}
+
+		// New recording — build pill.
+		lastStartedAt = startedAt;
+		pauseBtnEl = null;
 		clearElapsed();
 		recStart = startedAt;
 		container.innerHTML = "";
 		container.classList.add("cap-ov-anim");
 
 		const pill = mk("div", "cap-ov-pill");
-		const dot  = mk("span", "cap-ov-dot");
+
+		// Left: dot + timer
+		const left = mk("div", "cap-ov-left");
+		const dot  = mk("span", "cap-ov-dot" + (paused ? " cap-ov-dot--paused" : ""));
 		const elapsed = mk("span", "cap-ov-elapsed", fmt(Date.now() - startedAt));
 		elapsed.id = "cap-ov-elapsed";
-		const stop = document.createElement("button");
-		stop.className = "cap-ov-btn-stop";
-		stop.textContent = "Stop";
-		stop.addEventListener("click", () => {
-			stop.disabled = true;
+		left.append(dot, elapsed);
+
+		const divider = mk("div", "cap-ov-divider");
+
+		// Actions
+		const actions = mk("div", "cap-ov-actions");
+
+		// Pause / Resume
+		const pauseBtn = document.createElement("button");
+		pauseBtn.className = "cap-ov-icon-btn";
+		setPauseIcon(pauseBtn, paused);
+		pauseBtn.addEventListener("click", () => {
+			const isPaused = pauseBtn.innerHTML === IC.play;
+			chrome.runtime.sendMessage({ type: isPaused ? "RESUME" : "PAUSE" }).catch(() => {});
+		});
+
+		// Restart
+		const restartBtn = document.createElement("button");
+		restartBtn.className = "cap-ov-icon-btn";
+		restartBtn.innerHTML = IC.restart;
+		restartBtn.title = "Restart recording (discard this take)";
+		restartBtn.addEventListener("click", () => {
+			restartBtn.disabled = true;
+			pauseBtn.disabled = true;
+			chrome.runtime.sendMessage({ type: "RESTART" }).catch(() => {});
+		});
+
+		// Stop
+		const stopBtn = document.createElement("button");
+		stopBtn.className = "cap-ov-btn-stop";
+		stopBtn.innerHTML = IC.stop + "Stop";
+		stopBtn.title = "Stop and upload recording";
+		stopBtn.addEventListener("click", () => {
+			stopBtn.disabled = true;
+			pauseBtn.disabled = true;
+			restartBtn.disabled = true;
 			chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
 		});
 
-		pill.append(dot, elapsed, stop);
+		pauseBtnEl = pauseBtn;
+		actions.append(pauseBtn, restartBtn, stopBtn);
+		pill.append(left, divider, actions);
 		container.appendChild(pill);
 
 		elapsedIv = setInterval(() => {
-			const el = shadow.getElementById("cap-ov-elapsed");
-			if (el) el.textContent = fmt(Date.now() - recStart);
-		}, 1000);
+			if (!paused) {
+				const el = shadow.getElementById("cap-ov-elapsed");
+				if (el) el.textContent = fmt(Date.now() - recStart);
+			}
+		}, 500);
 	}
 
 	function showFinishing() {
 		clearElapsed();
+		lastStartedAt = 0;
+		pauseBtnEl = null;
 		container.innerHTML = "";
 		const pill = mk("div", "cap-ov-pill");
-		const dot  = mk("span", "cap-ov-dot cap-ov-dot--blue");
-		const lbl  = mk("span", "cap-ov-elapsed", "Saving…");
-		pill.append(dot, lbl);
+		const left = mk("div", "cap-ov-left");
+		left.append(mk("span", "cap-ov-dot cap-ov-dot--blue"), mk("span", "cap-ov-elapsed", "Saving…"));
+		pill.appendChild(left);
 		container.appendChild(pill);
 	}
 
 	function showComplete(shareUrl: string) {
 		clearElapsed();
+		lastStartedAt = 0;
+		pauseBtnEl = null;
 		container.innerHTML = "";
 		container.classList.add("cap-ov-anim");
 
@@ -248,6 +370,8 @@ if (!document.getElementById(HOST_ID)) {
 
 	function showError(reason: string) {
 		clearElapsed();
+		lastStartedAt = 0;
+		pauseBtnEl = null;
 		container.innerHTML = "";
 		container.classList.add("cap-ov-anim");
 
@@ -265,22 +389,32 @@ if (!document.getElementById(HOST_ID)) {
 		container.appendChild(card);
 	}
 
-	type St = { kind: string; shareUrl?: string; reason?: string; startedAt?: number };
+	type St = { kind: string; shareUrl?: string; reason?: string; startedAt?: number; paused?: boolean };
 	function handleState(state: St) {
 		switch (state.kind) {
-			case "recording":  showRecording(state.startedAt ?? Date.now()); break;
+			case "recording":
+				showRecording(state.startedAt ?? Date.now(), state.paused === true);
+				break;
 			case "uploading":
-			case "finishing":  showFinishing(); break;
-			case "complete":   if (state.shareUrl) showComplete(state.shareUrl); break;
-			case "error":      showError(state.reason ?? "Unknown error"); break;
+			case "finishing":
+				showFinishing();
+				break;
+			case "complete":
+				if (state.shareUrl) showComplete(state.shareUrl);
+				break;
+			case "error":
+				showError(state.reason ?? "Unknown error");
+				break;
 			case "idle":
 				clearElapsed();
+				lastStartedAt = 0;
+				pauseBtnEl = null;
 				host.remove();
 				break;
 		}
 	}
 
-	// ── Bootstrap ──────────────────────────────────────────────────────────
+	// ── Bootstrap ────────────────────────────────────────────────────────
 	chrome.storage.local.get("capExtState", (result) => {
 		const state = (result as Record<string, unknown>).capExtState as St | undefined;
 		if (state) handleState(state);

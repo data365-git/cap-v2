@@ -2,6 +2,7 @@ import { isKeepAliveAlarm, startKeepAlive, stopKeepAlive } from "./keepalive";
 import type { ExtensionSettings, ExtensionState } from "./state";
 import { getSettings, getState, setSettings, setState } from "./state";
 import {
+	discardUpload,
 	finalizeUpload,
 	handleChunk,
 	initializeUpload,
@@ -208,13 +209,31 @@ async function handleMessage(
 
 		// ── Popup: pause ──────────────────────────────────────────────────
 		case "PAUSE": {
+			const pauseSt = await getState();
+			if (pauseSt.kind === "recording") {
+				const next = { ...pauseSt, paused: true };
+				await setState(next);
+				updateBadge(next);
+			}
 			await sendToCapturePage({ type: "PAUSE_CAPTURE" }).catch(() => {});
 			return { ok: true };
 		}
 
 		// ── Popup: resume ─────────────────────────────────────────────────
 		case "RESUME": {
+			const resumeSt = await getState();
+			if (resumeSt.kind === "recording") {
+				const next = { ...resumeSt, paused: false };
+				await setState(next);
+				updateBadge(next);
+			}
 			await sendToCapturePage({ type: "RESUME_CAPTURE" }).catch(() => {});
+			return { ok: true };
+		}
+
+		// ── Overlay: restart (discard + fresh take) ───────────────────────
+		case "RESTART": {
+			await sendToCapturePage({ type: "DISCARD_RECORDING" }).catch(() => {});
 			return { ok: true };
 		}
 
@@ -393,6 +412,28 @@ async function handleMessage(
 			stopKeepAlive();
 			updateBadge(nextState);
 			await finalizeUpload();
+			return { ok: true };
+		}
+
+		// ── Capture page: recording discarded (restart path) ─────────────
+		case "RECORDER_DISCARDED": {
+			const discardSt = await getState();
+			const restartMode = discardSt.kind === "recording" ? discardSt.mode : "instruction";
+			const restartMeetingId = discardSt.kind === "recording" ? discardSt.meetingId : undefined;
+			const restartTabId = discardSt.kind === "recording" ? discardSt.tabId : undefined;
+
+			captureTabId = null;
+			overlayTargetTabId = null;
+
+			discardUpload();
+			stopKeepAlive();
+
+			await setState({ kind: "idle" });
+			updateBadge({ kind: "idle" });
+
+			const restartSettings = await getSettings();
+			await setState({ kind: "arming", mode: restartMode, meetingId: restartMeetingId, tabId: restartTabId });
+			await launchMeetCapture(restartMeetingId, restartTabId, restartSettings);
 			return { ok: true };
 		}
 
