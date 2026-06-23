@@ -1,8 +1,11 @@
 "use client";
 
+import { GenerateSection } from "../GenerateSection";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 interface SummaryPanelProps {
+	videoId: string;
+	transcriptionStatus?: string | null;
 	data: {
 		duration?: number;
 		aiSummary?: {
@@ -16,7 +19,12 @@ interface SummaryPanelProps {
 	onVideoJump?: (seconds: number) => void;
 }
 
-export function SummaryPanel({ data, onVideoJump }: SummaryPanelProps) {
+export function SummaryPanel({
+	videoId,
+	transcriptionStatus,
+	data,
+	onVideoJump,
+}: SummaryPanelProps) {
 	const { aiSummary } = data;
 	const topics = aiSummary?.topics ?? [];
 	const nextSteps = aiSummary?.nextSteps ?? [];
@@ -24,8 +32,14 @@ export function SummaryPanel({ data, onVideoJump }: SummaryPanelProps) {
 
 	if (!aiSummary) {
 		return (
-			<div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-6 text-center">
-				<p className="text-sm text-gray-500">No AI summary available.</p>
+			<div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-8 text-center">
+				<GenerateSection
+					videoId={videoId}
+					kind="ai"
+					label="Generate summary"
+					description="No AI summary available."
+					transcriptReady={transcriptionStatus === "COMPLETE"}
+				/>
 			</div>
 		);
 	}

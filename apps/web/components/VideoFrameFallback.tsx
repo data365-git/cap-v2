@@ -100,7 +100,7 @@ export const VideoFrameFallback = ({
 		video.addEventListener("seeked", handleSeeked);
 		video.crossOrigin = "anonymous";
 		video.preload = "metadata";
-		video.src = `/api/playlist?userId=${encodeURIComponent(ownerId)}&videoId=${encodeURIComponent(videoId)}&videoType=mp4`;
+		video.src = `/api/playlist?videoId=${encodeURIComponent(videoId)}&videoType=mp4`;
 		video.load();
 
 		return () => {

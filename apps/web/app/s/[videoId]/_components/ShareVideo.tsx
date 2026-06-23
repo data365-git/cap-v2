@@ -341,10 +341,10 @@ export const ShareVideo = forwardRef<
 
 		// All source types use the native <video> player via the mp4 playlist endpoint.
 		// The /api/playlist?videoType=mp4 route returns a signed redirect to result.mp4.
-		const videoSrc = `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=mp4`;
+		const videoSrc = `/api/playlist?videoId=${data.id}&videoType=mp4`;
 		const rawFallbackSrc =
 			data.source.type === "webMP4" || data.source.type === "extensionWeb"
-				? `/api/playlist?userId=${data.owner.id}&videoId=${data.id}&videoType=raw-preview`
+				? `/api/playlist?videoId=${data.id}&videoType=raw-preview`
 				: undefined;
 		const enableCrossOrigin = true;
 
@@ -504,6 +504,8 @@ export const ShareVideo = forwardRef<
 					<BelowVideoTabs
 						summary={
 							<SummaryPanel
+								videoId={data.id}
+								transcriptionStatus={data.transcriptionStatus}
 								data={{
 									duration: data.duration ?? undefined,
 									aiSummary: data.metadata?.aiSummary ?? undefined,
@@ -515,11 +517,14 @@ export const ShareVideo = forwardRef<
 						tasks={
 							<TasksPanel
 								videoId={data.id}
+								transcriptionStatus={data.transcriptionStatus}
 								tasks={data.metadata?.aiSummary?.tasks ?? []}
 							/>
 						}
 						transcript={
 							<TranscriptPanel
+								videoId={data.id}
+								transcriptionStatus={data.transcriptionStatus}
 								transcriptContent={transcriptContent ?? undefined}
 								currentTime={currentTime}
 								onVideoJump={handleSeek}
@@ -527,6 +532,8 @@ export const ShareVideo = forwardRef<
 						}
 						refined={
 							<RefinedTranscriptPanel
+								videoId={data.id}
+								transcriptionStatus={data.transcriptionStatus}
 								refinedTranscript={
 									data.metadata?.aiSummary?.refinedTranscript ?? undefined
 								}

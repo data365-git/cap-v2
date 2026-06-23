@@ -1,9 +1,12 @@
 "use client";
 
 import { Play } from "lucide-react";
+import { GenerateSection } from "../GenerateSection";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 interface RefinedTranscriptPanelProps {
+	videoId: string;
+	transcriptionStatus?: string | null;
 	refinedTranscript?: {
 		chapters: {
 			startSec: number;
@@ -15,15 +18,21 @@ interface RefinedTranscriptPanelProps {
 }
 
 export function RefinedTranscriptPanel({
+	videoId,
+	transcriptionStatus,
 	refinedTranscript,
 	onVideoJump,
 }: RefinedTranscriptPanelProps) {
 	if (!refinedTranscript || refinedTranscript.chapters.length === 0) {
 		return (
 			<div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-8 text-center">
-				<p className="text-sm text-gray-500">
-					Refined transcript not available yet
-				</p>
+				<GenerateSection
+					videoId={videoId}
+					kind="ai"
+					label="Generate refined transcript"
+					description="Refined transcript not available yet"
+					transcriptReady={transcriptionStatus === "COMPLETE"}
+				/>
 			</div>
 		);
 	}

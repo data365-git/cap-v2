@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { GenerateSection } from "../GenerateSection";
 
 interface TranscriptPanelProps {
+	videoId: string;
+	transcriptionStatus?: string | null;
 	transcriptContent?: string;
 	currentTime?: number;
 	onVideoJump?: (seconds: number) => void;
@@ -154,6 +157,8 @@ function isActive(cue: Cue, currentTime: number): boolean {
 }
 
 export function TranscriptPanel({
+	videoId,
+	transcriptionStatus,
 	transcriptContent,
 	currentTime = 0,
 	onVideoJump,
@@ -177,9 +182,22 @@ export function TranscriptPanel({
 	}, [activeCueId]);
 
 	if (!transcriptContent || cues.length === 0) {
+		// Transcript already done but cues empty (e.g. NO_AUDIO) → plain message.
+		// Otherwise offer on-demand generation.
 		return (
-			<div className="flex items-center justify-center h-full">
-				<p className="text-sm text-gray-500">No transcript available.</p>
+			<div className="flex items-center justify-center h-full p-4">
+				{transcriptionStatus === "COMPLETE" ||
+				transcriptionStatus === "NO_AUDIO" ||
+				transcriptionStatus === "SKIPPED" ? (
+					<p className="text-sm text-gray-500">No transcript available.</p>
+				) : (
+					<GenerateSection
+						videoId={videoId}
+						kind="transcript"
+						label="Generate transcript"
+						description="No transcript available."
+					/>
+				)}
 			</div>
 		);
 	}

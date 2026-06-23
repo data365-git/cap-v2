@@ -12,6 +12,7 @@ import {
 	HttpApiEndpoint,
 	HttpApiError,
 	HttpApiGroup,
+	HttpServerRequest,
 	HttpServerResponse,
 } from "@effect/platform";
 import { eq } from "drizzle-orm";
@@ -140,11 +141,77 @@ const getPlaylistResponse = (
 			video.source.type === "webMP4" ||
 			video.source.type === "extensionWeb";
 
+		// Stream an R2/S3 object through this same-origin endpoint instead of
+		// 302-redirecting the browser straight to the bucket. This removes the
+		// cross-origin (CORS) dependency entirely: the browser only ever talks to
+		// our origin. HTTP Range requests are forwarded so the <video> element can
+		// seek/scrub — R2 replies 206 + Content-Range, which we relay verbatim.
+		const proxyObject = (objectKey: string) =>
+			Effect.gen(function* () {
+				const request = yield* HttpServerRequest.HttpServerRequest;
+
+				// Presigned GET URLs are signed for the GET method only, so a HEAD
+				// must use the internal client (headObject) rather than fetching the
+				// signed URL with method HEAD (which would fail the SigV4 check).
+				if (request.method === "HEAD") {
+					const head = yield* bucket.headObject(objectKey).pipe(Effect.option);
+					if (Option.isNone(head) || (head.value.ContentLength ?? 0) === 0) {
+						return yield* Effect.fail(new HttpApiError.NotFound());
+					}
+					return HttpServerResponse.empty().pipe(
+						HttpServerResponse.setHeaders({
+							"Accept-Ranges": "bytes",
+							"Content-Length": String(head.value.ContentLength ?? 0),
+							"Content-Type": head.value.ContentType ?? "video/mp4",
+						}),
+					);
+				}
+
+				const signedUrl = yield* bucket.getSignedObjectUrl(objectKey);
+				const range = request.headers.range;
+
+				const upstream = yield* Effect.tryPromise({
+					try: (signal) =>
+						fetch(signedUrl, {
+							headers: range ? { Range: range } : undefined,
+							signal,
+						}),
+					catch: () => new HttpApiError.InternalServerError(),
+				});
+
+				if (!upstream.ok && upstream.status !== 206) {
+					return yield* Effect.fail(
+						upstream.status === 404
+							? new HttpApiError.NotFound()
+							: new HttpApiError.InternalServerError(),
+					);
+				}
+
+				// fetch() Response headers are immutable, so build a fresh header
+				// set forwarding exactly what the <video> element needs for seeking.
+				const forwarded: Record<string, string> = {
+					"Accept-Ranges": "bytes",
+					"Content-Type": upstream.headers.get("content-type") ?? "video/mp4",
+				};
+				const pass = (from: string, to: string) => {
+					const value = upstream.headers.get(from);
+					if (value !== null) forwarded[to] = value;
+				};
+				pass("content-length", "Content-Length");
+				pass("content-range", "Content-Range");
+				pass("etag", "ETag");
+				pass("last-modified", "Last-Modified");
+
+				return HttpServerResponse.raw(upstream.body, {
+					status: upstream.status,
+					statusText: upstream.statusText,
+					headers: forwarded,
+				});
+			});
+
 		if (urlParams.videoType === "raw-preview") {
 			const rawFileKey = yield* resolveRawPreviewKey(video);
-			return yield* bucket
-				.getSignedObjectUrl(rawFileKey)
-				.pipe(Effect.map(HttpServerResponse.redirect));
+			return yield* proxyObject(rawFileKey);
 		}
 
 		if (
@@ -289,16 +356,18 @@ const getPlaylistResponse = (
 				if (!hasResult) {
 					const rawKey = yield* resolveRawPreviewKey(video).pipe(Effect.option);
 					if (Option.isSome(rawKey)) {
-						return HttpServerResponse.redirect(
-							yield* bucket.getSignedObjectUrl(rawKey.value),
-						);
+						return yield* proxyObject(rawKey.value);
 					}
 				}
 			}
 
-			return HttpServerResponse.redirect(
-				yield* bucket.getSignedObjectUrl(redirect),
-			);
+			// Proxy mp4 bytes same-origin (no CORS); leave HLS .m3u8 as a redirect
+			// since its embedded segment URLs are resolved by the player directly.
+			return redirect.endsWith(".mp4")
+				? yield* proxyObject(redirect)
+				: HttpServerResponse.redirect(
+						yield* bucket.getSignedObjectUrl(redirect),
+					);
 		}
 
 		if (
@@ -342,9 +411,7 @@ const getPlaylistResponse = (
 			yield* Effect.log(
 				`Returning path ${`${video.ownerId}/${video.id}/result.mp4`}`,
 			);
-			return yield* bucket
-				.getSignedObjectUrl(`${video.ownerId}/${video.id}/result.mp4`)
-				.pipe(Effect.map(HttpServerResponse.redirect));
+			return yield* proxyObject(`${video.ownerId}/${video.id}/result.mp4`);
 		}
 
 		return yield* Effect.fail(new HttpApiError.NotFound());

@@ -25,8 +25,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import * as EffectRuntime from "@/lib/server";
-import { transcribeVideo } from "@/lib/transcribe";
-import { isAiGenerationEnabled } from "@/utils/flags";
 import { EmbedVideo } from "./_components/EmbedVideo";
 import { PasswordOverlay } from "./_components/PasswordOverlay";
 
@@ -57,7 +55,7 @@ export async function generateMetadata(
 						videos: [
 							{
 								url: new URL(
-									`/api/playlist?userId=${video.ownerId}&videoId=${video.id}`,
+									`/api/playlist?videoId=${video.id}`,
 									buildEnv.NEXT_PUBLIC_WEB_URL,
 								).toString(),
 								width: 1280,
@@ -82,7 +80,7 @@ export async function generateMetadata(
 								buildEnv.NEXT_PUBLIC_WEB_URL,
 							).toString(),
 							streamUrl: new URL(
-								`/api/playlist?userId=${video.ownerId}&videoId=${video.id}`,
+								`/api/playlist?videoId=${video.id}`,
 								buildEnv.NEXT_PUBLIC_WEB_URL,
 							).toString(),
 							width: 1280,
@@ -237,31 +235,8 @@ async function EmbedContent({
 		spaces: sharedSpaces,
 	});
 
-	let aiGenerationEnabled = false;
-	const videoOwnerQuery = await db()
-		.select({
-			email: users.email,
-			stripeSubscriptionStatus: users.stripeSubscriptionStatus,
-			thirdPartyStripeSubscriptionId: users.thirdPartyStripeSubscriptionId,
-		})
-		.from(users)
-		.where(eq(users.id, video.ownerId))
-		.limit(1);
-
-	if (videoOwnerQuery.length > 0 && videoOwnerQuery[0]) {
-		const videoOwner = videoOwnerQuery[0];
-		aiGenerationEnabled = await isAiGenerationEnabled(videoOwner);
-	}
-
-	if (
-		!rules.settings.disableTranscript &&
-		video.transcriptionStatus !== "COMPLETE" &&
-		video.transcriptionStatus !== "PROCESSING" &&
-		video.transcriptionStatus !== "SKIPPED" &&
-		video.transcriptionStatus !== "NO_AUDIO"
-	) {
-		transcribeVideo(video.id, video.ownerId, aiGenerationEnabled);
-	}
+	// On-demand AI: do NOT auto-transcribe when the embed loads. Transcription
+	// (and summary/tasks/refined) is triggered explicitly from the share page.
 
 	const currentMetadata = (video.metadata as VideoMetadata) || {};
 	let initialAiData = null;

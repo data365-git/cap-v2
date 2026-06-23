@@ -57,7 +57,6 @@ import {
 	isSocialCrawlerUserAgent,
 	SOCIAL_REFERRER_DOMAINS,
 } from "@/lib/social-crawlers";
-import { transcribeVideo } from "@/lib/transcribe";
 import {
 	isEditSourceKey,
 	reconcileStaleEditUpload,
@@ -570,24 +569,9 @@ async function AuthorizedContent({
 		aiGenerationEnabled = await isAiGenerationEnabled(videoOwner);
 	}
 
-	if (
-		transcriptionGenerationAvailable &&
-		!hasActiveUpload &&
-		video.transcriptionStatus !== "COMPLETE" &&
-		video.transcriptionStatus !== "PROCESSING" &&
-		video.transcriptionStatus !== "SKIPPED" &&
-		video.transcriptionStatus !== "NO_AUDIO"
-	) {
-		console.log("[ShareVideoPage] Starting transcription for video:", videoId);
-		transcribeVideo(videoId, video.owner.id, aiGenerationEnabled).catch(
-			(error) => {
-				console.error(
-					`[ShareVideoPage] Error transcribing video ${videoId}:`,
-					error,
-				);
-			},
-		);
-	}
+	// On-demand AI: transcription is NOT auto-started on page view (that spent
+	// Gemini tokens on every visit). The owner triggers it from the Transcript
+	// tab's Generate button (POST /api/videos/[videoId]/retry-transcription).
 
 	const currentMetadata = (video.metadata as VideoMetadata) || {};
 	const metadata = currentMetadata;

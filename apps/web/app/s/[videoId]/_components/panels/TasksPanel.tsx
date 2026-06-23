@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { GenerateSection } from "../GenerateSection";
 
 interface Task {
 	title: string;
@@ -12,6 +13,7 @@ interface Task {
 
 interface TasksPanelProps {
 	videoId: string;
+	transcriptionStatus?: string | null;
 	tasks?: Task[];
 }
 
@@ -81,6 +83,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 
 export function TasksPanel({
 	videoId,
+	transcriptionStatus,
 	tasks: initialTasks = [],
 }: TasksPanelProps) {
 	const [mode, setMode] = useState<TasksMode>("board");
@@ -127,9 +130,13 @@ export function TasksPanel({
 	if (total === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center px-4 py-10 text-center">
-				<p className="text-sm text-gray-500">
-					No tasks extracted from this meeting
-				</p>
+				<GenerateSection
+					videoId={videoId}
+					kind="ai"
+					label="Generate tasks"
+					description="No tasks extracted from this meeting"
+					transcriptReady={transcriptionStatus === "COMPLETE"}
+				/>
 			</div>
 		);
 	}
