@@ -36,6 +36,9 @@ if (!document.getElementById(HOST_ID)) {
   0%,100% { opacity: 1; }
   50%     { opacity: 0.25; }
 }
+@keyframes ov-spin {
+  to { transform: rotate(360deg); }
+}
 
 /* pill */
 .cap-ov-pill {
@@ -67,6 +70,16 @@ if (!document.getElementById(HOST_ID)) {
 }
 .cap-ov-dot--paused { background: #6b7280; animation: none; }
 .cap-ov-dot--blue   { background: #3b82f6; animation: none; }
+
+/* spinner for arming state */
+.cap-ov-spinner {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(249,250,251,0.25);
+  border-top-color: #f9fafb;
+  flex-shrink: 0;
+  animation: ov-spin .75s linear infinite;
+}
 
 .cap-ov-elapsed {
   font-size: 16px; font-weight: 600;
@@ -195,11 +208,16 @@ if (!document.getElementById(HOST_ID)) {
 	});
 	document.addEventListener("mouseup", () => { dragging = false; });
 
-	// ── Helpers ────────────────────────────────────────────────────────────
+	// ── Timer state (module-level so interval closure always reads current values) ──
 	let elapsedIv: ReturnType<typeof setInterval> | null = null;
 	let recStart = 0;
 	let lastStartedAt = 0;
 	let pauseBtnEl: HTMLButtonElement | null = null;
+
+	// Mutable pause tracking — NOT closure-captured, so the interval always reads live values.
+	let currentPaused = false;
+	let pausedAt = 0;       // wall-clock ms when the current pause began
+	let totalPausedMs = 0;  // cumulative paused duration to subtract from elapsed
 
 	function clearElapsed() {
 		if (elapsedIv !== null) { clearInterval(elapsedIv); elapsedIv = null; }
@@ -212,11 +230,23 @@ if (!document.getElementById(HOST_ID)) {
 		return h > 0 ? `${p(h)}:${p(m % 60)}:${p(s % 60)}` : `${p(m)}:${p(s % 60)}`;
 	}
 
+	function liveElapsed(): number {
+		// Elapsed time the recorder was actually running (excludes paused duration).
+		const pauseOffset = currentPaused ? (Date.now() - pausedAt) : 0;
+		return Date.now() - recStart - totalPausedMs - pauseOffset;
+	}
+
 	function mk(tag: string, cls?: string, text?: string): HTMLElement {
 		const el = document.createElement(tag);
 		if (cls)  el.className   = cls;
 		if (text) el.textContent = text;
 		return el;
+	}
+
+	function reAnimate() {
+		container.classList.remove("cap-ov-anim");
+		void (container as HTMLElement).offsetWidth; // force reflow
+		container.classList.add("cap-ov-anim");
 	}
 
 	// SVG icon strings (Lucide-style, 18×18 viewport)
@@ -234,34 +264,58 @@ if (!document.getElementById(HOST_ID)) {
 
 	// ── Phase renderers ────────────────────────────────────────────────────
 
+	function showArming() {
+		clearElapsed();
+		lastStartedAt = 0;
+		pauseBtnEl = null;
+		container.innerHTML = "";
+		reAnimate();
+		const pill = mk("div", "cap-ov-pill");
+		const left = mk("div", "cap-ov-left");
+		left.append(mk("span", "cap-ov-spinner"), mk("span", "cap-ov-elapsed", "Starting…"));
+		pill.appendChild(left);
+		container.appendChild(pill);
+	}
+
 	function showRecording(startedAt: number, paused: boolean) {
-		// If same recording already displayed, just update pause button.
+		// ── Update path: same recording, only pause state changed ──────────
 		if (lastStartedAt === startedAt && pauseBtnEl) {
+			const wasAlreadyPaused = currentPaused;
+
+			if (!wasAlreadyPaused && paused) {
+				// Transition → paused: record when the pause started.
+				pausedAt = Date.now();
+				currentPaused = true;
+			} else if (wasAlreadyPaused && !paused) {
+				// Transition → resumed: accumulate paused duration.
+				if (pausedAt > 0) totalPausedMs += Date.now() - pausedAt;
+				pausedAt = 0;
+				currentPaused = false;
+			}
+
 			setPauseIcon(pauseBtnEl, paused);
 			const dot = shadow.querySelector<HTMLElement>(".cap-ov-dot");
-			if (dot) {
-				dot.className = "cap-ov-dot" + (paused ? " cap-ov-dot--paused" : "");
-			}
+			if (dot) dot.className = "cap-ov-dot" + (paused ? " cap-ov-dot--paused" : "");
 			return;
 		}
 
-		// New recording — build pill.
+		// ── Full render: new recording (or returning to this tab) ──────────
 		lastStartedAt = startedAt;
 		pauseBtnEl = null;
+		currentPaused = paused;
+		pausedAt = paused ? Date.now() : 0; // if we join while already paused
+		totalPausedMs = 0;
 		clearElapsed();
 		recStart = startedAt;
 		container.innerHTML = "";
-		// Force re-trigger entrance animation (container may already be in the DOM).
-		container.classList.remove("cap-ov-anim");
-		void (container as HTMLElement).offsetWidth;
-		container.classList.add("cap-ov-anim");
+		reAnimate();
 
 		const pill = mk("div", "cap-ov-pill");
 
 		// Left: dot + timer
 		const left = mk("div", "cap-ov-left");
 		const dot  = mk("span", "cap-ov-dot" + (paused ? " cap-ov-dot--paused" : ""));
-		const elapsed = mk("span", "cap-ov-elapsed", fmt(Date.now() - startedAt));
+		const elapsed = mk("span", "cap-ov-elapsed", fmt(liveElapsed()));
 		elapsed.id = "cap-ov-elapsed";
 		left.append(dot, elapsed);
 
@@ -275,8 +329,8 @@ if (!document.getElementById(HOST_ID)) {
 		pauseBtn.className = "cap-ov-icon-btn";
 		setPauseIcon(pauseBtn, paused);
 		pauseBtn.addEventListener("click", () => {
-			const isPaused = pauseBtn.innerHTML === IC.play;
-			chrome.runtime.sendMessage({ type: isPaused ? "RESUME" : "PAUSE" }).catch(() => {});
+			// Read currentPaused (live) — not a closure over the initial paused value.
+			chrome.runtime.sendMessage({ type: currentPaused ? "RESUME" : "PAUSE" }).catch(() => {});
 		});
 
 		// Restart
@@ -307,10 +361,11 @@ if (!document.getElementById(HOST_ID)) {
 		pill.append(left, divider, actions);
 		container.appendChild(pill);
 
+		// Interval reads currentPaused/totalPausedMs from module scope — always live.
 		elapsedIv = setInterval(() => {
-			if (!paused) {
+			if (!currentPaused) {
 				const el = shadow.getElementById("cap-ov-elapsed");
-				if (el) el.textContent = fmt(Date.now() - recStart);
+				if (el) el.textContent = fmt(liveElapsed());
 			}
 		}, 500);
 	}
@@ -319,6 +374,7 @@ if (!document.getElementById(HOST_ID)) {
 		clearElapsed();
 		lastStartedAt = 0;
 		pauseBtnEl = null;
+		currentPaused = false;
 		container.innerHTML = "";
 		const pill = mk("div", "cap-ov-pill");
 		const left = mk("div", "cap-ov-left");
@@ -331,8 +387,9 @@ if (!document.getElementById(HOST_ID)) {
 		clearElapsed();
 		lastStartedAt = 0;
 		pauseBtnEl = null;
+		currentPaused = false;
 		container.innerHTML = "";
-		container.classList.add("cap-ov-anim");
+		reAnimate();
 
 		const card = mk("div", "cap-ov-card");
 		card.append(
@@ -375,8 +432,9 @@ if (!document.getElementById(HOST_ID)) {
 		clearElapsed();
 		lastStartedAt = 0;
 		pauseBtnEl = null;
+		currentPaused = false;
 		container.innerHTML = "";
-		container.classList.add("cap-ov-anim");
+		reAnimate();
 
 		const card = mk("div", "cap-ov-card");
 		const btn  = document.createElement("button");
@@ -395,6 +453,10 @@ if (!document.getElementById(HOST_ID)) {
 	type St = { kind: string; shareUrl?: string; reason?: string; startedAt?: number; paused?: boolean };
 	function handleState(state: St) {
 		switch (state.kind) {
+			case "arming":
+				// Visible during picker + 3-2-1 countdown — shows "Starting…" spinner pill.
+				showArming();
+				break;
 			case "recording":
 				showRecording(state.startedAt ?? Date.now(), state.paused === true);
 				break;
@@ -412,6 +474,7 @@ if (!document.getElementById(HOST_ID)) {
 				clearElapsed();
 				lastStartedAt = 0;
 				pauseBtnEl = null;
+				currentPaused = false;
 				host.remove();
 				break;
 		}
