@@ -1,7 +1,7 @@
 // Camera preview bubble — injected into the active tab when cameraOverlay is enabled.
 // Shows a live circular webcam feed that the user can drag and configure.
 // The preview is cosmetic; actual camera compositing happens in capture.ts.
-// The bubble bakes in at the bottom-right corner matching the canvas compositor.
+// The bubble bakes in at the bottom-left corner matching the canvas compositor.
 
 const CAM_HOST_ID = "cap-camera-host";
 if (!document.getElementById(CAM_HOST_ID)) {
@@ -17,7 +17,7 @@ if (!document.getElementById(CAM_HOST_ID)) {
 .cam-bubble {
   position: fixed;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
   z-index: 2147483646;
   display: flex;
   flex-direction: column;

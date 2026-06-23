@@ -18,6 +18,8 @@ import {
 // offscreen document did.
 
 let captureTabId: number | null = null;
+// When true, RECORDER_DISCARDED should go to idle (delete) instead of restarting.
+let pendingDeleteAfterDiscard = false;
 // Tabs that currently have overlay.js injected — used to re-inject on switch/reload.
 const overlayInjectedTabs = new Set<number>();
 
@@ -317,8 +319,16 @@ async function handleMessage(
 			return { ok: true };
 		}
 
+		// ── Overlay: delete (discard + cancel, no upload, no restart) ───────
+		case "DELETE_RECORDING": {
+			pendingDeleteAfterDiscard = true;
+			await sendToCapturePage({ type: "DISCARD_RECORDING" }).catch(() => {});
+			return { ok: true };
+		}
+
 		// ── Overlay: restart (discard + fresh take) ───────────────────────
 		case "RESTART": {
+			pendingDeleteAfterDiscard = false;
 			await sendToCapturePage({ type: "DISCARD_RECORDING" }).catch(() => {});
 			return { ok: true };
 		}
@@ -506,22 +516,26 @@ async function handleMessage(
 			return { ok: true };
 		}
 
-		// ── Capture page: recording discarded (restart path) ─────────────
+		// ── Capture page: recording discarded (restart OR delete path) ──────
 		case "RECORDER_DISCARDED": {
 			const discardSt = await getState();
-			const restartMode = discardSt.kind === "recording" ? discardSt.mode : "instruction";
-			const restartMeetingId = discardSt.kind === "recording" ? discardSt.meetingId : undefined;
-			const restartTabId = discardSt.kind === "recording" ? discardSt.tabId : undefined;
-
 			captureTabId = null;
-			clearOverlayTabs(); // Overlay self-removes via state→idle
-
+			clearOverlayTabs();
 			discardUpload();
 			stopKeepAlive();
-
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
 
+			if (pendingDeleteAfterDiscard) {
+				// DELETE path — just go idle, no restart.
+				pendingDeleteAfterDiscard = false;
+				return { ok: true };
+			}
+
+			// RESTART path — launch a fresh recording.
+			const restartMode = discardSt.kind === "recording" ? discardSt.mode : "instruction";
+			const restartMeetingId = discardSt.kind === "recording" ? discardSt.meetingId : undefined;
+			const restartTabId = discardSt.kind === "recording" ? discardSt.tabId : undefined;
 			const restartSettings = await getSettings();
 			await setState({ kind: "arming", mode: restartMode, meetingId: restartMeetingId, tabId: restartTabId });
 			await launchMeetCapture(restartMeetingId, restartTabId, restartSettings);

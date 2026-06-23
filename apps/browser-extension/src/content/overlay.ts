@@ -117,6 +117,8 @@ if (!document.getElementById(HOST_ID)) {
 .cap-ov-icon-btn:hover  { background: rgba(255,255,255,0.1); color: #f9fafb; }
 .cap-ov-icon-btn:active { background: rgba(255,255,255,0.16); }
 .cap-ov-icon-btn:disabled { opacity: .3; cursor: not-allowed; }
+.cap-ov-icon-btn--danger { color: rgba(248,113,113,0.75); }
+.cap-ov-icon-btn--danger:hover { background: rgba(239,68,68,0.18) !important; color: #f87171 !important; }
 
 /* Hover-expand wrapper for restart button.
    Compact state: max-width:0 + opacity:0 hides restart.
@@ -129,7 +131,7 @@ if (!document.getElementById(HOST_ID)) {
   display: flex;
 }
 .cap-ov-pill:hover .cap-ov-hover-wrap {
-  max-width: 46px;
+  max-width: 84px;   /* room for Restart (38px) + Delete (38px) + gap (8px) */
   opacity: 1;
 }
 
@@ -269,6 +271,7 @@ if (!document.getElementById(HOST_ID)) {
 		pause:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/></svg>`,
 		play:    `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21"/></svg>`,
 		restart: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><polyline points="3 3 3 8 8 8"/></svg>`,
+		trash:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
 		stop:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>`,
 	};
 
@@ -348,19 +351,34 @@ if (!document.getElementById(HOST_ID)) {
 			chrome.runtime.sendMessage({ type: currentPaused ? "RESUME" : "PAUSE" }).catch(() => {});
 		});
 
-		// Restart (hidden until hover — wrapped in .cap-ov-hover-wrap)
+		// ── Hover-expand section (Restart + Delete) ──────────────────────
+		const hoverWrap = document.createElement("div");
+		hoverWrap.className = "cap-ov-hover-wrap";
+
+		// Restart — discard current take, start fresh
 		const restartBtn = document.createElement("button");
 		restartBtn.className = "cap-ov-icon-btn";
 		restartBtn.innerHTML = IC.restart;
-		restartBtn.title = "Restart recording (discard this take)";
+		restartBtn.title = "Restart recording (discard and start over)";
 		restartBtn.addEventListener("click", () => {
 			restartBtn.disabled = true;
 			pauseBtn.disabled = true;
 			chrome.runtime.sendMessage({ type: "RESTART" }).catch(() => {});
 		});
-		const hoverWrap = document.createElement("div");
-		hoverWrap.className = "cap-ov-hover-wrap";
-		hoverWrap.appendChild(restartBtn);
+
+		// Delete — discard recording and cancel entirely (no upload, no restart)
+		const deleteBtn = document.createElement("button");
+		deleteBtn.className = "cap-ov-icon-btn cap-ov-icon-btn--danger";
+		deleteBtn.innerHTML = IC.trash;
+		deleteBtn.title = "Delete recording (discard, no upload)";
+		deleteBtn.addEventListener("click", () => {
+			deleteBtn.disabled = true;
+			restartBtn.disabled = true;
+			pauseBtn.disabled = true;
+			chrome.runtime.sendMessage({ type: "DELETE_RECORDING" }).catch(() => {});
+		});
+
+		hoverWrap.append(restartBtn, deleteBtn);
 
 		// Stop
 		const stopBtn = document.createElement("button");
@@ -371,6 +389,7 @@ if (!document.getElementById(HOST_ID)) {
 			stopBtn.disabled = true;
 			pauseBtn.disabled = true;
 			restartBtn.disabled = true;
+			deleteBtn.disabled = true;
 			chrome.runtime.sendMessage({ type: "STOP" }).catch(() => {});
 		});
 

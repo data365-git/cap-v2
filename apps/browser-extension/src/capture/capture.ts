@@ -18,7 +18,9 @@ interface RecCtx {
 	displayStream: MediaStream;
 	micStream: MediaStream | null;
 	cameraStream: MediaStream | null;
-	compositeRafId: number | null;
+	// Closure that sets a flag checked by the rAF loop; more reliable than
+	// storing a stale rAF ID (the ID changes every frame, ctx snapshot goes stale).
+	stopComposite: (() => void) | null;
 	audioCtx: AudioContext;
 	chunkIndex: number;
 }
@@ -92,7 +94,7 @@ function releaseStreams(): void {
 	for (const t of ctx.displayStream.getTracks()) t.stop();
 	if (ctx.micStream) for (const t of ctx.micStream.getTracks()) t.stop();
 	if (ctx.cameraStream) for (const t of ctx.cameraStream.getTracks()) t.stop();
-	if (ctx.compositeRafId !== null) cancelAnimationFrame(ctx.compositeRafId);
+	if (ctx.stopComposite) ctx.stopComposite();
 	ctx.audioCtx.close().catch(() => {});
 	ctx = null;
 }
@@ -416,9 +418,9 @@ async function run(): Promise<void> {
 	// Phase 4b: camera compositing (if enabled) ─────────────────────────
 	// Gets the camera stream here in the extension page context (same origin
 	// as the mic permission, no cross-origin issues). Composites onto a canvas
-	// so the camera bubble appears baked into the final video at bottom-right.
+	// so the camera bubble appears baked into the final video at bottom-left.
 	let cameraStream: MediaStream | null = null;
-	let compositeRafId: number | null = null;
+	let stopComposite: (() => void) | null = null;
 
 	if (settings.cameraEnabled) {
 		try {
@@ -454,13 +456,18 @@ async function run(): Promise<void> {
 		const ctx2d = canvas.getContext("2d")!;
 		const bubbleSize = Math.round(canvas.height * 0.22);
 		const pad = 20;
-		const bx = canvas.width  - pad - bubbleSize;
+		// Bottom-LEFT: matches the on-page camera-bubble preview position.
+		const bx = pad;
 		const by = canvas.height - pad - bubbleSize;
 		const cx = bx + bubbleSize / 2;
 		const cy = by + bubbleSize / 2;
 		const r  = bubbleSize / 2;
 
+		// Flag-based stop: the closure captures `running` by reference so it
+		// remains current no matter how many rAF callbacks fire after ctx is set.
+		let running = true;
 		function drawFrame() {
+			if (!running) return;
 			ctx2d.drawImage(dispVid, 0, 0, canvas.width, canvas.height);
 			// Circle clip for camera
 			ctx2d.save();
@@ -478,9 +485,10 @@ async function run(): Promise<void> {
 			ctx2d.strokeStyle = "rgba(255,255,255,0.85)";
 			ctx2d.lineWidth = 3;
 			ctx2d.stroke();
-			compositeRafId = requestAnimationFrame(drawFrame);
+			requestAnimationFrame(drawFrame);
 		}
 		drawFrame();
+		stopComposite = () => { running = false; };
 
 		const canvasStream = canvas.captureStream(30);
 		recordStream = new MediaStream([
@@ -589,7 +597,7 @@ async function run(): Promise<void> {
 		showUploading(0);
 	};
 
-	ctx = { recorder, displayStream, micStream, cameraStream, compositeRafId, audioCtx, chunkIndex };
+	ctx = { recorder, displayStream, micStream, cameraStream, stopComposite, audioCtx, chunkIndex };
 
 	// Update onended now that ctx exists (previous assignment above handled pre-ctx case).
 	if (vt.length > 0) {
