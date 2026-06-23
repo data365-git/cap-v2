@@ -122,17 +122,20 @@ if (!document.getElementById(HOST_ID)) {
 
 /* Hover-expand wrapper for restart button.
    Compact state: max-width:0 + opacity:0 hides restart.
+   pointer-events:none prevents invisible buttons intercepting clicks on Stop.
    Hover state (pill:hover): slides in. */
 .cap-ov-hover-wrap {
   overflow: hidden;
   max-width: 0;
   opacity: 0;
+  pointer-events: none;
   transition: max-width .2s ease, opacity .15s ease;
   display: flex;
 }
 .cap-ov-pill:hover .cap-ov-hover-wrap {
   max-width: 84px;   /* room for Restart (38px) + Delete (38px) + gap (8px) */
   opacity: 1;
+  pointer-events: all;
 }
 
 /* stop button */

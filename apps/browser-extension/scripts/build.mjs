@@ -65,6 +65,11 @@ const entryPoints = [
 		outfile: join(distDir, "camera-bubble.js"),
 		format: "iife",
 	},
+	{
+		path: join(srcDir, "camera-bubble/camera-bubble-page.ts"),
+		outfile: join(distDir, "camera-bubble-page.js"),
+		format: "esm",
+	},
 ];
 
 async function build() {
@@ -110,6 +115,7 @@ function copyAssets() {
 		{ dir: "options", files: ["options.html", "options.css"] },
 		{ dir: "grant-permission", files: ["grant-permission.html", "grant-permission.css"] },
 		{ dir: "capture", files: ["capture.html", "capture.css"] },
+		{ dir: "camera-bubble", files: ["camera-bubble.html"] },
 	];
 	for (const page of pages) {
 		for (const file of page.files) {

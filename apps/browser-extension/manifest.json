@@ -38,6 +38,10 @@
 		{
 			"resources": ["sounds/*", "icons/*"],
 			"matches": ["https://meet.google.com/*"]
+		},
+		{
+			"resources": ["camera-bubble.html"],
+			"matches": ["https://*/*", "http://*/*"]
 		}
 	],
 	"externally_connectable": {
