@@ -44,28 +44,33 @@ document.querySelectorAll<HTMLButtonElement>(".size-btn").forEach((btn) => {
 	});
 });
 
-// Turn off
+// Turn off — stop tracks here (have direct access to the stream) then notify parent.
 offBtn.addEventListener("click", () => {
-	const stream = vid.srcObject as MediaStream | null;
-	if (stream) stream.getTracks().forEach((t) => t.stop());
+	stopTracks();
 	window.parent.postMessage({ type: "cam-off" }, "*");
 });
 
-// Drag — setPointerCapture keeps firing even when pointer leaves iframe bounds.
-// Deltas are forwarded to the parent content script which moves the host div.
-let dragging = false;
+function stopTracks(): void {
+	const stream = vid.srcObject as MediaStream | null;
+	if (stream) stream.getTracks().forEach((t) => t.stop());
+	vid.srcObject = null;
+}
 
+// Parent teardown: stop tracks and ack so the parent knows it's safe to remove the host.
+window.addEventListener("message", (e) => {
+	if (e.source !== window.parent) return;
+	if (e.data?.type !== "cam-stop") return;
+	stopTracks();
+	window.parent.postMessage({ type: "cam-stopped" }, "*");
+});
+
+// Drag — the parent content script owns all drag logic via a viewport shield.
+// The iframe only signals drag-start with the pointer's initial client coordinates
+// (relative to the iframe viewport). The parent converts these to page coordinates
+// and captures all subsequent mousemove/mouseup on a transparent shield div,
+// preventing any underlying page elements from receiving those events.
 wrap.addEventListener("pointerdown", (e: PointerEvent) => {
 	if ((e.target as Element).closest("button, #menu-overlay")) return;
-	dragging = true;
-	wrap.setPointerCapture(e.pointerId);
 	e.preventDefault();
+	window.parent.postMessage({ type: "cam-drag-start", clientX: e.clientX, clientY: e.clientY }, "*");
 });
-
-wrap.addEventListener("pointermove", (e: PointerEvent) => {
-	if (!dragging) return;
-	window.parent.postMessage({ type: "cam-drag", dx: e.movementX, dy: e.movementY }, "*");
-});
-
-wrap.addEventListener("pointerup", () => { dragging = false; });
-wrap.addEventListener("pointercancel", () => { dragging = false; });
