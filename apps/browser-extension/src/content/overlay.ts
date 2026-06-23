@@ -118,6 +118,21 @@ if (!document.getElementById(HOST_ID)) {
 .cap-ov-icon-btn:active { background: rgba(255,255,255,0.16); }
 .cap-ov-icon-btn:disabled { opacity: .3; cursor: not-allowed; }
 
+/* Hover-expand wrapper for restart button.
+   Compact state: max-width:0 + opacity:0 hides restart.
+   Hover state (pill:hover): slides in. */
+.cap-ov-hover-wrap {
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width .2s ease, opacity .15s ease;
+  display: flex;
+}
+.cap-ov-pill:hover .cap-ov-hover-wrap {
+  max-width: 46px;
+  opacity: 1;
+}
+
 /* stop button */
 .cap-ov-btn-stop {
   background: #ef4444; color: #fff;
@@ -333,7 +348,7 @@ if (!document.getElementById(HOST_ID)) {
 			chrome.runtime.sendMessage({ type: currentPaused ? "RESUME" : "PAUSE" }).catch(() => {});
 		});
 
-		// Restart
+		// Restart (hidden until hover — wrapped in .cap-ov-hover-wrap)
 		const restartBtn = document.createElement("button");
 		restartBtn.className = "cap-ov-icon-btn";
 		restartBtn.innerHTML = IC.restart;
@@ -343,6 +358,9 @@ if (!document.getElementById(HOST_ID)) {
 			pauseBtn.disabled = true;
 			chrome.runtime.sendMessage({ type: "RESTART" }).catch(() => {});
 		});
+		const hoverWrap = document.createElement("div");
+		hoverWrap.className = "cap-ov-hover-wrap";
+		hoverWrap.appendChild(restartBtn);
 
 		// Stop
 		const stopBtn = document.createElement("button");
@@ -357,7 +375,7 @@ if (!document.getElementById(HOST_ID)) {
 		});
 
 		pauseBtnEl = pauseBtn;
-		actions.append(pauseBtn, restartBtn, stopBtn);
+		actions.append(pauseBtn, hoverWrap, stopBtn);
 		pill.append(left, divider, actions);
 		container.appendChild(pill);
 

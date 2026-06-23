@@ -27,6 +27,19 @@ const overlayInjectedTabs = new Set<number>();
 // the buffer before all chunks have been appended to it.
 let chunkTail: Promise<void> = Promise.resolve();
 
+// Inject camera-bubble.js into a tab (only when cameraOverlay is on).
+async function injectCameraBubble(tabId: number): Promise<void> {
+	try {
+		const tab = await chrome.tabs.get(tabId);
+		const url = tab.url ?? "";
+		if (!url || url.startsWith("chrome://") || url.startsWith("chrome-extension://") ||
+			url.startsWith("edge://") || url.startsWith("about:") || url.startsWith("data:")) return;
+	} catch { return; }
+	try {
+		await chrome.scripting.executeScript({ target: { tabId }, files: ["camera-bubble.js"] });
+	} catch { /* non-injectable page */ }
+}
+
 // Inject overlay.js into a tab if not already there; silently skip non-injectable pages.
 async function injectOverlay(tabId: number): Promise<void> {
 	if (overlayInjectedTabs.has(tabId)) return;
@@ -202,6 +215,8 @@ async function launchMeetCapture(
 	});
 	if (activeTab?.id != null) {
 		void injectOverlay(activeTab.id);
+		// Inject camera preview bubble if camera overlay is enabled
+		if (_settings.cameraOverlay) void injectCameraBubble(activeTab.id);
 	}
 
 	// capture.ts handles picker + getUserMedia + MediaRecorder in one context.
@@ -273,8 +288,8 @@ async function handleMessage(
 		// ── Popup: pause ──────────────────────────────────────────────────
 		case "PAUSE": {
 			const pauseSt = await getState();
-			if (pauseSt.kind === "recording") {
-				const next = { ...pauseSt, paused: true };
+			if (pauseSt.kind === "recording" && !pauseSt.paused) {
+				const next = { ...pauseSt, paused: true, pauseStartedAt: Date.now() };
 				await setState(next);
 				updateBadge(next);
 			}
@@ -285,8 +300,16 @@ async function handleMessage(
 		// ── Popup: resume ─────────────────────────────────────────────────
 		case "RESUME": {
 			const resumeSt = await getState();
-			if (resumeSt.kind === "recording") {
-				const next = { ...resumeSt, paused: false };
+			if (resumeSt.kind === "recording" && resumeSt.paused) {
+				const additionalPause = resumeSt.pauseStartedAt
+					? Date.now() - resumeSt.pauseStartedAt
+					: 0;
+				const next = {
+					...resumeSt,
+					paused: false,
+					pauseStartedAt: undefined,
+					totalPausedMs: resumeSt.totalPausedMs + additionalPause,
+				};
 				await setState(next);
 				updateBadge(next);
 			}
@@ -423,6 +446,7 @@ async function handleMessage(
 				tabId,
 				mime,
 				paused: false,
+				totalPausedMs: 0,
 			};
 			await setState(nextState);
 			startKeepAlive();
@@ -459,6 +483,14 @@ async function handleMessage(
 			// If CANCEL already moved us to idle, do not attempt to upload.
 			if (state.kind !== "recording") return { ok: true };
 
+			// Compute the true media duration (wall-clock minus paused intervals).
+			// If currently paused when stop fires, add the current pause segment too.
+			const now = Date.now();
+			const extraPause = state.paused && state.pauseStartedAt
+				? now - state.pauseStartedAt
+				: 0;
+			const durationMs = now - state.startedAt - state.totalPausedMs - extraPause;
+
 			const nextState: ExtensionState = {
 				kind: "uploading",
 				videoId: state.videoId,
@@ -470,7 +502,7 @@ async function handleMessage(
 			await setState(nextState);
 			stopKeepAlive();
 			updateBadge(nextState);
-			await finalizeUpload();
+			await finalizeUpload(durationMs);
 			return { ok: true };
 		}
 

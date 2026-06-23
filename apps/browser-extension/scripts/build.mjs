@@ -60,6 +60,11 @@ const entryPoints = [
 		outfile: join(distDir, "overlay.js"),
 		format: "iife",
 	},
+	{
+		path: join(srcDir, "content/camera-bubble.ts"),
+		outfile: join(distDir, "camera-bubble.js"),
+		format: "iife",
+	},
 ];
 
 async function build() {

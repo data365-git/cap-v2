@@ -29,6 +29,121 @@ export function discardUpload(): void {
 	inMemoryBuffer = new Uint8Array(0);
 }
 
+// ── Duration patching ─────────────────────────────────────────────────────
+// MediaRecorder produces WebM with Duration=0 and fragmented MP4 with
+// mvhd.duration=0, making the file non-seekable in most players.
+// These patchers find the duration field in the already-in-memory buffer
+// and overwrite it with the actual recording duration BEFORE upload.
+
+function readU32BE(b: Uint8Array, o: number): number {
+	return (((b[o] << 24) | (b[o+1] << 16) | (b[o+2] << 8) | b[o+3]) >>> 0);
+}
+function writeU32BE(b: Uint8Array, o: number, v: number): void {
+	b[o] = (v >>> 24) & 0xff; b[o+1] = (v >>> 16) & 0xff;
+	b[o+2] = (v >>> 8) & 0xff; b[o+3] = v & 0xff;
+}
+
+function findBox(b: Uint8Array, name: string, start: number, end?: number): number {
+	const [n0,n1,n2,n3] = [name.charCodeAt(0),name.charCodeAt(1),name.charCodeAt(2),name.charCodeAt(3)];
+	const lim = (end !== undefined ? Math.min(end, b.length) : b.length) - 8;
+	let i = start;
+	while (i <= lim) {
+		const sz = readU32BE(b, i);
+		if (sz < 8 || sz > b.length) break;
+		if (b[i+4]===n0 && b[i+5]===n1 && b[i+6]===n2 && b[i+7]===n3) return i;
+		i += sz;
+	}
+	return -1;
+}
+
+function patchMP4Duration(buf: Uint8Array, durationMs: number): void {
+	const moovOff = findBox(buf, "moov", 0);
+	if (moovOff < 0) return;
+	const moovSz = readU32BE(buf, moovOff);
+	const moovEnd = moovOff + moovSz;
+
+	function patchDurBox(boxOff: number): void {
+		if (boxOff < 0) return;
+		const ver = buf[boxOff + 8];
+		// version 0: timescale at +12, duration at +16 (both u32)
+		// version 1: timescale at +20, duration at +24 (u32 ts, u64 dur)
+		const tsOff = ver === 1 ? boxOff + 20 : boxOff + 12;
+		const durOff = ver === 1 ? boxOff + 24 : boxOff + 16;
+		const ts = readU32BE(buf, tsOff);
+		const dur = Math.round(durationMs * ts / 1000);
+		if (ver === 1) { writeU32BE(buf, durOff, 0); writeU32BE(buf, durOff+4, dur); }
+		else { writeU32BE(buf, durOff, dur); }
+	}
+
+	patchDurBox(findBox(buf, "mvhd", moovOff+8, moovEnd));
+
+	let trakOff = findBox(buf, "trak", moovOff+8, moovEnd);
+	while (trakOff >= 0 && trakOff < moovEnd) {
+		const trakSz = readU32BE(buf, trakOff);
+		const trakEnd = trakOff + trakSz;
+		// tkhd uses movie timescale (read from mvhd)
+		const tkhdOff = findBox(buf, "tkhd", trakOff+8, trakEnd);
+		if (tkhdOff >= 0) {
+			const mvhdOff = findBox(buf, "mvhd", moovOff+8, moovEnd);
+			const mvTs = mvhdOff >= 0 ? readU32BE(buf, buf[mvhdOff+8]===1 ? mvhdOff+20 : mvhdOff+12) : 1000;
+			const ver = buf[tkhdOff+8];
+			const dur = Math.round(durationMs * mvTs / 1000);
+			if (ver === 1) { writeU32BE(buf, tkhdOff+24, 0); writeU32BE(buf, tkhdOff+28, dur); }
+			else { writeU32BE(buf, tkhdOff+20, dur); }
+		}
+		// mdhd has its own timescale
+		const mdiaOff = findBox(buf, "mdia", trakOff+8, trakEnd);
+		if (mdiaOff >= 0) {
+			patchDurBox(findBox(buf, "mdhd", mdiaOff+8, mdiaOff + readU32BE(buf, mdiaOff)));
+		}
+		trakOff = findBox(buf, "trak", trakEnd, moovEnd);
+	}
+}
+
+function readVint(b: Uint8Array, off: number): { width: number; value: number } {
+	const byte0 = b[off] ?? 0;
+	let mask = 0x80, width = 1;
+	while ((byte0 & mask) === 0 && width < 8) { mask >>= 1; width++; }
+	let value = byte0 & (mask - 1);
+	for (let i = 1; i < width; i++) value = (value << 8) | (b[off+i] ?? 0);
+	return { width, value };
+}
+
+function patchWebMDuration(buf: Uint8Array, durationMs: number): void {
+	// Scan for Segment Info element (0x1549A966) in first 8KB
+	const limit = Math.min(buf.length, 8192);
+	for (let i = 0; i < limit - 12; i++) {
+		if (buf[i]===0x15 && buf[i+1]===0x49 && buf[i+2]===0xA9 && buf[i+3]===0x66) {
+			const { width, value: infoSize } = readVint(buf, i+4);
+			const body = i + 4 + width;
+			const infoEnd = Math.min(body + infoSize, buf.length);
+			// Scan Info body for Duration element (0x4489)
+			for (let j = body; j < infoEnd - 4; j++) {
+				if (buf[j] === 0x44 && buf[j+1] === 0x89) {
+					const { width: sw, value: elemSz } = readVint(buf, j+2);
+					const dataOff = j + 2 + sw;
+					const dv = new DataView(buf.buffer, buf.byteOffset + dataOff, elemSz);
+					if (elemSz >= 8) dv.setFloat64(0, durationMs, false);
+					else if (elemSz >= 4) dv.setFloat32(0, durationMs, false);
+					return;
+				}
+			}
+			break;
+		}
+	}
+}
+
+function patchDuration(buf: Uint8Array, durationMs: number): void {
+	if (durationMs <= 0 || buf.length < 8) return;
+	// MP4 magic: bytes 4-7 = 'ftyp'
+	if (buf[4]===0x66 && buf[5]===0x74 && buf[6]===0x79 && buf[7]===0x70) {
+		patchMP4Duration(buf, durationMs);
+	// WebM/MKV magic: 0x1A45DFA3
+	} else if (buf[0]===0x1A && buf[1]===0x45 && buf[2]===0xDF && buf[3]===0xA3) {
+		patchWebMDuration(buf, durationMs);
+	}
+}
+
 function drainBuffer(): Uint8Array {
 	const drained = inMemoryBuffer;
 	inMemoryBuffer = new Uint8Array(0);
@@ -209,7 +324,7 @@ export async function handleChunk(
 	}
 }
 
-export async function finalizeUpload(): Promise<void> {
+export async function finalizeUpload(durationMs = 0): Promise<void> {
 	const state = await getState();
 	if (state.kind !== "recording" && state.kind !== "uploading") return;
 
@@ -236,6 +351,7 @@ export async function finalizeUpload(): Promise<void> {
 	}
 
 	const remaining = drainBuffer();
+	if (durationMs > 0 && remaining.length >= 8) patchDuration(remaining, durationMs);
 	if (remaining.length > 0) {
 		try {
 			const completedPart = await uploadPart(

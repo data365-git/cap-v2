@@ -135,6 +135,15 @@ function lucideSVG(
 	return svg;
 }
 
+// lucide Home
+function iconHome(size = 18): SVGSVGElement {
+	return lucideSVG(
+		`<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+    <polyline points="9 22 9 12 15 12 15 22"/>`,
+		size,
+	);
+}
+
 // lucide Settings (gear)
 function iconSettings(size = 18): SVGSVGElement {
 	return lucideSVG(
@@ -305,13 +314,25 @@ function renderIdlePanel(
 	logoRow.appendChild(logoBadgeSVG(22));
 	logoRow.appendChild(el("span", { className: "hdr-text" }, "Cap"));
 
+	const hdrRight = el("div", { className: "hdr-right" });
+
+	const homeBtn = el("button", { className: "hdr-gear" });
+	homeBtn.title = "Open dashboard";
+	homeBtn.appendChild(iconHome(18));
+	homeBtn.addEventListener("click", () => {
+		chrome.tabs.create({ url: `${settings.apiBaseUrl}/dashboard` });
+		window.close();
+	});
+
 	const gearBtn = el("button", { className: "hdr-gear" });
 	gearBtn.title = "Settings";
 	gearBtn.appendChild(iconSettings(18));
 	gearBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
+	hdrRight.appendChild(homeBtn);
+	hdrRight.appendChild(gearBtn);
 	header.appendChild(logoRow);
-	header.appendChild(gearBtn);
+	header.appendChild(hdrRight);
 	root.appendChild(header);
 
 	// ── Actions ──

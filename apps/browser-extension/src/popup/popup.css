@@ -89,6 +89,12 @@ body {
 	background: #f0f0f0;
 }
 
+.hdr-right {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
 /* ── Action buttons ──────────────────────────────────────────────────── */
 
 .actions {

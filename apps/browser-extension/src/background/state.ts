@@ -41,6 +41,8 @@ interface RecordingState {
 	tabId?: number;
 	mime: string;
 	paused: boolean;
+	totalPausedMs: number;   // cumulative paused duration (ms) — used to compute true media duration
+	pauseStartedAt?: number; // wall-clock ms when current pause began (undefined if not paused)
 }
 
 interface UploadingState {

@@ -9,12 +9,16 @@ interface StoredSettings {
 	micEnabled?: boolean;
 	micDeviceId?: string;
 	soundEnabled?: boolean;
+	cameraOverlay?: boolean;
+	cameraDeviceId?: string;
 }
 
 interface RecCtx {
 	recorder: MediaRecorder;
 	displayStream: MediaStream;
 	micStream: MediaStream | null;
+	cameraStream: MediaStream | null;
+	compositeRafId: number | null;
 	audioCtx: AudioContext;
 	chunkIndex: number;
 }
@@ -69,6 +73,8 @@ async function readSettings(): Promise<{
 	micEnabled: boolean;
 	micDeviceId: string;
 	soundEnabled: boolean;
+	cameraEnabled: boolean;
+	cameraDeviceId: string;
 }> {
 	const got = await chrome.storage.local.get("capExtSettings");
 	const s = (got.capExtSettings as StoredSettings | undefined) ?? {};
@@ -76,6 +82,8 @@ async function readSettings(): Promise<{
 		micEnabled: s.micEnabled !== false,
 		micDeviceId: s.micDeviceId ?? "",
 		soundEnabled: s.soundEnabled !== false,
+		cameraEnabled: s.cameraOverlay === true,
+		cameraDeviceId: s.cameraDeviceId ?? "",
 	};
 }
 
@@ -83,6 +91,8 @@ function releaseStreams(): void {
 	if (!ctx) return;
 	for (const t of ctx.displayStream.getTracks()) t.stop();
 	if (ctx.micStream) for (const t of ctx.micStream.getTracks()) t.stop();
+	if (ctx.cameraStream) for (const t of ctx.cameraStream.getTracks()) t.stop();
+	if (ctx.compositeRafId !== null) cancelAnimationFrame(ctx.compositeRafId);
 	ctx.audioCtx.close().catch(() => {});
 	ctx = null;
 }
@@ -403,10 +413,86 @@ async function run(): Promise<void> {
 	if (micStream && micStream.getAudioTracks().length > 0)
 		audioCtx.createMediaStreamSource(micStream).connect(dest);
 
-	const recordStream = new MediaStream([
-		...displayStream.getVideoTracks(),
-		...dest.stream.getAudioTracks(),
-	]);
+	// Phase 4b: camera compositing (if enabled) ─────────────────────────
+	// Gets the camera stream here in the extension page context (same origin
+	// as the mic permission, no cross-origin issues). Composites onto a canvas
+	// so the camera bubble appears baked into the final video at bottom-right.
+	let cameraStream: MediaStream | null = null;
+	let compositeRafId: number | null = null;
+
+	if (settings.cameraEnabled) {
+		try {
+			const camC: MediaStreamConstraints = settings.cameraDeviceId
+				? { video: { deviceId: { exact: settings.cameraDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } } }
+				: { video: { width: { ideal: 640 }, height: { ideal: 480 } } };
+			cameraStream = await navigator.mediaDevices.getUserMedia(camC);
+		} catch {
+			cameraStream = null; // Camera unavailable — continue without it
+		}
+	}
+
+	let recordStream: MediaStream;
+
+	if (cameraStream) {
+		// Set up canvas compositor
+		const canvas = document.createElement("canvas");
+		const dispVid = document.createElement("video");
+		dispVid.srcObject = displayStream;
+		dispVid.muted = true;
+		await new Promise<void>((r) => { dispVid.onloadedmetadata = () => r(); });
+		await dispVid.play();
+
+		const camVid = document.createElement("video");
+		camVid.srcObject = cameraStream;
+		camVid.muted = true;
+		await new Promise<void>((r) => { camVid.onloadedmetadata = () => r(); });
+		await camVid.play();
+
+		canvas.width  = dispVid.videoWidth  || 1920;
+		canvas.height = dispVid.videoHeight || 1080;
+
+		const ctx2d = canvas.getContext("2d")!;
+		const bubbleSize = Math.round(canvas.height * 0.22);
+		const pad = 20;
+		const bx = canvas.width  - pad - bubbleSize;
+		const by = canvas.height - pad - bubbleSize;
+		const cx = bx + bubbleSize / 2;
+		const cy = by + bubbleSize / 2;
+		const r  = bubbleSize / 2;
+
+		function drawFrame() {
+			ctx2d.drawImage(dispVid, 0, 0, canvas.width, canvas.height);
+			// Circle clip for camera
+			ctx2d.save();
+			ctx2d.beginPath();
+			ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
+			ctx2d.clip();
+			// Mirror the camera horizontally
+			ctx2d.translate(cx, cy);
+			ctx2d.scale(-1, 1);
+			ctx2d.drawImage(camVid, -r, -r, bubbleSize, bubbleSize);
+			ctx2d.restore();
+			// White ring
+			ctx2d.beginPath();
+			ctx2d.arc(cx, cy, r + 2, 0, Math.PI * 2);
+			ctx2d.strokeStyle = "rgba(255,255,255,0.85)";
+			ctx2d.lineWidth = 3;
+			ctx2d.stroke();
+			compositeRafId = requestAnimationFrame(drawFrame);
+		}
+		drawFrame();
+
+		const canvasStream = canvas.captureStream(30);
+		recordStream = new MediaStream([
+			...canvasStream.getVideoTracks(),
+			...dest.stream.getAudioTracks(),
+		]);
+	} else {
+		recordStream = new MediaStream([
+			...displayStream.getVideoTracks(),
+			...dest.stream.getAudioTracks(),
+		]);
+	}
 
 	// Wire up "Stop sharing" bar early so countdown cancels cleanly.
 	const vt = displayStream.getVideoTracks();
@@ -503,7 +589,7 @@ async function run(): Promise<void> {
 		showUploading(0);
 	};
 
-	ctx = { recorder, displayStream, micStream, audioCtx, chunkIndex };
+	ctx = { recorder, displayStream, micStream, cameraStream, compositeRafId, audioCtx, chunkIndex };
 
 	// Update onended now that ctx exists (previous assignment above handled pre-ctx case).
 	if (vt.length > 0) {
