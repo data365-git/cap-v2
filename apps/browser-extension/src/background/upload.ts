@@ -114,6 +114,7 @@ async function uploadPart(
 export async function initializeUpload(
 	mode: "instruction" | "meeting",
 	meetingId?: string,
+	contentType = "video/webm",
 ): Promise<{ videoId: string; uploadId: string }> {
 	const settings = await requireSettings();
 	const api = createCapApi(settings.apiBaseUrl, settings.apiKey);
@@ -136,8 +137,12 @@ export async function initializeUpload(
 		meetingId,
 	});
 
+	// Use the actual recorder MIME so S3/R2 serves the correct Content-Type.
+	// Strip codec params (e.g. "video/mp4;codecs=h264" → "video/mp4") since
+	// S3 Content-Type must not contain codec parameters.
+	const baseContentType = contentType.split(";")[0].trim() || "video/webm";
 	const { uploadId } = await api.initiateMultipart({
-		contentType: "video/webm",
+		contentType: baseContentType,
 		videoId,
 		subpath: "result.mp4",
 	});

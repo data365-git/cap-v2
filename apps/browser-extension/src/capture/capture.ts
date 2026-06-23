@@ -26,6 +26,13 @@ let timerInterval: ReturnType<typeof setInterval> | null = null;
 let stoppedSent = false;
 let countdownCancelled = false;
 
+// Tracks how many ondataavailable → arrayBuffer() calls are still in-flight.
+// onstop MUST wait for these to reach zero before sending RECORDER_STOPPED,
+// otherwise the last chunk's RECORDER_CHUNK message arrives at the SW AFTER
+// RECORDER_STOPPED and gets silently dropped (SW state is already "uploading").
+let pendingChunkCount = 0;
+let resolveChunksDrained: (() => void) | null = null;
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function tell(msg: Record<string, unknown>): void {
@@ -455,14 +462,25 @@ async function run(): Promise<void> {
 
 	recorder.ondataavailable = async (e) => {
 		if (e.data.size <= 0) return;
-		const buffer = await e.data.arrayBuffer();
-		tell({
-			type: "RECORDER_CHUNK",
-			chunk: Array.from(new Uint8Array(buffer)),
-			index: chunkIndex++,
-			mime: recorder.mimeType,
-			ts: Date.now(),
-		});
+		// Increment BEFORE the async read so onstop sees the in-flight count.
+		pendingChunkCount++;
+		try {
+			const buffer = await e.data.arrayBuffer();
+			tell({
+				type: "RECORDER_CHUNK",
+				chunk: Array.from(new Uint8Array(buffer)),
+				index: chunkIndex++,
+				mime: recorder.mimeType,
+				ts: Date.now(),
+			});
+		} finally {
+			pendingChunkCount--;
+			if (pendingChunkCount === 0 && resolveChunksDrained) {
+				const cb = resolveChunksDrained;
+				resolveChunksDrained = null;
+				cb();
+			}
+		}
 	};
 
 	recorder.onerror = () => {
@@ -471,7 +489,14 @@ async function run(): Promise<void> {
 		showError("MediaRecorder encountered an error.");
 	};
 
-	recorder.onstop = () => {
+	// Async onstop: wait for every in-flight arrayBuffer()+tell() to complete
+	// before sending RECORDER_STOPPED. Without this gate, onstop fires (sync)
+	// while the last ondataavailable is still awaiting arrayBuffer(), so
+	// RECORDER_STOPPED reaches the SW before the final RECORDER_CHUNK.
+	recorder.onstop = async () => {
+		if (pendingChunkCount > 0) {
+			await new Promise<void>((resolve) => { resolveChunksDrained = resolve; });
+		}
 		releaseStreams();
 		if (settings.soundEnabled) playSound(soundRecordStop);
 		sendStopped();
@@ -528,6 +553,9 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 			// Stop recorder without uploading — sends RECORDER_DISCARDED instead of RECORDER_STOPPED.
 			countdownCancelled = true;
 			stoppedSent = true; // Prevent the normal onstop from sending RECORDER_STOPPED.
+			// Drain the pending-chunks gate so no future resolveChunksDrained fires.
+			pendingChunkCount = 0;
+			resolveChunksDrained = null;
 			if (ctx && ctx.recorder.state !== "inactive") {
 				ctx.recorder.onstop = () => {
 					releaseStreams();

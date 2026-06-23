@@ -21,6 +21,12 @@ let captureTabId: number | null = null;
 // Tabs that currently have overlay.js injected — used to re-inject on switch/reload.
 const overlayInjectedTabs = new Set<number>();
 
+// Promise chain that serializes RECORDER_CHUNK processing relative to
+// RECORDER_STOPPED. Each CHUNK chains handleChunk() onto this tail; STOPPED
+// awaits the tail before finalizing. Prevents finalizeUpload() from draining
+// the buffer before all chunks have been appended to it.
+let chunkTail: Promise<void> = Promise.resolve();
+
 // Inject overlay.js into a tab if not already there; silently skip non-injectable pages.
 async function injectOverlay(tabId: number): Promise<void> {
 	if (overlayInjectedTabs.has(tabId)) return;
@@ -184,6 +190,10 @@ async function launchMeetCapture(
 	_tabId: number | undefined,
 	_settings: ExtensionSettings,
 ): Promise<void> {
+	// Reset the chunk serialization tail so prior-recording chain entries
+	// don't block the new recording's RECORDER_STOPPED processing.
+	chunkTail = Promise.resolve();
+
 	// Pre-inject overlay into the active tab NOW (during arming/countdown) so
 	// it is already in the page and appears instantly when recording starts.
 	const [activeTab] = await chrome.tabs.query({
@@ -384,7 +394,7 @@ async function handleMessage(
 			let videoId: string;
 			let uploadId: string;
 			try {
-				const result = await initializeUpload(mode, meetingId);
+				const result = await initializeUpload(mode, meetingId, mime);
 				videoId = result.videoId;
 				uploadId = result.uploadId;
 			} catch (err) {
@@ -429,13 +439,20 @@ async function handleMessage(
 			const index = getNumber(msg, "index") ?? 0;
 			const mime = getString(msg, "mime") ?? "video/webm";
 			if (raw && Array.isArray(raw) && raw.length > 0) {
-				await handleChunk(new Uint8Array(raw).buffer, index, mime);
+				const ab = new Uint8Array(raw).buffer;
+				// Chain onto chunkTail: RECORDER_STOPPED awaits this tail, so
+				// finalizeUpload() cannot drain the buffer until every chunk appends.
+				chunkTail = chunkTail.then(() => handleChunk(ab, index, mime)).catch(() => {});
+				await chunkTail;
 			}
 			return { ok: true };
 		}
 
 		// ── Capture page: recorder stopped ───────────────────────────────
 		case "RECORDER_STOPPED": {
+			// Wait for every RECORDER_CHUNK that arrived before this message to
+			// finish appending to inMemoryBuffer before finalizeUpload drains it.
+			await chunkTail;
 			captureTabId = null;
 			clearOverlayTabs(); // Overlay self-removes via state→uploading/complete
 			const state = await getState();
