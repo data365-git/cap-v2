@@ -1,6 +1,6 @@
 // Extension page — NOT a service worker.
 // Handles the full recording pipeline in one context:
-//   chooseDesktopMedia → getUserMedia → MediaRecorder → RECORDER_CHUNK → RECORDER_STOPPED
+//   chooseDesktopMedia → getUserMedia → 3-2-1 countdown → MediaRecorder
 // Stays open after recording ends to show upload progress and the share link.
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -8,6 +8,7 @@
 interface StoredSettings {
 	micEnabled?: boolean;
 	micDeviceId?: string;
+	soundEnabled?: boolean;
 }
 
 interface RecCtx {
@@ -23,6 +24,7 @@ interface RecCtx {
 let ctx: RecCtx | null = null;
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let stoppedSent = false;
+let countdownCancelled = false;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -31,17 +33,16 @@ function tell(msg: Record<string, unknown>): void {
 }
 
 function stopTimer(): void {
-	if (timerInterval !== null) {
-		clearInterval(timerInterval);
-		timerInterval = null;
-	}
+	if (timerInterval !== null) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
 }
 
 function formatElapsed(ms: number): string {
 	const s = Math.max(0, Math.floor(ms / 1000));
-	const h = Math.floor(s / 3600);
-	const m = Math.floor((s % 3600) / 60);
-	const sec = s % 60;
+	const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
 	return [h, m, sec].map((v) => String(v).padStart(2, "0")).join(":");
 }
 
@@ -53,21 +54,21 @@ function pickMime(): string {
 		"video/webm;codecs=vp8,opus",
 		"video/webm",
 	];
-	for (const m of prefs) {
-		if (MediaRecorder.isTypeSupported(m)) return m;
-	}
+	for (const m of prefs) if (MediaRecorder.isTypeSupported(m)) return m;
 	return "video/webm";
 }
 
 async function readSettings(): Promise<{
 	micEnabled: boolean;
 	micDeviceId: string;
+	soundEnabled: boolean;
 }> {
 	const got = await chrome.storage.local.get("capExtSettings");
 	const s = (got.capExtSettings as StoredSettings | undefined) ?? {};
 	return {
 		micEnabled: s.micEnabled !== false,
 		micDeviceId: s.micDeviceId ?? "",
+		soundEnabled: s.soundEnabled !== false,
 	};
 }
 
@@ -82,44 +83,77 @@ function releaseStreams(): void {
 async function closeSelf(): Promise<void> {
 	try {
 		const tab = await chrome.tabs.getCurrent();
-		if (tab?.id !== undefined) {
-			chrome.tabs.remove(tab.id);
-			return;
-		}
-	} catch {
-		// fallthrough
-	}
+		if (tab?.id !== undefined) { chrome.tabs.remove(tab.id); return; }
+	} catch { /* fallthrough */ }
 	window.close();
+}
+
+// ── Sound ─────────────────────────────────────────────────────────────────
+
+function _sine(
+	ac: AudioContext, freq: number, t: number,
+	off: number, dur: number, vol: number,
+): void {
+	const osc = ac.createOscillator(), g = ac.createGain();
+	osc.connect(g); g.connect(ac.destination);
+	osc.type = "sine";
+	osc.frequency.setValueAtTime(freq, t + off);
+	g.gain.setValueAtTime(0, t + off);
+	g.gain.linearRampToValueAtTime(vol, t + off + 0.008);
+	g.gain.exponentialRampToValueAtTime(0.001, t + off + dur);
+	osc.start(t + off); osc.stop(t + off + dur);
+}
+
+function playSound(fn: (ac: AudioContext, t: number) => void): void {
+	try {
+		const ac = new AudioContext();
+		const go = () => {
+			fn(ac, ac.currentTime);
+			setTimeout(() => ac.close().catch(() => {}), 1500);
+		};
+		if (ac.state === "suspended") ac.resume().then(go).catch(() => {});
+		else go();
+	} catch (_) { /* no audio ctx */ }
+}
+
+function soundTick(ac: AudioContext, t: number): void {
+	const osc = ac.createOscillator(), g = ac.createGain();
+	osc.connect(g); g.connect(ac.destination);
+	osc.type = "sine";
+	osc.frequency.setValueAtTime(600, t);
+	g.gain.setValueAtTime(0, t);
+	g.gain.linearRampToValueAtTime(0.1, t + 0.005);
+	g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+	osc.start(t); osc.stop(t + 0.12);
+}
+
+function soundChime(ac: AudioContext, t: number): void {
+	_sine(ac, 880,  t, 0,    0.38, 0.22);
+	_sine(ac, 1318, t, 0.16, 0.5,  0.18);
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
 
-function $root(): HTMLElement {
-	return document.getElementById("root")!;
-}
+function $root(): HTMLElement { return document.getElementById("root")!; }
 
 function mk<K extends keyof HTMLElementTagNameMap>(
-	tag: K,
-	cls = "",
-	text = "",
+	tag: K, cls = "", text = "",
 ): HTMLElementTagNameMap[K] {
 	const el = document.createElement(tag);
-	if (cls) el.className = cls;
+	if (cls)  el.className   = cls;
 	if (text) el.textContent = text;
 	return el;
 }
 
-function mkCard(): HTMLDivElement {
-	return mk("div", "card");
-}
+function mkCard(): HTMLDivElement { return mk("div", "card"); }
 
-const ns = "http://www.w3.org/2000/svg";
+const SVG_NS = "http://www.w3.org/2000/svg";
 function mkLogo(size = 40): SVGSVGElement {
-	const svg = document.createElementNS(ns, "svg");
-	svg.setAttribute("width", String(size));
-	svg.setAttribute("height", String(size));
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("width",   String(size));
+	svg.setAttribute("height",  String(size));
 	svg.setAttribute("viewBox", "0 0 40 40");
-	svg.setAttribute("fill", "none");
+	svg.setAttribute("fill",    "none");
 	svg.innerHTML = `
     <rect width="40" height="40" fill="#fff" rx="8"/>
     <path fill="#4785FF" d="M20 36c8.837 0 16-7.163 16-16 0-8.836-7.163-16-16-16-8.836 0-16 7.164-16 16 0 8.837 7.164 16 16 16z"/>
@@ -133,39 +167,42 @@ function mkLogo(size = 40): SVGSVGElement {
 
 function showPicker(): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 	card.appendChild(mkLogo());
 	card.appendChild(mk("p", "phase-title", "Opening screen picker…"));
-	card.appendChild(
-		mk("p", "phase-sub", "Choose a screen or window to record."),
-	);
+	card.appendChild(mk("p", "phase-sub",   "Choose a screen or window to record."));
 	root.appendChild(card);
 }
 
 function showStarting(): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 	card.appendChild(mkLogo());
 	card.appendChild(mk("div", "spinner"));
-	card.appendChild(mk("p", "phase-title", "Starting recording…"));
+	card.appendChild(mk("p", "phase-title", "Preparing…"));
+	root.appendChild(card);
+}
+
+function showCountdown(n: number): void {
+	stopTimer();
+	const root = $root(); root.innerHTML = "";
+	const card = mkCard();
+	card.appendChild(mkLogo());
+	card.appendChild(mk("div", "countdown-num", String(n)));
+	card.appendChild(mk("p",  "phase-sub", "Recording starts in…"));
 	root.appendChild(card);
 }
 
 function showRecording(startedAt: number): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 
 	const header = mk("div", "rec-header");
-	const dot = mk("span", "rec-dot");
-	const label = mk("span", "rec-label", "Recording");
-	header.appendChild(dot);
-	header.appendChild(label);
+	header.appendChild(mk("span", "rec-dot"));
+	header.appendChild(mk("span", "rec-label", "Recording"));
 	card.appendChild(header);
 
 	const timerEl = mk("div", "rec-timer", formatElapsed(Date.now() - startedAt));
@@ -175,13 +212,9 @@ function showRecording(startedAt: number): void {
 	stopBtn.addEventListener("click", () => {
 		stopBtn.disabled = true;
 		stopBtn.textContent = "Stopping…";
-		if (ctx && ctx.recorder.state !== "inactive") {
-			ctx.recorder.stop();
-		} else {
-			sendStopped();
-		}
+		if (ctx && ctx.recorder.state !== "inactive") ctx.recorder.stop();
+		else sendStopped();
 	});
-
 	card.appendChild(stopBtn);
 	root.appendChild(card);
 
@@ -192,22 +225,18 @@ function showRecording(startedAt: number): void {
 
 function showUploading(pct: number): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 	card.appendChild(mkLogo());
 	card.appendChild(mk("div", "spinner"));
 	card.appendChild(mk("p", "phase-title", "Uploading…"));
-	card.appendChild(
-		mk("p", "upload-pct", pct > 0 ? `${pct}%` : ""),
-	);
+	if (pct > 0) card.appendChild(mk("p", "upload-pct", `${pct}%`));
 	root.appendChild(card);
 }
 
 function showFinishing(): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 	card.appendChild(mkLogo());
 	card.appendChild(mk("div", "spinner"));
@@ -217,8 +246,7 @@ function showFinishing(): void {
 
 function showComplete(shareUrl: string): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 
 	const icon = mk("div", "complete-icon");
@@ -235,7 +263,7 @@ function showComplete(shareUrl: string): void {
 	urlEl.addEventListener("click", () => {
 		navigator.clipboard.writeText(shareUrl).then(() => {
 			urlEl.textContent = "Copied!";
-			setTimeout(() => (urlEl.textContent = shareUrl), 2000);
+			setTimeout(() => { urlEl.textContent = shareUrl; }, 2000);
 		}).catch(() => {});
 	});
 	card.appendChild(urlEl);
@@ -244,7 +272,7 @@ function showComplete(shareUrl: string): void {
 	copyBtn.addEventListener("click", () => {
 		navigator.clipboard.writeText(shareUrl).then(() => {
 			copyBtn.textContent = "Copied!";
-			setTimeout(() => (copyBtn.textContent = "Copy link"), 2000);
+			setTimeout(() => { copyBtn.textContent = "Copy link"; }, 2000);
 		}).catch(() => {});
 	});
 
@@ -252,21 +280,18 @@ function showComplete(shareUrl: string): void {
 	openBtn.addEventListener("click", () => chrome.tabs.create({ url: shareUrl }));
 
 	const row = mk("div", "btn-row");
-	row.appendChild(copyBtn);
-	row.appendChild(openBtn);
+	row.appendChild(copyBtn); row.appendChild(openBtn);
 	card.appendChild(row);
 
 	const doneBtn = mk("button", "link-btn", "Done");
 	doneBtn.addEventListener("click", () => closeSelf());
 	card.appendChild(doneBtn);
-
 	root.appendChild(card);
 }
 
 function showError(reason: string): void {
 	stopTimer();
-	const root = $root();
-	root.innerHTML = "";
+	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
 
 	const icon = mk("div", "error-icon");
@@ -279,22 +304,18 @@ function showError(reason: string): void {
 
 	card.appendChild(icon);
 	card.appendChild(mk("p", "phase-title", "Recording failed"));
-	card.appendChild(mk("p", "error-msg", reason));
+	card.appendChild(mk("p", "error-msg",   reason));
 
 	const dismissBtn = mk("button", "action-btn action-btn--secondary", "Dismiss");
 	dismissBtn.addEventListener("click", () => closeSelf());
 	card.appendChild(dismissBtn);
-
 	root.appendChild(card);
 }
 
 // ── Recording helpers ─────────────────────────────────────────────────────
 
 function sendStopped(): void {
-	if (!stoppedSent) {
-		stoppedSent = true;
-		tell({ type: "RECORDER_STOPPED" });
-	}
+	if (!stoppedSent) { stoppedSent = true; tell({ type: "RECORDER_STOPPED" }); }
 }
 
 // ── Main recording flow ───────────────────────────────────────────────────
@@ -331,14 +352,10 @@ async function run(): Promise<void> {
 			displayStream = await navigator.mediaDevices.getUserMedia({
 				video: vidC,
 				audio: {
-					mandatory: {
-						chromeMediaSource: "desktop",
-						chromeMediaSourceId: streamId,
-					},
+					mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId },
 				} as unknown as MediaTrackConstraints,
 			});
 		} catch {
-			// Screen/window sources have no audio track — retry video-only.
 			displayStream = await navigator.mediaDevices.getUserMedia({ video: vidC });
 		}
 	} catch (err) {
@@ -358,29 +375,67 @@ async function run(): Promise<void> {
 				: { audio: true };
 			micStream = await navigator.mediaDevices.getUserMedia(c);
 		} catch {
-			try {
-				micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			} catch {
-				// Continue without mic.
-			}
+			try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+			catch { /* no mic */ }
 		}
 	}
 
 	// Phase 4: mix audio
 	const audioCtx = new AudioContext({ sampleRate: 48_000 });
 	const dest = audioCtx.createMediaStreamDestination();
-	if (displayStream.getAudioTracks().length > 0) {
+	if (displayStream.getAudioTracks().length > 0)
 		audioCtx.createMediaStreamSource(displayStream).connect(dest);
-	}
-	if (micStream && micStream.getAudioTracks().length > 0) {
+	if (micStream && micStream.getAudioTracks().length > 0)
 		audioCtx.createMediaStreamSource(micStream).connect(dest);
-	}
+
 	const recordStream = new MediaStream([
 		...displayStream.getVideoTracks(),
 		...dest.stream.getAudioTracks(),
 	]);
 
-	// Phase 5: MediaRecorder
+	// Wire up "Stop sharing" bar early so countdown cancels cleanly.
+	const vt = displayStream.getVideoTracks();
+	if (vt.length > 0) {
+		vt[0].onended = () => {
+			countdownCancelled = true;
+			if (ctx && ctx.recorder.state !== "inactive") {
+				ctx.recorder.stop();
+			} else {
+				// Sharing ended during countdown — stop streams and report.
+				for (const t of displayStream.getTracks()) t.stop();
+				if (micStream) for (const t of micStream.getTracks()) t.stop();
+				audioCtx.close().catch(() => {});
+				sendStopped();
+				showUploading(0);
+			}
+		};
+	}
+
+	// Phase 5: 3-2-1 countdown
+	const COUNTDOWN = 3;
+	for (let i = COUNTDOWN; i >= 1; i--) {
+		if (countdownCancelled) {
+			for (const t of displayStream.getTracks()) t.stop();
+			if (micStream) for (const t of micStream.getTracks()) t.stop();
+			audioCtx.close().catch(() => {});
+			tell({ type: "CAPTURE_CANCELLED" });
+			await closeSelf();
+			return;
+		}
+		showCountdown(i);
+		if (settings.soundEnabled) playSound(soundTick);
+		await sleep(1000);
+	}
+	if (countdownCancelled) {
+		for (const t of displayStream.getTracks()) t.stop();
+		if (micStream) for (const t of micStream.getTracks()) t.stop();
+		audioCtx.close().catch(() => {});
+		tell({ type: "CAPTURE_CANCELLED" });
+		await closeSelf();
+		return;
+	}
+
+	// Phase 6: MediaRecorder
 	const mime = pickMime();
 	const recorder = new MediaRecorder(recordStream, {
 		mimeType: mime,
@@ -411,36 +466,35 @@ async function run(): Promise<void> {
 	recorder.onstop = () => {
 		releaseStreams();
 		sendStopped();
-		// Show uploading UI — tab stays open until STATE_CHANGED "complete" arrives.
 		showUploading(0);
 	};
 
-	// Auto-stop when user clicks "Stop sharing" in the browser bar.
-	const vt = displayStream.getVideoTracks();
+	ctx = { recorder, displayStream, micStream, audioCtx, chunkIndex };
+
+	// Update onended now that ctx exists (previous assignment above handled pre-ctx case).
 	if (vt.length > 0) {
 		vt[0].onended = () => {
 			if (ctx && ctx.recorder.state !== "inactive") ctx.recorder.stop();
 		};
 	}
 
-	ctx = { recorder, displayStream, micStream, audioCtx, chunkIndex };
 	recorder.start(1_000);
-
-	// Transition UI immediately (before SW confirms via STATE_CHANGED).
 	const localStartedAt = Date.now();
-	showRecording(localStartedAt);
 
+	// Play start chime and show recording UI.
+	if (settings.soundEnabled) playSound(soundChime);
+	showRecording(localStartedAt);
 	tell({ type: "RECORDER_STARTED", mime });
 }
 
-// ── Message listener (commands from SW + state broadcasts) ────────────────
+// ── Message listener ──────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 	const msg = raw as { type?: string; state?: Record<string, unknown> };
 
 	switch (msg.type) {
-		// Commands from SW
 		case "STOP_CAPTURE":
+			countdownCancelled = true;
 			if (ctx && ctx.recorder.state !== "inactive") {
 				ctx.recorder.stop();
 			} else {
@@ -461,46 +515,29 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 			sendResponse({ ok: true });
 			return true;
 
-		// State broadcasts from SW — drive the post-recording UI
 		case "STATE_CHANGED": {
 			const state = msg.state as { kind: string; [k: string]: unknown } | undefined;
 			if (!state) break;
-
 			switch (state.kind) {
 				case "recording": {
-					const startedAt = typeof state.startedAt === "number"
-						? state.startedAt
-						: Date.now();
-					// Only re-render if we're still in the recording phase
-					// (don't overwrite uploading/complete UI on delayed broadcasts).
+					const startedAt = typeof state.startedAt === "number" ? state.startedAt : Date.now();
 					if (ctx) showRecording(startedAt);
 					break;
 				}
 				case "uploading": {
-					const uploaded = typeof state.uploadedBytes === "number"
-						? state.uploadedBytes
-						: 0;
-					const total = typeof state.totalBytes === "number"
-						? state.totalBytes
-						: 0;
-					const pct = total > 0 ? Math.round((uploaded / total) * 100) : 0;
-					showUploading(pct);
+					const up   = typeof state.uploadedBytes === "number" ? state.uploadedBytes : 0;
+					const tot  = typeof state.totalBytes    === "number" ? state.totalBytes    : 0;
+					showUploading(tot > 0 ? Math.round((up / tot) * 100) : 0);
 					break;
 				}
-				case "finishing":
-					showFinishing();
-					break;
+				case "finishing": showFinishing(); break;
 				case "complete": {
-					const shareUrl = typeof state.shareUrl === "string"
-						? state.shareUrl
-						: "";
+					const shareUrl = typeof state.shareUrl === "string" ? state.shareUrl : "";
 					showComplete(shareUrl);
 					break;
 				}
 				case "error": {
-					const reason = typeof state.reason === "string"
-						? state.reason
-						: "An error occurred.";
+					const reason = typeof state.reason === "string" ? state.reason : "An error occurred.";
 					showError(reason);
 					break;
 				}

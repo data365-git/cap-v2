@@ -17,6 +17,8 @@ import {
 // offscreen document did.
 
 let captureTabId: number | null = null;
+// Tab that was active before capture.html opened — overlay injected here.
+let overlayTargetTabId: number | null = null;
 
 // Detect capture tab closed before recording ends.
 chrome.tabs.onRemoved.addListener((removedTabId: number) => {
@@ -123,6 +125,21 @@ async function launchMeetCapture(
 	_tabId: number | undefined,
 	_settings: ExtensionSettings,
 ): Promise<void> {
+	// Remember the active tab so we can inject the floating overlay there.
+	const [activeTab] = await chrome.tabs.query({
+		active: true,
+		lastFocusedWindow: true,
+	});
+	const prevUrl = activeTab?.url ?? "";
+	overlayTargetTabId =
+		activeTab?.id != null &&
+		!prevUrl.startsWith("chrome://") &&
+		!prevUrl.startsWith("chrome-extension://") &&
+		!prevUrl.startsWith("about:") &&
+		!prevUrl.startsWith("edge://")
+			? activeTab.id
+			: null;
+
 	// capture.ts handles picker + getUserMedia + MediaRecorder in one context.
 	// It reads mic settings from storage directly, so we only need to open it.
 	const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
@@ -218,6 +235,7 @@ async function handleMessage(
 				chrome.tabs.remove(captureTabId).catch(() => {});
 				captureTabId = null;
 			}
+			overlayTargetTabId = null;
 			await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
@@ -327,6 +345,20 @@ async function handleMessage(
 			await setState(nextState);
 			startKeepAlive();
 			updateBadge(nextState);
+
+			// Inject the floating overlay into the tab that was active before recording.
+			if (overlayTargetTabId !== null) {
+				chrome.scripting
+					.executeScript({
+						target: { tabId: overlayTargetTabId },
+						files: ["overlay.js"],
+					})
+					.catch(() => {
+						// Tab may be gone or non-injectable (chrome://, PDF, etc.) — ok.
+						overlayTargetTabId = null;
+					});
+			}
+
 			return { ok: true };
 		}
 
@@ -344,6 +376,7 @@ async function handleMessage(
 		// ── Capture page: recorder stopped ───────────────────────────────
 		case "RECORDER_STOPPED": {
 			captureTabId = null;
+			overlayTargetTabId = null;
 			const state = await getState();
 			// If CANCEL already moved us to idle, do not attempt to upload.
 			if (state.kind !== "recording") return { ok: true };
@@ -366,6 +399,7 @@ async function handleMessage(
 		// ── Capture page: recorder error ─────────────────────────────────
 		case "RECORDER_ERROR": {
 			captureTabId = null;
+			overlayTargetTabId = null;
 			const error = getString(msg, "error") ?? "Unknown recorder error";
 			const state = await getState();
 			const previousVideoId =

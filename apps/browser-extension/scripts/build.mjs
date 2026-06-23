@@ -55,6 +55,11 @@ const entryPoints = [
 		outfile: join(distDir, "capture.js"),
 		format: "esm",
 	},
+	{
+		path: join(srcDir, "content/overlay.ts"),
+		outfile: join(distDir, "overlay.js"),
+		format: "iife",
+	},
 ];
 
 async function build() {

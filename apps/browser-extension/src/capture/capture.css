@@ -97,6 +97,16 @@ body {
 	}
 }
 
+/* ── Phase: countdown ─────────────────────────────────────────────────── */
+
+.countdown-num {
+	font-size: 96px;
+	font-weight: 700;
+	color: #202020;
+	letter-spacing: -0.05em;
+	line-height: 1;
+}
+
 /* ── Phase: recording ─────────────────────────────────────────────────── */
 
 .rec-header {
