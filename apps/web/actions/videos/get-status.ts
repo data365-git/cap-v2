@@ -34,6 +34,8 @@ export interface VideoStatusResult {
 	aiTitle: string | null;
 	summary: string | null;
 	chapters: { title: string; start: number }[] | null;
+	pipelineProgress?: { phase: "transcribe" | "refine" | "summary" | "tasks" | "index"; done: number; total: number; startedAt: string; updatedAt: string };
+	transcriptionError?: string;
 	error?: string;
 }
 
@@ -100,6 +102,8 @@ export async function getVideoStatus(
 			aiTitle: metadata.aiTitle || null,
 			summary: metadata.summary || null,
 			chapters: metadata.chapters || null,
+			pipelineProgress: metadata.pipelineProgress,
+			transcriptionError: metadata.transcriptionError,
 		};
 	}
 
@@ -112,6 +116,8 @@ export async function getVideoStatus(
 			aiTitle: metadata.aiTitle || null,
 			summary: metadata.summary || null,
 			chapters: metadata.chapters || null,
+			pipelineProgress: metadata.pipelineProgress,
+			transcriptionError: metadata.transcriptionError,
 			error: "Transcription failed",
 		};
 	}
@@ -128,5 +134,7 @@ export async function getVideoStatus(
 		aiTitle: metadata.aiTitle || null,
 		summary: metadata.summary || null,
 		chapters: metadata.chapters || null,
+		pipelineProgress: metadata.pipelineProgress,
+		transcriptionError: metadata.transcriptionError,
 	};
 }

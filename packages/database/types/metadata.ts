@@ -77,6 +77,24 @@ export interface VideoMetadata {
 	 * "pending" is the implicit default for old rows (treat undefined as pending).
 	 */
 	thumbnailStatus?: "pending" | "ready" | "failed";
+	/**
+	 * Live progress for the transcription → AI generation pipeline.
+	 * Written by the transcribe + generate-ai workflows; read-modify-write into
+	 * the metadata JSON (no DB column). The bar advances monotonically through
+	 * the five phases; AI phase total is always 4.
+	 */
+	pipelineProgress?: {
+		phase: "transcribe" | "refine" | "summary" | "tasks" | "index";
+		done: number;
+		total: number;
+		startedAt: string; // ISO
+		updatedAt: string; // ISO
+	};
+	/**
+	 * Human-readable reason the transcription failed (videos table has no
+	 * errorMessage column). Cleared at the start of every transcription run.
+	 */
+	transcriptionError?: string;
 }
 
 export type VideoEditRange = {

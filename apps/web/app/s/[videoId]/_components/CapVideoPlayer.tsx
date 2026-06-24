@@ -175,6 +175,7 @@ export function CapVideoPlayer({
 	const [hasError, setHasError] = useState(false);
 	const [isRetryingProcessing, setIsRetryingProcessing] = useState(false);
 	const [playerDuration, setPlayerDuration] = useState(fallbackDuration ?? 0);
+	const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
 	const [preferredSource, setPreferredSource] = useState<"mp4" | "raw">("mp4");
 	const [hasTriedRawFallback, setHasTriedRawFallback] = useState(false);
 	const [iosLevelPatchedUrl, setIosLevelPatchedUrl] = useState<string | null>(
@@ -327,7 +328,13 @@ export function CapVideoPlayer({
 			setPlayerDuration(fileDuration);
 		};
 
-		const handleLoadedMetadata = () => adoptFileDuration();
+		const handleLoadedMetadata = () => {
+			adoptFileDuration();
+			const { videoWidth, videoHeight } = video;
+			if (videoWidth > 0 && videoHeight > 0) {
+				setVideoAspectRatio(videoWidth / videoHeight);
+			}
+		};
 
 		adoptFileDuration();
 
@@ -729,6 +736,11 @@ export function CapVideoPlayer({
 				mediaPlayerClassName,
 				"[&::-webkit-media-text-track-display]:!hidden",
 			)}
+			style={
+				videoAspectRatio != null
+					? { aspectRatio: String(videoAspectRatio) }
+					: undefined
+			}
 			autoHide
 		>
 			{showUploadFailureOverlay && (
@@ -999,6 +1011,7 @@ export function CapVideoPlayer({
 				<SegmentedProgressBar
 					chapters={chapters}
 					duration={playerDuration}
+					fallbackDuration={playerDuration}
 					videoRef={videoRef}
 				/>
 				<div className="flex gap-2 items-center w-full">

@@ -111,7 +111,7 @@ export async function transcribeVideoWorkflow(
 			);
 		}
 	} catch (error) {
-		await markError(videoId);
+		await markError(videoId, describeTranscriptionError(error));
 		await cleanupTempAudio(videoId, userId, videoData.video);
 		throw error;
 	}
@@ -165,6 +165,17 @@ async function validateVideo(videoId: string): Promise<VideoData> {
 		.set({ transcriptionStatus: "PROCESSING" })
 		.where(eq(videos.id, videoId as Video.VideoId));
 
+	// Clear any stale failure reason so a successful retry doesn't surface an
+	// old error. Read-modify-write to preserve aiSummary/refinedTranscript/etc.
+	const staleMetadata = (result.video.metadata as VideoMetadata) || {};
+	if (staleMetadata.transcriptionError !== undefined) {
+		const { transcriptionError: _cleared, ...rest } = staleMetadata;
+		await db()
+			.update(videos)
+			.set({ metadata: rest })
+			.where(eq(videos.id, videoId as Video.VideoId));
+	}
+
 	return {
 		video: result.video,
 		transcriptionDisabled,
@@ -192,13 +203,62 @@ async function markNoAudio(videoId: string): Promise<void> {
 		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
-async function markError(videoId: string): Promise<void> {
+/**
+ * Read-modify-write a partial patch into the video's metadata JSON so we never
+ * clobber sibling fields (aiSummary, refinedTranscript, enhancedAudioStatus…).
+ */
+async function patchVideoMetadata(
+	videoId: string,
+	patch: Partial<VideoMetadata>,
+): Promise<void> {
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+
+	const currentMetadata = (row?.metadata as VideoMetadata) || {};
+
+	await db()
+		.update(videos)
+		.set({ metadata: { ...currentMetadata, ...patch } })
+		.where(eq(videos.id, videoId as Video.VideoId));
+}
+
+async function markError(videoId: string, reason?: string): Promise<void> {
 	"use step";
 
 	await db()
 		.update(videos)
 		.set({ transcriptionStatus: "ERROR" })
 		.where(eq(videos.id, videoId as Video.VideoId));
+
+	if (reason) {
+		await patchVideoMetadata(videoId, {
+			transcriptionError: reason.slice(0, 200),
+		});
+	}
+}
+
+/**
+ * Map a caught error to a short, user-facing reason string with a coarse
+ * category prefix when the underlying tool is detectable.
+ */
+function describeTranscriptionError(error: unknown): string {
+	const message =
+		error instanceof Error ? error.message : String(error ?? "Unknown error");
+	const lower = message.toLowerCase();
+	let prefixed = message;
+	if (lower.includes("ffmpeg")) {
+		prefixed = `Audio extraction failed: ${message}`;
+	} else if (
+		lower.includes("gemini") ||
+		lower.includes("api key") ||
+		lower.includes("quota") ||
+		lower.includes("429")
+	) {
+		prefixed = `AI service error: ${message}`;
+	}
+	return prefixed.slice(0, 200);
 }
 
 async function extractAudio(
@@ -346,6 +406,17 @@ async function transcribeAudio(
 		totalDuration > CHUNK_THRESHOLD_SEC && Number.isFinite(totalDuration);
 
 	if (!shouldChunk) {
+		const startedAt = new Date().toISOString();
+		await patchVideoMetadata(context.videoId, {
+			pipelineProgress: {
+				phase: "transcribe",
+				done: 0,
+				total: 1,
+				startedAt,
+				updatedAt: startedAt,
+			},
+		});
+
 		const result = await withCostGuard({
 			orgId: context.orgId,
 			userId: context.userId,
@@ -368,6 +439,16 @@ async function transcribeAudio(
 					inputTokens: res.inputTokens,
 					outputTokens: res.outputTokens,
 				};
+			},
+		});
+
+		await patchVideoMetadata(context.videoId, {
+			pipelineProgress: {
+				phase: "transcribe",
+				done: 1,
+				total: 1,
+				startedAt,
+				updatedAt: new Date().toISOString(),
 			},
 		});
 
@@ -410,6 +491,17 @@ async function transcribeAudio(
 			CHUNK_OVERLAP_SEC,
 		);
 
+		const chunkStartedAt = new Date().toISOString();
+		await patchVideoMetadata(context.videoId, {
+			pipelineProgress: {
+				phase: "transcribe",
+				done: 0,
+				total: slices.length,
+				startedAt: chunkStartedAt,
+				updatedAt: chunkStartedAt,
+			},
+		});
+
 		for (let i = 0; i < slices.length; i++) {
 			const slice = slices[i];
 			if (!slice) continue;
@@ -447,6 +539,16 @@ async function transcribeAudio(
 			perChunkResults.push({ cues: result.cues, startOffsetSec: 0 });
 			totalCueCount += result.cues.length;
 			if (!result.isComplete) allComplete = false;
+
+			await patchVideoMetadata(context.videoId, {
+				pipelineProgress: {
+					phase: "transcribe",
+					done: i + 1,
+					total: slices.length,
+					startedAt: chunkStartedAt,
+					updatedAt: new Date().toISOString(),
+				},
+			});
 		}
 	} finally {
 		await Promise.all(slices.map((s) => s.cleanup()));
@@ -493,12 +595,10 @@ async function saveTranscription(
 		console.error(
 			`[CAP-TRANSCRIBE] Transcription truncated for ${videoId} — marking ERROR`,
 		);
-		// videos table has no errorMessage column — log the reason and persist
-		// the ERROR status (same path as markError) so UI revalidation triggers.
-		await db()
-			.update(videos)
-			.set({ transcriptionStatus: "ERROR" })
-			.where(eq(videos.id, videoId as Video.VideoId));
+		// videos table has no errorMessage column — persist the human-readable
+		// reason into metadata (read-modify-write) alongside the ERROR status so
+		// UI revalidation can surface it.
+		await markError(videoId, "Transkripsiya juda uzun — qayta urinib ko'ring");
 	}
 }
 

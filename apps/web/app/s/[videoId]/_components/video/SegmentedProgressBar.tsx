@@ -16,6 +16,7 @@ interface Props {
 	duration: number;
 	videoRef: React.RefObject<HTMLVideoElement | null>;
 	fallbackDuration?: number | null;
+	getLiveDuration?: () => number;
 }
 
 function formatMmSs(sec: number): string {
@@ -35,6 +36,7 @@ export function SegmentedProgressBar({
 	duration,
 	videoRef,
 	fallbackDuration,
+	getLiveDuration,
 }: Props) {
 	const dispatch = useMediaDispatch();
 	const barRef = React.useRef<HTMLDivElement>(null);
@@ -49,7 +51,13 @@ export function SegmentedProgressBar({
 		label: "",
 	});
 
-	const effectiveDuration = duration > 0 ? duration : (fallbackDuration ?? 0);
+	const liveDuration = getLiveDuration?.() ?? videoRef.current?.duration ?? 0;
+	const effectiveDuration =
+		Number.isFinite(liveDuration) && liveDuration > 0
+			? liveDuration
+			: duration > 0
+				? duration
+				: (fallbackDuration ?? 0);
 
 	const normalizedChapters: Chapter[] = React.useMemo(() => {
 		if (chapters.length === 0 || effectiveDuration <= 0) return [];
@@ -80,7 +88,12 @@ export function SegmentedProgressBar({
 
 	const seekToTime = React.useCallback(
 		(time: number) => {
-			const clamped = Math.max(0, Math.min(time, effectiveDuration));
+			const live = videoRef.current?.duration;
+			const dur =
+				Number.isFinite(live) && (live ?? 0) > 0
+					? (live as number)
+					: effectiveDuration;
+			const clamped = Math.max(0, Math.min(time, dur));
 			dispatch({
 				type: MediaActionTypes.MEDIA_SEEK_REQUEST,
 				detail: clamped,
@@ -95,15 +108,20 @@ export function SegmentedProgressBar({
 	const getTimeFromPointer = React.useCallback(
 		(clientX: number): number => {
 			const bar = barRef.current;
-			if (!bar || effectiveDuration <= 0) return 0;
+			const live = videoRef.current?.duration;
+			const dur =
+				Number.isFinite(live) && (live ?? 0) > 0
+					? (live as number)
+					: effectiveDuration;
+			if (!bar || dur <= 0) return 0;
 			const rect = bar.getBoundingClientRect();
 			const ratio = Math.max(
 				0,
 				Math.min((clientX - rect.left) / rect.width, 1),
 			);
-			return ratio * effectiveDuration;
+			return ratio * dur;
 		},
-		[effectiveDuration],
+		[effectiveDuration, videoRef],
 	);
 
 	const getTooltipLabel = React.useCallback(

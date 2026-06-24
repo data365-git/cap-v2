@@ -149,12 +149,38 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 		};
 	}
 
+	// Pipeline progress: 4 logical steps (refine → summary → tasks → index).
+	// The transcript-only Gemini pipeline has no separable refine/summary/tasks
+	// boundaries, so we map them onto the single master AI call: once
+	// generateWithAi returns, refine+summary+tasks are all done (done:3, phase
+	// "index"); saveResults persisting the result completes index (done:4).
+	const aiStartedAt = new Date().toISOString();
+	await patchVideoMetadata(videoId, {
+		pipelineProgress: {
+			phase: "refine",
+			done: 0,
+			total: 4,
+			startedAt: aiStartedAt,
+			updatedAt: aiStartedAt,
+		},
+	});
+
 	const result = await generateWithAi(
 		transcript,
 		videoData.aiGenerationLanguage,
 		videoData.video.duration ?? null,
 		videoId,
 	);
+
+	await patchVideoMetadata(videoId, {
+		pipelineProgress: {
+			phase: "index",
+			done: 3,
+			total: 4,
+			startedAt: aiStartedAt,
+			updatedAt: new Date().toISOString(),
+		},
+	});
 
 	if (result._usage) {
 		await recordSummaryUsage(
@@ -167,7 +193,32 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 
 	await saveResults(videoId, videoData, result);
 
+	await patchVideoMetadata(videoId, {
+		pipelineProgress: {
+			phase: "index",
+			done: 4,
+			total: 4,
+			startedAt: aiStartedAt,
+			updatedAt: new Date().toISOString(),
+		},
+	});
+
 	return { success: true, message: "AI generation completed successfully" };
+}
+
+/**
+ * Read-modify-write a partial patch into the video's metadata JSON so we never
+ * clobber sibling fields (aiSummary, refinedTranscript, transcriptionError…).
+ */
+async function patchVideoMetadata(
+	videoId: string,
+	patch: Partial<VideoMetadata>,
+): Promise<void> {
+	const current = await getCurrentVideoMetadata(videoId, {});
+	await db()
+		.update(videos)
+		.set({ metadata: { ...current, ...patch } })
+		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
 async function validateAndSetProcessing(videoId: string): Promise<VideoData> {

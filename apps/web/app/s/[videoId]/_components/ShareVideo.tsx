@@ -121,7 +121,7 @@ export const ShareVideo = forwardRef<
 		const [videoSize, setVideoSizeState] = useState<"sm" | "md" | "lg">(() => {
 			if (typeof window === "undefined") return "md";
 			const stored = localStorage.getItem("videoSize");
-			return stored === "sm" || stored === "lg" ? stored : "md";
+			return stored === "sm" || stored === "md" ? stored : "lg";
 		});
 
 		const setVideoSize = useCallback((size: "sm" | "md" | "lg") => {
