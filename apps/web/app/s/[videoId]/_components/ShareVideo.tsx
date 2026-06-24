@@ -21,6 +21,7 @@ import type { VideoData } from "../types";
 import { AIChatPopup } from "./AIChatPopup";
 import { AIFab } from "./AIFab";
 import { BelowVideoTabs } from "./BelowVideoTabs";
+import { GenerateStrip } from "./GenerateStrip";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
 import {
@@ -63,6 +64,7 @@ export const ShareVideo = forwardRef<
 		areCommentStampsDisabled?: boolean;
 		areReactionStampsDisabled?: boolean;
 		aiGenerationStatus?: AiGenerationStatus | null;
+		isOwner?: boolean;
 		canRetryProcessing?: boolean;
 		canFinalizeDesktopSegments?: boolean;
 		showPlaybackStatusBadge?: boolean;
@@ -80,6 +82,7 @@ export const ShareVideo = forwardRef<
 			areChaptersDisabled,
 			areCommentStampsDisabled,
 			areReactionStampsDisabled,
+			isOwner = false,
 			canRetryProcessing,
 			canFinalizeDesktopSegments = false,
 			showPlaybackStatusBadge = false,
@@ -114,6 +117,18 @@ export const ShareVideo = forwardRef<
 		>(null);
 		const [aiChatOpen, setAiChatOpen] = useState(false);
 		const [currentTime, setCurrentTime] = useState(0);
+		const [videoSize, setVideoSizeState] = useState<"sm" | "md" | "lg">(() => {
+			if (typeof window === "undefined") return "md";
+			const stored = localStorage.getItem("videoSize");
+			return stored === "sm" || stored === "lg" ? stored : "md";
+		});
+
+		const setVideoSize = useCallback((size: "sm" | "md" | "lg") => {
+			setVideoSizeState(size);
+			if (typeof window !== "undefined") {
+				localStorage.setItem("videoSize", size);
+			}
+		}, []);
 		const autoFinalizeAttemptedRef = useRef(false);
 		const segmentUploadProgress = useUploadProgress(
 			data.id,
@@ -348,11 +363,21 @@ export const ShareVideo = forwardRef<
 				: undefined;
 		const enableCrossOrigin = true;
 
+		const videoSizeMaxWidth: Record<"sm" | "md" | "lg", string> = {
+			sm: "62%",
+			md: "82%",
+			lg: "100%",
+		};
+
 		return (
 			<>
 				<div
-					className="relative h-full"
-					style={{ viewTransitionName: "cap-edit-video" }}
+					className="mx-auto relative h-full"
+					style={{
+						viewTransitionName: "cap-edit-video",
+						maxWidth: videoSizeMaxWidth[videoSize],
+						transition: "max-width 320ms ease",
+					}}
 				>
 					{isActivelyRecording ? (
 						<div className="relative h-full overflow-hidden rounded-xl bg-black">
@@ -426,6 +451,8 @@ export const ShareVideo = forwardRef<
 											title: ch.title,
 										}))
 							}
+							videoSize={videoSize}
+							onVideoSizeChange={setVideoSize}
 						/>
 					)}
 					{showFinalizeRecordingControl && (
@@ -500,8 +527,17 @@ export const ShareVideo = forwardRef<
 					onOpenChange={setUpgradeModalOpen}
 				/>
 
+				{isOwner && (
+					<GenerateStrip
+						videoId={data.id}
+						transcriptionStatus={data.transcriptionStatus ?? undefined}
+						aiGenerationStatus={undefined}
+					/>
+				)}
+
 				<div className="mt-4">
 					<BelowVideoTabs
+						isOwner={isOwner}
 						summary={
 							<SummaryPanel
 								videoId={data.id}
@@ -511,6 +547,7 @@ export const ShareVideo = forwardRef<
 									aiSummary: data.metadata?.aiSummary ?? undefined,
 									speakerCount: undefined,
 								}}
+								isOwner={isOwner}
 								onVideoJump={handleSeek}
 							/>
 						}
@@ -519,6 +556,7 @@ export const ShareVideo = forwardRef<
 								videoId={data.id}
 								transcriptionStatus={data.transcriptionStatus}
 								tasks={data.metadata?.aiSummary?.tasks ?? []}
+								isOwner={isOwner}
 							/>
 						}
 						transcript={
@@ -528,6 +566,7 @@ export const ShareVideo = forwardRef<
 								transcriptContent={transcriptContent ?? undefined}
 								currentTime={currentTime}
 								onVideoJump={handleSeek}
+								isOwner={isOwner}
 							/>
 						}
 						refined={
@@ -538,6 +577,7 @@ export const ShareVideo = forwardRef<
 									data.metadata?.aiSummary?.refinedTranscript ?? undefined
 								}
 								onVideoJump={handleSeek}
+								isOwner={isOwner}
 							/>
 						}
 					/>

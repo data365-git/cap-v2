@@ -115,6 +115,8 @@ interface Props {
 	showFloatingVolumeControl?: boolean;
 	onUploadComplete?: () => void;
 	chapters?: { startSec: number; title: string }[];
+	videoSize?: "sm" | "md" | "lg";
+	onVideoSizeChange?: (size: "sm" | "md" | "lg") => void;
 }
 
 export function CapVideoPlayer({
@@ -149,6 +151,8 @@ export function CapVideoPlayer({
 	showFloatingVolumeControl = false,
 	onUploadComplete,
 	chapters = [],
+	videoSize,
+	onVideoSizeChange,
 }: Props) {
 	const [currentCue, setCurrentCue] = useState<string>("");
 	const [controlsVisible, setControlsVisible] = useState(false);
@@ -904,6 +908,40 @@ export function CapVideoPlayer({
 						<MediaPlayerTime fallbackDuration={playerDuration} />
 					</div>
 					<div className="flex gap-2 items-center">
+						{onVideoSizeChange && videoSize && (
+							<div
+								role="tablist"
+								aria-label="Video size"
+								className="inline-flex items-center gap-0.5 rounded-full p-[3px]"
+								style={{ background: "rgba(255,255,255,.12)" }}
+							>
+								{(["sm", "md", "lg"] as const).map((size) => (
+									<button
+										key={size}
+										type="button"
+										role="tab"
+										aria-selected={videoSize === size}
+										title={size === "sm" ? "Small" : size === "md" ? "Medium" : "Large"}
+										onClick={() => onVideoSizeChange(size)}
+										className="rounded-full leading-none transition-colors"
+										style={{
+											border: "none",
+											cursor: "pointer",
+											fontFamily: "inherit",
+											fontSize: 11,
+											fontWeight: 700,
+											letterSpacing: "0.04em",
+											padding: "3px 8px",
+											lineHeight: 1,
+											background: videoSize === size ? "#fff" : "none",
+											color: videoSize === size ? "var(--accent-ink, #1a1a1a)" : "rgba(255,255,255,.65)",
+										}}
+									>
+										{size.toUpperCase()}
+									</button>
+								))}
+							</div>
+						)}
 						{!disableCaptions && (
 							<MediaPlayerCaptions
 								setToggleCaptions={setToggleCaptions}

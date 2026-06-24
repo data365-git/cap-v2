@@ -1,8 +1,11 @@
 "use server";
 
 import { db } from "@cap/database";
-import { aiUsageEvents } from "@cap/database/schema";
+import { getCurrentUser } from "@cap/database/auth/session";
+import { aiUsageEvents, videos } from "@cap/database/schema";
+import { Organisation, Video } from "@cap/web-domain";
 import { and, eq, sql } from "drizzle-orm";
+import { getOrganizationAccess } from "@/actions/organization/authorization";
 
 function currentBillingMonth(): string {
 	const now = new Date();
@@ -10,6 +13,13 @@ function currentBillingMonth(): string {
 	const month = String(now.getUTCMonth() + 1).padStart(2, "0");
 	return `${year}-${month}`;
 }
+
+const ZERO_RESULT = {
+	totalUsdCents: 0,
+	breakdown: {} as Record<string, number>,
+	capUsdCents: null as number | null,
+	percentUsed: 0,
+};
 
 export async function getMonthlySpend(scope: {
 	type: "user" | "org" | "video";
@@ -20,6 +30,36 @@ export async function getMonthlySpend(scope: {
 	capUsdCents: number | null;
 	percentUsed: number;
 }> {
+	const user = await getCurrentUser();
+	if (!user) return { ...ZERO_RESULT, breakdown: {} };
+
+	// Authorization per scope type.
+	if (scope.type === "user") {
+		if (scope.id !== user.id) return { ...ZERO_RESULT, breakdown: {} };
+	} else if (scope.type === "org") {
+		const access = await getOrganizationAccess(
+			user.id,
+			Organisation.OrganisationId.make(scope.id),
+		);
+		if (!access) return { ...ZERO_RESULT, breakdown: {} };
+	} else {
+		// type === "video"
+		const [video] = await db()
+			.select({ ownerId: videos.ownerId, orgId: videos.orgId })
+			.from(videos)
+			.where(eq(videos.id, Video.VideoId.make(scope.id)))
+			.limit(1);
+
+		if (!video) return { ...ZERO_RESULT, breakdown: {} };
+
+		if (video.ownerId !== user.id) {
+			const access = video.orgId
+				? await getOrganizationAccess(user.id, video.orgId)
+				: null;
+			if (!access) return { ...ZERO_RESULT, breakdown: {} };
+		}
+	}
+
 	const billingMonth = currentBillingMonth();
 
 	const colMap = {

@@ -15,6 +15,7 @@ interface RefinedTranscriptPanelProps {
 		}[];
 	};
 	onVideoJump?: (seconds: number) => void;
+	isOwner?: boolean;
 }
 
 export function RefinedTranscriptPanel({
@@ -22,17 +23,22 @@ export function RefinedTranscriptPanel({
 	transcriptionStatus,
 	refinedTranscript,
 	onVideoJump,
+	isOwner = false,
 }: RefinedTranscriptPanelProps) {
 	if (!refinedTranscript || refinedTranscript.chapters.length === 0) {
 		return (
 			<div className="rd-empty">
-				<GenerateSection
-					videoId={videoId}
-					kind="ai"
-					label="Generate refined transcript"
-					description="Refined transcript not available yet"
-					transcriptReady={transcriptionStatus === "COMPLETE"}
-				/>
+				{isOwner ? (
+					<GenerateSection
+						videoId={videoId}
+						kind="ai"
+						label="Generate refined transcript"
+						description="Refined transcript not available yet"
+						transcriptReady={transcriptionStatus === "COMPLETE"}
+					/>
+				) : (
+					"Refined transcript not available yet."
+				)}
 			</div>
 		);
 	}

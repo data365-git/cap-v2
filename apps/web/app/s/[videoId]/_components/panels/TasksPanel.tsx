@@ -16,6 +16,7 @@ interface TasksPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
 	tasks?: Task[];
+	isOwner?: boolean;
 }
 
 type TasksMode = "board" | "checklist";
@@ -54,6 +55,7 @@ export function TasksPanel({
 	videoId,
 	transcriptionStatus,
 	tasks: initialTasks = [],
+	isOwner = false,
 }: TasksPanelProps) {
 	const [mode, setMode] = useState<TasksMode>("board");
 	const [tasks, setTasks] = useState<Task[]>(initialTasks);
@@ -95,13 +97,17 @@ export function TasksPanel({
 	if (total === 0) {
 		return (
 			<div className="rd-empty">
-				<GenerateSection
-					videoId={videoId}
-					kind="ai"
-					label="Generate tasks"
-					description="No tasks extracted from this meeting"
-					transcriptReady={transcriptionStatus === "COMPLETE"}
-				/>
+				{isOwner ? (
+					<GenerateSection
+						videoId={videoId}
+						kind="ai"
+						label="Generate tasks"
+						description="No tasks extracted from this meeting"
+						transcriptReady={transcriptionStatus === "COMPLETE"}
+					/>
+				) : (
+					"No tasks available yet."
+				)}
 			</div>
 		);
 	}

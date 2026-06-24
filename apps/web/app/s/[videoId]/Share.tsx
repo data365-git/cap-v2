@@ -546,6 +546,7 @@ export const Share = ({
 									areReactionStampsDisabled={areReactionStampsDisabled}
 									chapters={aiData?.chapters || []}
 									aiGenerationStatus={aiData?.aiGenerationStatus}
+									isOwner={viewerId === data.owner.id}
 									canRetryProcessing={viewerId === data.owner.id}
 									canFinalizeDesktopSegments={viewerId === data.owner.id}
 									showPlaybackStatusBadge={viewerId === data.owner.id}

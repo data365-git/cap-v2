@@ -22,7 +22,7 @@ export async function newComment(data: {
 	const content = data.content;
 	const videoId = data.videoId;
 	const type = data.type;
-	const parentCommentId = data.parentCommentId;
+	const parentCommentId = data.parentCommentId || null;
 	const timestamp = data.timestamp;
 	const conditionalType = parentCommentId
 		? "reply"

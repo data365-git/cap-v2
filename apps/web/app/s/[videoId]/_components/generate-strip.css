@@ -1,0 +1,332 @@
+/* GenerateStrip — dark AI insights card */
+/* All tokens copied verbatim from Share Page - Redesigned.html */
+
+.gen-strip {
+  position: relative;
+  margin-top: 18px;
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  background: linear-gradient(135deg, #0e1a3a 0%, #122249 38%, #1f1740 100%);
+  color: #fff;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow:
+    0 18px 40px -16px rgba(15, 23, 42, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: padding 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.gen-aura {
+  position: absolute;
+  inset: -40% -10% auto auto;
+  width: 60%;
+  height: 220%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side, rgba(96, 165, 250, 0.55), transparent 70%),
+    radial-gradient(
+      closest-side at 30% 70%,
+      rgba(167, 139, 250, 0.45),
+      transparent 70%
+    );
+  filter: blur(36px);
+  opacity: 0.85;
+  animation: genAuraDrift 14s ease-in-out infinite alternate;
+}
+
+@keyframes genAuraDrift {
+  0% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(-6%, 4%);
+  }
+}
+
+.gen-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.gen-orb {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  flex-shrink: 0;
+  background: radial-gradient(
+    120% 120% at 30% 25%,
+    #93c5fd,
+    #3b82f6 55%,
+    #1d4ed8
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow:
+    0 6px 18px rgba(59, 130, 246, 0.55),
+    inset 0 1px 1px rgba(255, 255, 255, 0.45);
+}
+
+.gen-orb svg {
+  width: 22px;
+  height: 22px;
+}
+
+.gen-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.gen-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.gen-sub {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 2px;
+  transition: color 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.gen-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: none;
+  padding: 11px 18px 11px 16px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  background: linear-gradient(180deg, #5a9bff, #3b82f6 55%, #1d4ed8);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 6px 18px rgba(59, 130, 246, 0.5);
+  overflow: hidden;
+  flex-shrink: 0;
+  transition:
+    filter 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.gen-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 10px 24px rgba(59, 130, 246, 0.65);
+}
+
+.gen-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.gen-btn:disabled {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.gen-btn svg {
+  width: 16px;
+  height: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.gen-btn-text {
+  position: relative;
+  z-index: 1;
+}
+
+.gen-btn-shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 70%
+  );
+  transform: translateX(-130%);
+  animation: btnShine 3.4s ease-in-out infinite;
+}
+
+@keyframes btnShine {
+  0%,
+  40% {
+    transform: translateX(-130%);
+  }
+  60%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+.gen-btn:disabled .gen-btn-shimmer {
+  display: none;
+}
+
+/* Steps pipeline */
+.gen-steps {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 400ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 300ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    margin-top 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  margin-top: 0;
+}
+
+.gen-steps.visible {
+  max-height: 80px;
+  opacity: 1;
+  margin-top: 14px;
+}
+
+.gen-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  transition:
+    background 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-color 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    color 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.gen-step .gs-ic {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.gen-step .gs-ic svg {
+  width: 14px;
+  height: 14px;
+}
+
+.gen-step .gs-lbl {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gen-step .gs-state {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.gen-step .gs-state::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.6px solid rgba(255, 255, 255, 0.18);
+}
+
+/* Active step — spinner ring */
+.gen-step.active {
+  background: rgba(96, 165, 250, 0.16);
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #fff;
+}
+
+.gen-step.active .gs-state::before {
+  border-color: transparent;
+  border-top-color: #93c5fd;
+  border-right-color: #93c5fd;
+  animation: gsSpin 0.85s linear infinite;
+}
+
+@keyframes gsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Done step — green check */
+.gen-step.done {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
+.gen-step.done .gs-state::before {
+  border-color: #34d399;
+  background: #34d399;
+}
+
+.gen-step.done .gs-state::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #0f172a;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Error step */
+.gen-step.error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.gen-step.error .gs-state::before {
+  border-color: #ef4444;
+  background: #ef4444;
+}
+
+/* Done state — compact ribbon */
+.gen-strip.is-done {
+  padding: 12px 18px;
+}
+
+.gen-strip.is-done .gen-sub {
+  color: rgba(167, 243, 208, 0.95);
+}
+
+/* Error message below steps */
+.gen-error {
+  position: relative;
+  z-index: 1;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: #fca5a5;
+}

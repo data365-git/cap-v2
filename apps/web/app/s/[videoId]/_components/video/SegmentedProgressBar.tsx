@@ -204,11 +204,11 @@ export function SegmentedProgressBar({
 			onPointerDown={onPointerDown}
 			onPointerUp={onPointerUp}
 		>
-			<div className="flex w-full gap-[2px]" style={{ height: "4px" }}>
+			<div className="flex w-full gap-[3px]" style={{ height: "4px" }}>
 				{segments.map((seg, i) => (
 					<div
 						key={seg.startSec}
-						className="relative rounded-full overflow-hidden bg-white/40"
+						className="relative rounded-full overflow-hidden bg-white/40 transition-all duration-[320ms] hover:bg-blue-500 hover:shadow-[0_0_8px_rgba(37,99,235,0.95),0_0_16px_rgba(37,99,235,0.55)]"
 						style={{ flex: seg.flex }}
 					>
 						<div
@@ -233,8 +233,8 @@ export function SegmentedProgressBar({
 
 			{tooltip.visible && (
 				<div
-					className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900/90 px-2 py-0.5 text-xs text-white z-50"
-					style={{ left: tooltip.x }}
+					className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded px-2 py-0.5 text-xs text-white z-50"
+					style={{ left: tooltip.x, backgroundColor: "#15171c" }}
 				>
 					{tooltip.label}
 				</div>

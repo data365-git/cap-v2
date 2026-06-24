@@ -21,10 +21,10 @@ function formatUzs(cents: number): string {
 }
 
 const OPERATIONS: { key: string; label: string; icon: React.ReactNode }[] = [
-	{ key: "transcription", label: "Transcription", icon: <FileText /> },
-	{ key: "summary", label: "Summary", icon: <LayoutGrid /> },
-	{ key: "embedding", label: "Embeddings", icon: <Database /> },
-	{ key: "chat", label: "Chat", icon: <MessageSquare /> },
+	{ key: "transcription", label: "Transkripsiya", icon: <FileText /> },
+	{ key: "summary", label: "Xulosa", icon: <LayoutGrid /> },
+	{ key: "embedding", label: "RAG indekslash", icon: <Database /> },
+	{ key: "chat", label: "AI suhbat", icon: <MessageSquare /> },
 ];
 
 export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {

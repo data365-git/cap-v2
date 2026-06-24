@@ -10,6 +10,7 @@ interface TranscriptPanelProps {
 	transcriptContent?: string;
 	currentTime?: number;
 	onVideoJump?: (seconds: number) => void;
+	isOwner?: boolean;
 }
 
 interface Cue {
@@ -137,6 +138,7 @@ export function TranscriptPanel({
 	transcriptContent,
 	currentTime = 0,
 	onVideoJump,
+	isOwner = false,
 }: TranscriptPanelProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const activeRef = useRef<HTMLDivElement>(null);
@@ -164,13 +166,15 @@ export function TranscriptPanel({
 				transcriptionStatus === "NO_AUDIO" ||
 				transcriptionStatus === "SKIPPED" ? (
 					"No transcript available."
-				) : (
+				) : isOwner ? (
 					<GenerateSection
 						videoId={videoId}
 						kind="transcript"
 						label="Generate transcript"
 						description="No transcript available."
 					/>
+				) : (
+					"No transcript available yet."
 				)}
 			</div>
 		);

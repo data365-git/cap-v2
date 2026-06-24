@@ -18,6 +18,7 @@ interface BelowVideoTabsProps {
 	tasks?: React.ReactNode;
 	transcript?: React.ReactNode;
 	refined?: React.ReactNode;
+	isOwner?: boolean;
 }
 
 export function BelowVideoTabs({
@@ -25,6 +26,7 @@ export function BelowVideoTabs({
 	tasks,
 	transcript,
 	refined,
+	isOwner: _isOwner = false,
 }: BelowVideoTabsProps) {
 	const searchParams = useSearchParams();
 	const router = useRouter();

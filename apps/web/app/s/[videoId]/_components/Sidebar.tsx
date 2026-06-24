@@ -244,20 +244,22 @@ export const Sidebar = forwardRef<{ scrollToBottom: () => void }, SidebarProps>(
 				className="flex flex-col gap-3"
 				style={{ width: "320px", position: "sticky", top: "1rem" }}
 			>
-				<div
-					style={{
-						borderRadius: "14px",
-						background: "linear-gradient(135deg, #f5f3ff 0%, #f7f9fc 100%)",
-						border: "1px solid rgba(124, 58, 237, .15)",
-						boxShadow:
-							"0 1px 2px rgba(15,23,42,.06), 0 2px 6px rgba(15,23,42,.07)",
-						backdropFilter: "blur(8px)",
-						WebkitBackdropFilter: "blur(8px)",
-						overflow: "hidden",
-					}}
-				>
-					<MeetingCostPanel videoId={data.id} />
-				</div>
+				{isOwner && (
+					<div
+						style={{
+							borderRadius: "14px",
+							background: "linear-gradient(135deg, #f5f3ff 0%, #f7f9fc 100%)",
+							border: "1px solid rgba(124, 58, 237, .15)",
+							boxShadow:
+								"0 1px 2px rgba(15,23,42,.06), 0 2px 6px rgba(15,23,42,.07)",
+							backdropFilter: "blur(8px)",
+							WebkitBackdropFilter: "blur(8px)",
+							overflow: "hidden",
+						}}
+					>
+						<MeetingCostPanel videoId={data.id} />
+					</div>
+				)}
 
 				<div className="bg-white rounded-2xl border border-gray-5 overflow-hidden flex flex-col">
 					<div className="flex items-center px-4 py-3 border-b border-gray-5">

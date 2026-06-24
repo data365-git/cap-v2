@@ -307,6 +307,107 @@
 	font-size: 13px;
 }
 
+/* ===== SUMMARY view switcher toolbar ===== */
+.share-rd .sum-switcher-toolbar {
+	display: flex;
+	justify-content: flex-end;
+	margin: 14px 0;
+}
+
+/* ===== SUMMARY: timeline view (chapters) ===== */
+.share-rd .chapter-list {
+	position: relative;
+	padding-left: 6px;
+}
+.share-rd .chapter {
+	position: relative;
+	display: grid;
+	grid-template-columns: 64px 1fr;
+	gap: 14px;
+	padding: 0 0 18px 0;
+}
+.share-rd .chapter::before {
+	content: "";
+	position: absolute;
+	left: 71px;
+	top: 22px;
+	bottom: -2px;
+	width: 2px;
+	background: var(--line);
+}
+.share-rd .chapter:last-child::before {
+	display: none;
+}
+.share-rd .chapter-time {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--accent-ink);
+	font-variant-numeric: tabular-nums;
+	background: var(--accent-soft);
+	border: 1px solid rgba(var(--accent-glow), 0.18);
+	border-radius: 999px;
+	padding: 4px 0;
+	text-align: center;
+	height: max-content;
+	cursor: pointer;
+	transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+		transform var(--dur) var(--ease);
+}
+.share-rd .chapter-time:hover {
+	background: var(--accent);
+	color: #fff;
+	transform: scale(1.04);
+}
+.share-rd .chapter-dot {
+	position: absolute;
+	left: 68px;
+	top: 8px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--accent);
+	box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--line);
+	z-index: 1;
+}
+.share-rd .chapter-body .ct {
+	font-size: 13.5px;
+	font-weight: 650;
+	color: var(--ink);
+	margin-bottom: 3px;
+}
+.share-rd .chapter-body .cd {
+	font-size: 12.5px;
+	line-height: 1.6;
+	color: var(--ink-2);
+}
+
+/* ===== SUMMARY: document view ===== */
+.share-rd .doc-view ul {
+	margin: 0 0 14px;
+	padding-left: 4px;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+.share-rd .doc-view li {
+	font-size: 13px;
+	line-height: 1.65;
+	color: var(--ink-2);
+	padding-left: 20px;
+	position: relative;
+}
+.share-rd .doc-view li::before {
+	content: "";
+	position: absolute;
+	left: 4px;
+	top: 9px;
+	width: 6px;
+	height: 6px;
+	border-radius: 2px;
+	background: var(--accent);
+}
+
 /* ===== Depth pass: lift elements off the surface ===== */
 .share-rd .stat-card,
 .share-rd .topic-card,
@@ -1036,8 +1137,8 @@
 	letter-spacing: 0.02em;
 }
 .share-rd .cost-total-usd {
-	font-size: 15px;
-	font-weight: 800;
+	font-size: 18px;
+	font-weight: 750;
 	color: #fff;
 	font-variant-numeric: tabular-nums;
 }
