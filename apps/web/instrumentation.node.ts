@@ -77,9 +77,25 @@ async function applyS3BucketCors(s3Client: S3Client) {
 
 async function createS3Bucket() {
 	// Cloudflare R2 buckets are pre-provisioned and don't support CreateBucket
-	// or PutBucketPolicy via the S3 API — skip this step when using R2.
+	// or PutBucketPolicy via the S3 API — but PutBucketCors IS supported. Without
+	// a CORS policy, direct browser uploads (the file-import flow does a presigned
+	// PUT from the browser) fail with a network/status-0 error. Apply CORS only.
 	if (process.env.CLOUDFLARE_R2_ACCOUNT_ID) {
-		console.log("Using Cloudflare R2 — skipping MinIO bucket creation");
+		try {
+			const r2Client = new S3Client({
+				endpoint: `https://${process.env.CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+				region: serverEnv().CAP_AWS_REGION ?? "auto",
+				credentials: {
+					accessKeyId: serverEnv().CAP_AWS_ACCESS_KEY ?? "",
+					secretAccessKey: serverEnv().CAP_AWS_SECRET_KEY ?? "",
+				},
+				forcePathStyle: true,
+			});
+			await applyS3BucketCors(r2Client);
+			console.log("Configured R2 bucket CORS");
+		} catch (e) {
+			console.error("Failed to configure R2 bucket CORS", e);
+		}
 		return;
 	}
 
