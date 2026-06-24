@@ -591,24 +591,43 @@ function renderDefaultNudge(): void {
 	container.appendChild(card);
 	nudgeState = "default";
 
-	btnRecord.addEventListener("click", () => {
-		sendToBackground({
+	btnRecord.addEventListener("click", async () => {
+		// Don't clear the nudge until the SW acks — otherwise a dropped message
+		// (evicted/cold-starting SW) silently loses the click. Show "Starting…"
+		// while we await + retry; keep the nudge and surface an error on failure.
+		btnRecord.disabled = true;
+		btnLater.disabled = true;
+		btnDismiss.disabled = true;
+		btnRecord.textContent = "Starting…";
+
+		const res = await sendToBackgroundAwait({
 			type: "MEET_NUDGE_RECORD_NOW",
 			meetingId: meetingId ?? "",
 		});
-		clearNudge();
-		nudgeState = "hidden";
+
+		if (res) {
+			// SW received the click (recording started, or already active) → done.
+			clearNudge();
+			nudgeState = "hidden";
+		} else {
+			// No ack after retries — keep the nudge so the user can retry.
+			btnRecord.disabled = false;
+			btnLater.disabled = false;
+			btnDismiss.disabled = false;
+			btnRecord.textContent = "Record now";
+			showNudgeError(card, "Couldn't start recording — tap to try again.");
+		}
 	});
 
 	btnLater.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_LATER" });
+		void sendToBackgroundAwait({ type: "MEET_NUDGE_LATER" });
 		laterUntil = Date.now() + LATER_MS;
 		clearNudge();
 		nudgeState = "hidden";
 	});
 
 	btnDismiss.addEventListener("click", () => {
-		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
+		void sendToBackgroundAwait({ type: "MEET_NUDGE_DISMISS" });
 		dismissed = true;
 		clearNudge();
 		nudgeState = "hidden";
@@ -643,7 +662,7 @@ function renderCountdownNudge(): void {
 
 	const onCancel = () => {
 		stopCountdown();
-		sendToBackground({ type: "MEET_NUDGE_DISMISS" });
+		void sendToBackgroundAwait({ type: "MEET_NUDGE_DISMISS" });
 		dismissed = true;
 		clearNudge();
 		nudgeState = "hidden";
@@ -658,12 +677,16 @@ function renderCountdownNudge(): void {
 		if (countdownRemaining <= 0) {
 			stopCountdown();
 			playAudio(soundChime);
-			sendToBackground({
-				type: "MEET_NUDGE_RECORD_NOW",
-				meetingId: meetingId ?? "",
-			});
 			clearNudge();
 			nudgeState = "hidden";
+			// Await + retry; if the auto-start never reaches the SW, fall back to the
+			// manual nudge so the user can start it themselves instead of nothing.
+			void sendToBackgroundAwait({
+				type: "MEET_NUDGE_RECORD_NOW",
+				meetingId: meetingId ?? "",
+			}).then((res) => {
+				if (!res) renderDefaultNudge();
+			});
 		}
 	}, 1000);
 }
@@ -828,6 +851,41 @@ function renderErrorCard(reason: string, recoverable: boolean): void {
 
 function sendToBackground(msg: OutboundMessage): void {
 	chrome.runtime.sendMessage(msg).catch(() => {});
+}
+
+// Await a response from the service worker, retrying to absorb the MV3
+// cold-start race: an evicted SW is woken by the message, but the send can still
+// reject ("message port closed") or the worker can be mid-eviction. Returns the
+// SW's response object, or null if no ack after all attempts.
+async function sendToBackgroundAwait(
+	msg: OutboundMessage,
+	attempts = 3,
+): Promise<{ ok?: boolean; error?: string } | null> {
+	for (let i = 0; i < attempts; i++) {
+		try {
+			const res = (await chrome.runtime.sendMessage(msg)) as
+				| { ok?: boolean; error?: string }
+				| undefined;
+			if (res != null) return res;
+		} catch {
+			// SW cold-start / port closed — fall through and retry.
+		}
+		if (i < attempts - 1) {
+			await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+		}
+	}
+	return null;
+}
+
+function showNudgeError(card: HTMLElement, text: string): void {
+	let err = card.querySelector<HTMLElement>(".cap-nudge-error");
+	if (!err) {
+		err = makeEl("div", "cap-nudge-error");
+		err.style.cssText =
+			"color:#dc2626;font-size:12px;margin-top:6px;text-align:center;";
+		card.appendChild(err);
+	}
+	err.textContent = text;
 }
 
 // ── Main gate ─────────────────────────────────────────────────────────────────

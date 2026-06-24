@@ -398,6 +398,9 @@ async function handleMessage(
 
 		// ── Content: Meet call started ────────────────────────────────────
 		case "MEET_CALL_STARTED": {
+			// Keep the service worker warm while in a Meet call so nudge clicks
+			// (Record now) aren't dropped by an evicted/cold-starting worker.
+			startKeepAlive();
 			const settings = await getSettings();
 			if (settings.autoRecordOnMeet) {
 				return {
@@ -418,6 +421,10 @@ async function handleMessage(
 				state.meetingId === meetingId
 			) {
 				await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
+			} else if (state.kind !== "recording") {
+				// Not recording — stop the Meet keep-alive (a recording manages its
+				// own keep-alive lifecycle, so don't clear it mid-recording).
+				stopKeepAlive();
 			}
 			return { ok: true };
 		}
