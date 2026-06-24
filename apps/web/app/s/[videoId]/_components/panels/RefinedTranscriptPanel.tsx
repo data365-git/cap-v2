@@ -2,12 +2,18 @@
 
 import { Play } from "lucide-react";
 import { GenerateSection } from "../GenerateSection";
+import { RichText } from "../RichText";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 interface RefinedTranscriptPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
 	refinedTranscript?: {
+		intro?: {
+			participants: string[];
+			duration: string;
+			purpose: string;
+		};
 		chapters: {
 			startSec: number;
 			title: string;
@@ -43,8 +49,40 @@ export function RefinedTranscriptPanel({
 		);
 	}
 
+	const intro = refinedTranscript.intro;
+	const hasIntro =
+		intro &&
+		((intro.participants && intro.participants.length > 0) ||
+			intro.duration ||
+			intro.purpose);
+
 	return (
 		<>
+			{hasIntro && intro && (
+				<div className="refined-doc-intro">
+					<div className="refined-doc-intro-label">Uchrashuv hisoboti</div>
+					<div className="refined-doc-intro-text">
+						{intro.participants && intro.participants.length > 0 && (
+							<>
+								<strong>Ishtirokchilar:</strong>{" "}
+								{intro.participants.join(", ")}
+								{(intro.duration || intro.purpose) && " · "}
+							</>
+						)}
+						{intro.duration && (
+							<>
+								<strong>Davomiyligi:</strong> {intro.duration}
+								{intro.purpose && " · "}
+							</>
+						)}
+						{intro.purpose && (
+							<>
+								<strong>Maqsad:</strong> {intro.purpose}
+							</>
+						)}
+					</div>
+				</div>
+			)}
 			{refinedTranscript.chapters.map((chapter) => (
 				<section className="refined-section" key={chapter.startSec}>
 					<div className="refined-head">
@@ -65,7 +103,7 @@ export function RefinedTranscriptPanel({
 					</div>
 					{chapter.paragraphs.map((paragraph) => (
 						<p className="refined-para" key={paragraph}>
-							{paragraph}
+							<RichText>{paragraph}</RichText>
 						</p>
 					))}
 				</section>

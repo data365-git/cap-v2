@@ -9,7 +9,7 @@ import { startAiGeneration } from "@/lib/generate-ai";
 import { isAiGenerationEnabled } from "@/utils/flags";
 
 export async function POST(
-	_request: Request,
+	request: Request,
 	props: RouteContext<"/api/videos/[videoId]/retry-ai">,
 ) {
 	try {
@@ -22,6 +22,9 @@ export async function POST(
 		if (!videoId) {
 			return Response.json({ error: "Video ID is required" }, { status: 400 });
 		}
+
+		const force =
+			new URL(request.url).searchParams.get("force") === "1";
 
 		const videoQuery = await db()
 			.select()
@@ -50,12 +53,36 @@ export async function POST(
 
 		const metadata = (video.metadata as VideoMetadata) || {};
 
-		const canRetry =
+		// Allow retry when AI gen status indicates a non-success terminal state.
+		const statusAllowsRetry =
 			!metadata.aiGenerationStatus ||
 			metadata.aiGenerationStatus === "ERROR" ||
 			metadata.aiGenerationStatus === "SKIPPED";
 
-		if (!canRetry) {
+		// Also allow retry when status is COMPLETE but the produced content is
+		// empty (the long-video bug ships back tasks: [], chapters: [], no
+		// overview — looks complete, is actually useless).
+		const aiSummary = metadata.aiSummary;
+		const isEmptyContent =
+			(!aiSummary?.tasks || aiSummary.tasks.length === 0) &&
+			(!aiSummary?.refinedTranscript?.chapters ||
+				aiSummary.refinedTranscript.chapters.length === 0) &&
+			(!aiSummary?.overview || aiSummary.overview.trim() === "");
+
+		let retryReason: "force" | "empty-content" | "error-or-skipped" | null =
+			null;
+		if (force) {
+			retryReason = "force";
+		} else if (statusAllowsRetry) {
+			retryReason = "error-or-skipped";
+		} else if (
+			metadata.aiGenerationStatus === "COMPLETE" &&
+			isEmptyContent
+		) {
+			retryReason = "empty-content";
+		}
+
+		if (!retryReason) {
 			return Response.json(
 				{
 					error:
@@ -65,6 +92,10 @@ export async function POST(
 				{ status: 400 },
 			);
 		}
+
+		console.info(
+			`[CAP-RETRY] retry-ai video=${videoId} reason=${retryReason}`,
+		);
 
 		const videoOwnerQuery = await db()
 			.select({

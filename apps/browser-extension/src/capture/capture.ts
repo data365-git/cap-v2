@@ -202,8 +202,33 @@ function showPicker(): void {
 	const card = mkCard();
 	card.appendChild(mkLogo());
 	card.appendChild(mk("p", "phase-title", "Opening screen picker…"));
-	card.appendChild(mk("p", "phase-sub",   "Choose a screen or window to record."));
+	card.appendChild(mk("p", "phase-sub",   "Choose a screen, window, or tab to record."));
+	// For Google Meet (and any tab where participant audio plays in the tab),
+	// the user MUST keep "Share tab audio" checked in Chrome's picker, otherwise
+	// only the mic will end up in the recording. macOS in particular cannot
+	// capture system-wide audio for whole-screen shares — tab audio is the
+	// reliable path.
+	const hint = mk("p", "phase-sub", "Tip: pick the Meet tab and keep “Share tab audio” checked so other participants are recorded.");
+	hint.style.fontSize = "12px";
+	hint.style.opacity = "0.8";
+	card.appendChild(hint);
 	root.appendChild(card);
+}
+
+// Surface a non-fatal warning in the capture-page UI without aborting the run.
+// Used when tab/system audio could not be acquired so the user knows the
+// recording will only contain their microphone.
+function showWarningBanner(text: string): void {
+	const root = $root();
+	const banner = mk("div", "warning-banner", text);
+	banner.style.background = "#fff7e6";
+	banner.style.color = "#7a4a00";
+	banner.style.border = "1px solid #ffd591";
+	banner.style.padding = "8px 12px";
+	banner.style.borderRadius = "6px";
+	banner.style.margin = "8px 0";
+	banner.style.fontSize = "12px";
+	root.insertBefore(banner, root.firstChild);
 }
 
 function showStarting(): void {
@@ -378,7 +403,16 @@ async function run(): Promise<void> {
 	showStarting();
 
 	// Phase 2: display stream — SAME context as picker (avoids cross-context streamId error)
+	//
+	// macOS caveat: Chrome on macOS cannot capture system-wide audio when the user
+	// picks "Entire Screen". Tab audio (when the user picks a tab and ticks
+	// "Share tab audio") is the only reliable path for Meet on macOS. We attempt
+	// the audio-bearing constraint first; if it throws (user un-checked the box,
+	// or picked a screen on macOS) we surface a clear, user-visible warning rather
+	// than silently downgrading to a mic-only recording.
 	let displayStream: MediaStream;
+	let tabAudioAcquired = false;
+	let tabAudioFailureReason: string | null = null;
 	const vidC = {
 		mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId },
 	} as unknown as MediaTrackConstraints;
@@ -390,14 +424,44 @@ async function run(): Promise<void> {
 					mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId },
 				} as unknown as MediaTrackConstraints,
 			});
-		} catch {
+			tabAudioAcquired = displayStream.getAudioTracks().length > 0;
+			if (!tabAudioAcquired) {
+				tabAudioFailureReason = "tab/system audio constraint returned no audio tracks";
+			}
+		} catch (audioErr) {
+			// Audio-constrained getUserMedia threw — most common cause is the user
+			// not checking "Share tab audio"/"Share system audio" in the picker, or
+			// macOS rejecting system-audio capture for whole-screen shares.
+			tabAudioFailureReason = audioErr instanceof Error ? audioErr.message : String(audioErr);
+			console.warn("[CAP-AUDIO] audio-constrained getUserMedia failed:", tabAudioFailureReason);
 			displayStream = await navigator.mediaDevices.getUserMedia({ video: vidC });
+			tabAudioAcquired = false;
 		}
 	} catch (err) {
 		const reason = `Failed to capture display: ${err instanceof Error ? err.message : String(err)}`;
 		tell({ type: "RECORDER_ERROR", error: reason });
 		showError(reason);
 		return;
+	}
+
+	console.info(
+		`[CAP-AUDIO] display capture: video tracks=${displayStream.getVideoTracks().length}, ` +
+		`tab/system audio tracks=${displayStream.getAudioTracks().length}, ` +
+		`acquired=${tabAudioAcquired}` +
+		(tabAudioFailureReason ? ` (reason: ${tabAudioFailureReason})` : ""),
+	);
+
+	if (!tabAudioAcquired) {
+		// Do NOT abort the recording — the mic-only path is a legitimate use case
+		// (screen demos with narration). But the user MUST be told, because the
+		// most common Meet scenario silently lost the other participant's voice
+		// before this fix.
+		const warn =
+			"Tab/system audio was NOT captured. Only your microphone will be recorded. " +
+			"For Google Meet, re-open the picker, choose the Meet tab, and keep " +
+			"“Share tab audio” checked.";
+		showWarningBanner(warn);
+		tell({ type: "RECORDER_WARNING", warning: warn, code: "NO_TAB_AUDIO" });
 	}
 
 	// Phase 3: microphone (if enabled)
@@ -415,13 +479,47 @@ async function run(): Promise<void> {
 		}
 	}
 
+	console.info(
+		`[CAP-AUDIO] mic capture: enabled=${settings.micEnabled}, ` +
+		`tracks=${micStream ? micStream.getAudioTracks().length : 0}`,
+	);
+
 	// Phase 4: mix audio
+	//
+	// We feed BOTH the tab/system-audio MediaStream (from displayStream) AND the
+	// mic MediaStream into a single AudioContext destination. The destination's
+	// .stream emits ONE mixed audio track, which becomes the only audio track on
+	// the final recordStream. We deliberately do NOT add the raw displayStream
+	// audio tracks to recordStream directly — that would either double-add audio
+	// or emit two separate tracks that MediaRecorder ignores past index 0.
 	const audioCtx = new AudioContext({ sampleRate: 48_000 });
 	const dest = audioCtx.createMediaStreamDestination();
-	if (displayStream.getAudioTracks().length > 0)
-		audioCtx.createMediaStreamSource(displayStream).connect(dest);
-	if (micStream && micStream.getAudioTracks().length > 0)
-		audioCtx.createMediaStreamSource(micStream).connect(dest);
+	let mixedSources = 0;
+	if (displayStream.getAudioTracks().length > 0) {
+		try {
+			// Wrap in a fresh MediaStream so createMediaStreamSource only sees the
+			// audio tracks (avoids any video-track interactions inside the graph).
+			const tabAudioOnly = new MediaStream(displayStream.getAudioTracks());
+			audioCtx.createMediaStreamSource(tabAudioOnly).connect(dest);
+			mixedSources++;
+			console.info("[CAP-AUDIO] mixer: connected tab/system audio source");
+		} catch (e) {
+			console.warn("[CAP-AUDIO] mixer: failed to connect tab audio source:", e);
+		}
+	}
+	if (micStream && micStream.getAudioTracks().length > 0) {
+		try {
+			audioCtx.createMediaStreamSource(micStream).connect(dest);
+			mixedSources++;
+			console.info("[CAP-AUDIO] mixer: connected mic audio source");
+		} catch (e) {
+			console.warn("[CAP-AUDIO] mixer: failed to connect mic audio source:", e);
+		}
+	}
+	console.info(
+		`[CAP-AUDIO] mixer: ${mixedSources} source(s) routed to destination, ` +
+		`dest tracks=${dest.stream.getAudioTracks().length}`,
+	);
 
 	// Phase 4b: build the record stream ─────────────────────────────────
 	//
@@ -444,6 +542,13 @@ async function run(): Promise<void> {
 		...displayStream.getVideoTracks(),
 		...dest.stream.getAudioTracks(),
 	]);
+
+	console.info(
+		`[CAP-AUDIO] recordStream assembled: ` +
+		`video tracks=${recordStream.getVideoTracks().length}, ` +
+		`audio tracks=${recordStream.getAudioTracks().length} ` +
+		`(expected 1 mixed track combining mic + tab audio when both available)`,
+	);
 
 	// Wire up "Stop sharing" bar early so countdown cancels cleanly.
 	const vt = displayStream.getVideoTracks();
@@ -628,11 +733,25 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 				case "complete": {
 					const shareUrl = typeof state.shareUrl === "string" ? state.shareUrl : "";
 					showComplete(shareUrl);
+					// Auto-close the capture tab — the in-page nudge (Meet) and the
+					// floating overlay (non-Meet) already received the STATE_CHANGED
+					// broadcast with the same shareUrl, so the user sees the complete
+					// UI on their actual page instead of on capture.html.
+					// 500ms delay so the broadcast has time to reach all listeners
+					// before this tab vanishes.
+					setTimeout(() => {
+						tell({ type: "CLOSE_CAPTURE_TAB", reason: "complete" });
+					}, 500);
 					break;
 				}
 				case "error": {
 					const reason = typeof state.reason === "string" ? state.reason : "An error occurred.";
 					showError(reason);
+					// Auto-close on error too — the in-page nudge / overlay surfaces
+					// the error with a Retry button, so the capture tab is redundant.
+					setTimeout(() => {
+						tell({ type: "CLOSE_CAPTURE_TAB", reason: "error" });
+					}, 500);
 					break;
 				}
 			}

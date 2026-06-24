@@ -18,6 +18,9 @@ import {
 // offscreen document did.
 
 let captureTabId: number | null = null;
+// The originating (meeting/page) tab the user was on before the capture tab opened.
+// Used to return focus after the picker finishes so the user never sees capture.html.
+let meetingTabId: number | null = null;
 // When true, RECORDER_DISCARDED should go to idle (delete) instead of restarting.
 let pendingDeleteAfterDiscard = false;
 // Bookkeeping only — which tabs we've injected into. NOT used to gate re-injection:
@@ -119,6 +122,7 @@ chrome.tabs.onRemoved.addListener((removedTabId: number) => {
 	cameraBubbleTabs.delete(removedTabId);
 	if (captureTabId !== removedTabId) return;
 	captureTabId = null;
+	meetingTabId = null;
 	getState().then(async (st) => {
 		if (st.kind === "arming") {
 			// Closed before picking — go idle.
@@ -240,8 +244,20 @@ async function launchMeetCapture(
 		if (_settings.cameraOverlay) void injectCameraBubble(activeTab.id);
 	}
 
+	// Remember the originating (meeting/page) tab so we can return focus to it as
+	// soon as the picker is done — the user should never look at capture.html.
+	// Prefer explicit meeting tabId from arming state; fall back to active tab.
+	const armingTabId =
+		armingState.kind === "arming" ? armingState.tabId : undefined;
+	meetingTabId = armingTabId ?? activeTab?.id ?? null;
+	console.info(`[CAP-LIFECYCLE] stored meetingTabId=${meetingTabId}`);
+
 	// capture.ts handles picker + getUserMedia + MediaRecorder in one context.
 	// It reads mic settings from storage directly, so we only need to open it.
+	// We open it focused (active: true) ONLY because chrome.desktopCapture.choose
+	// requires a focused tab to render the picker; as soon as RECORDER_STARTED
+	// fires we refocus the meeting/page tab and pin+mute the capture tab so the
+	// user never has to look at it.
 	const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
 		chrome.tabs.create(
 			{ url: chrome.runtime.getURL("capture.html"), active: true },
@@ -505,6 +521,40 @@ async function handleMessage(
 			// Overlay is already pre-injected (launchMeetCapture) and listening to
 			// chrome.storage.onChanged — it will show the recording pill automatically.
 
+			// Return focus to the meeting/page tab — the user should never have to
+			// look at capture.html. Pin + mute the capture tab so it's tucked away.
+			if (meetingTabId !== null) {
+				console.info(
+					`[CAP-LIFECYCLE] RECORDER_STARTED — refocusing meetingTabId=${meetingTabId}`,
+				);
+				chrome.tabs
+					.update(meetingTabId, { active: true })
+					.catch(() => {
+						/* tab may have been closed — no-op */
+					});
+			}
+			if (captureTabId !== null) {
+				chrome.tabs
+					.update(captureTabId, { pinned: true, muted: true })
+					.catch(() => {
+						/* capture tab may have been closed — no-op */
+					});
+			}
+
+			return { ok: true };
+		}
+
+		// ── Capture page: hide itself once it's done (complete/cancel) ───
+		case "CLOSE_CAPTURE_TAB": {
+			if (captureTabId !== null) {
+				const reason = getString(msg, "reason") ?? "unknown";
+				console.info(
+					`[CAP-LIFECYCLE] capture tab close requested (reason=${reason})`,
+				);
+				const idToClose = captureTabId;
+				captureTabId = null;
+				chrome.tabs.remove(idToClose).catch(() => {});
+			}
 			return { ok: true };
 		}
 

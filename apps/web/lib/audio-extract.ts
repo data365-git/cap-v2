@@ -153,6 +153,100 @@ export async function extractAudioToBuffer(videoUrl: string): Promise<Buffer> {
 	});
 }
 
+export interface AudioSlice {
+	path: string;
+	startOffsetSec: number;
+	durationSec: number;
+	cleanup: () => Promise<void>;
+}
+
+/**
+ * Slice an existing audio file on disk into time-windowed chunks. Uses ffmpeg
+ * stream copy (no re-encode) when possible. Each chunk overlaps the next by
+ * `overlapSec` seconds to avoid mid-word cuts at boundaries.
+ */
+export async function chunkAudio(
+	inputPath: string,
+	totalDurationSec: number,
+	windowSec = 600,
+	overlapSec = 5,
+): Promise<AudioSlice[]> {
+	const ffmpeg = getFfmpegPath();
+	const slices: AudioSlice[] = [];
+	const stride = Math.max(1, windowSec - overlapSec);
+
+	let offset = 0;
+	let index = 0;
+	while (offset < totalDurationSec) {
+		const remaining = totalDurationSec - offset;
+		const sliceDuration = Math.min(windowSec, remaining);
+		const outputPath = join(
+			tmpdir(),
+			`audio-chunk-${randomUUID()}-${index}.mp3`,
+		);
+
+		const ffmpegArgs = [
+			"-ss",
+			String(offset),
+			"-i",
+			inputPath,
+			"-t",
+			String(sliceDuration),
+			"-vn",
+			"-acodec",
+			"libmp3lame",
+			"-b:a",
+			"128k",
+			"-f",
+			"mp3",
+			"-y",
+			outputPath,
+		];
+
+		await new Promise<void>((resolveSlice, rejectSlice) => {
+			const proc = spawn(ffmpeg, ffmpegArgs, {
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+			let stderr = "";
+			proc.stderr?.on("data", (data: Buffer) => {
+				stderr += data.toString();
+			});
+			proc.on("error", (err: Error) => {
+				fs.unlink(outputPath).catch(() => {});
+				rejectSlice(new Error(`Audio chunking failed: ${err.message}`));
+			});
+			proc.on("close", (code: number | null) => {
+				if (code === 0) {
+					resolveSlice();
+				} else {
+					fs.unlink(outputPath).catch(() => {});
+					rejectSlice(
+						new Error(`Audio chunking failed with code ${code}: ${stderr}`),
+					);
+				}
+			});
+		});
+
+		slices.push({
+			path: outputPath,
+			startOffsetSec: offset,
+			durationSec: sliceDuration,
+			cleanup: async () => {
+				try {
+					await fs.unlink(outputPath);
+				} catch {}
+			},
+		});
+
+		index++;
+		// last slice — break out (next iteration would go past end)
+		if (remaining <= windowSec) break;
+		offset += stride;
+	}
+
+	return slices;
+}
+
 export async function convertWavToMp3(wavBuffer: Buffer): Promise<Buffer> {
 	const ffmpeg = getFfmpegPath();
 	const ffmpegArgs = [

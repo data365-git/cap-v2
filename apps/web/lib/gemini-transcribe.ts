@@ -1,7 +1,17 @@
+export interface VttCue {
+	index: number;
+	startSec: number;
+	endSec: number;
+	text: string;
+}
+
 export interface GeminiTranscribeResult {
 	transcriptVtt: string;
+	cues: VttCue[];
 	inputTokens: number;
 	outputTokens: number;
+	finishReason: string;
+	isComplete: boolean;
 	words?: Array<{
 		word: string;
 		start: number;
@@ -28,11 +38,104 @@ function detectMimeType(audioUrl: string): string {
 }
 
 function formatVttTimestamp(seconds: number): string {
-	const h = Math.floor(seconds / 3600);
-	const m = Math.floor((seconds % 3600) / 60);
-	const s = Math.floor(seconds % 60);
-	const ms = Math.round((seconds % 1) * 1000);
+	const safe = Math.max(0, seconds);
+	const h = Math.floor(safe / 3600);
+	const m = Math.floor((safe % 3600) / 60);
+	const s = Math.floor(safe % 60);
+	const ms = Math.round((safe % 1) * 1000);
 	return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+}
+
+function parseVttTimestamp(ts: string): number | null {
+	// Accept HH:MM:SS.mmm or MM:SS.mmm
+	const m1 = ts.match(/^(\d+):(\d{2}):(\d{2})[.,](\d{1,3})$/);
+	if (m1) {
+		const [, h, m, s, ms] = m1;
+		return (
+			Number(h) * 3600 +
+			Number(m) * 60 +
+			Number(s) +
+			Number(ms.padEnd(3, "0")) / 1000
+		);
+	}
+	const m2 = ts.match(/^(\d+):(\d{2})[.,](\d{1,3})$/);
+	if (m2) {
+		const [, m, s, ms] = m2;
+		return Number(m) * 60 + Number(s) + Number(ms.padEnd(3, "0")) / 1000;
+	}
+	return null;
+}
+
+export function parseVttCues(vtt: string): VttCue[] {
+	const cues: VttCue[] = [];
+	const lines = vtt.split(/\r?\n/);
+	let i = 0;
+	let cueIndex = 0;
+
+	// skip WEBVTT header
+	while (i < lines.length && !lines[i]?.includes("-->")) i++;
+
+	while (i < lines.length) {
+		const line = lines[i] ?? "";
+		const arrowMatch = line.match(
+			/^\s*([\d:.,]+)\s*-->\s*([\d:.,]+)/,
+		);
+		if (!arrowMatch) {
+			i++;
+			continue;
+		}
+		const startSec = parseVttTimestamp(arrowMatch[1] ?? "");
+		const endSec = parseVttTimestamp(arrowMatch[2] ?? "");
+		if (startSec == null || endSec == null) {
+			i++;
+			continue;
+		}
+		i++;
+		const textLines: string[] = [];
+		while (i < lines.length && lines[i]?.trim() !== "") {
+			textLines.push(lines[i] ?? "");
+			i++;
+		}
+		cueIndex++;
+		cues.push({
+			index: cueIndex,
+			startSec,
+			endSec,
+			text: textLines.join("\n"),
+		});
+		// skip blank lines
+		while (i < lines.length && lines[i]?.trim() === "") i++;
+	}
+
+	return cues;
+}
+
+export function cuesToVtt(cues: VttCue[]): string {
+	let out = "WEBVTT\n\n";
+	cues.forEach((cue, idx) => {
+		out += `${idx + 1}\n${formatVttTimestamp(cue.startSec)} --> ${formatVttTimestamp(cue.endSec)}\n${cue.text}\n\n`;
+	});
+	return out;
+}
+
+export function shiftCues(cues: VttCue[], offsetSec: number): VttCue[] {
+	if (offsetSec === 0) return cues;
+	return cues.map((cue) => ({
+		...cue,
+		startSec: cue.startSec + offsetSec,
+		endSec: cue.endSec + offsetSec,
+	}));
+}
+
+export function mergeVtt(
+	perChunkResults: Array<{ cues: VttCue[]; startOffsetSec: number }>,
+): { vtt: string; cues: VttCue[] } {
+	const all: VttCue[] = [];
+	for (const r of perChunkResults) {
+		all.push(...shiftCues(r.cues, r.startOffsetSec));
+	}
+	all.sort((a, b) => a.startSec - b.startSec);
+	return { vtt: cuesToVtt(all), cues: all };
 }
 
 function plainTextToWebVTT(text: string, durationSec: number): string {
@@ -84,25 +187,56 @@ async function pollUntilActive(
 	throw new Error("Gemini file never reached ACTIVE state");
 }
 
-export async function transcribeWithGemini(
-	audioUrl: string,
-	options: {
-		apiKey: string;
-		audioDurationSec?: number;
-	},
-): Promise<GeminiTranscribeResult> {
-	const { apiKey, audioDurationSec = 300 } = options;
+export interface TranscribeOptions {
+	apiKey: string;
+	audioDurationSec?: number;
+	/** Local file path. If provided, audioInput is ignored. */
+	audioPath?: string;
+	/** Pre-loaded audio bytes (with explicit mimeType). */
+	audioBytes?: Uint8Array;
+	audioMimeType?: string;
+	/**
+	 * Seconds to add to every cue timestamp before returning. Used when this
+	 * call is transcribing a slice of a longer recording.
+	 */
+	startOffsetSec?: number;
+}
 
-	const audioResponse = await fetch(audioUrl);
+async function readAudio(
+	audioInput: string,
+	options: TranscribeOptions,
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+	if (options.audioBytes && options.audioMimeType) {
+		return { bytes: options.audioBytes, mimeType: options.audioMimeType };
+	}
+	if (options.audioPath) {
+		const { promises: fs } = await import("node:fs");
+		const buf = await fs.readFile(options.audioPath);
+		return {
+			bytes: new Uint8Array(buf),
+			mimeType: detectMimeType(options.audioPath),
+		};
+	}
+	const audioResponse = await fetch(audioInput);
 	if (!audioResponse.ok) {
 		throw new Error(
 			`Audio URL not accessible: ${audioResponse.status} ${audioResponse.statusText}`,
 		);
 	}
-
 	const audioBuffer = await audioResponse.arrayBuffer();
-	const audioBytes = new Uint8Array(audioBuffer);
-	const mimeType = detectMimeType(audioUrl);
+	return {
+		bytes: new Uint8Array(audioBuffer),
+		mimeType: detectMimeType(audioInput),
+	};
+}
+
+export async function transcribeWithGemini(
+	audioUrl: string,
+	options: TranscribeOptions,
+): Promise<GeminiTranscribeResult> {
+	const { apiKey, audioDurationSec = 300, startOffsetSec = 0 } = options;
+
+	const { bytes: audioBytes, mimeType } = await readAudio(audioUrl, options);
 	const displayName = `cap-audio-${Date.now()}`;
 
 	const initRes = await fetch(
@@ -187,14 +321,21 @@ Rules:
 If speaker names are known from the audio, use their names.
 
 If names are not clear, use:
-Speaker 1:
-Speaker 2:
-Speaker 3:
+Speaker 1
+Speaker 2
+Speaker 3
 
 Keep speaker labels consistent across the whole transcript.
 
-If two people talk over each other and both cannot be clearly separated, write:
-[ustma-ust gaplashildi]
+Each WEBVTT cue must contain EXACTLY ONE speaker. Begin each cue's text with a WebVTT voice tag: <v Speaker Name> followed by that speaker's words. NEVER merge two speakers into a single cue. Example of correct format:
+
+00:00:12.500 --> 00:00:15.200
+<v Bunyodbek>Salom, qanday yangiliklar bor?
+
+00:00:15.500 --> 00:00:18.100
+<v Jahongir>Yangi mijoz keldi, **deadline** ertaga.
+
+If two people talk over each other and both cannot be clearly separated, split into two adjacent cues with the same or overlapping timestamps and add the [ustma-ust gaplashildi] tag on the second cue.
 
 4. Add real, accurate timestamps from the audio. Do not use sample, fake, guessed, or template timestamps.
 
@@ -232,7 +373,7 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 				],
 				generationConfig: {
 					temperature: 0.1,
-					maxOutputTokens: 8192,
+					maxOutputTokens: 65536,
 				},
 			}),
 		},
@@ -241,6 +382,7 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 	const genData = (await genRes.json()) as {
 		candidates?: Array<{
 			content: { parts: Array<{ text?: string }> };
+			finishReason?: string;
 		}>;
 		usageMetadata?: {
 			promptTokenCount?: number;
@@ -256,6 +398,8 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 	}
 
 	const rawText = genData.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+	const finishReason = genData.candidates?.[0]?.finishReason ?? "UNKNOWN";
+	const isComplete = finishReason !== "MAX_TOKENS";
 	const inputTokens = genData.usageMetadata?.promptTokenCount ?? 0;
 	const outputTokens = genData.usageMetadata?.candidatesTokenCount ?? 0;
 
@@ -264,9 +408,21 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 		{ method: "DELETE" },
 	).catch(() => {});
 
-	const transcriptVtt = rawText.trimStart().startsWith("WEBVTT")
+	const baseVtt = rawText.trimStart().startsWith("WEBVTT")
 		? rawText.trimStart()
 		: plainTextToWebVTT(rawText, audioDurationSec);
 
-	return { transcriptVtt, inputTokens, outputTokens };
+	const parsedCues = parseVttCues(baseVtt);
+	const shifted = shiftCues(parsedCues, startOffsetSec);
+	const transcriptVtt =
+		startOffsetSec === 0 ? baseVtt : cuesToVtt(shifted);
+
+	return {
+		transcriptVtt,
+		cues: shifted,
+		inputTokens,
+		outputTokens,
+		finishReason,
+		isComplete,
+	};
 }

@@ -15,6 +15,11 @@ export interface AiSummary {
 	}[];
 	chapters: { startSec: number; title: string; body: string }[];
 	refinedTranscript: {
+		intro?: {
+			participants: string[];
+			duration: string;
+			purpose: string;
+		};
 		chapters: { startSec: number; title: string; paragraphs: string[] }[];
 	};
 }

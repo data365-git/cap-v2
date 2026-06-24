@@ -22,9 +22,17 @@ import {
 	ENHANCED_AUDIO_EXTENSION,
 	enhanceAudioFromUrl,
 } from "@/lib/audio-enhance";
-import { checkHasAudioTrack, extractAudioFromUrl } from "@/lib/audio-extract";
+import {
+	checkHasAudioTrack,
+	chunkAudio,
+	extractAudioFromUrl,
+} from "@/lib/audio-extract";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
-import { transcribeWithGemini } from "@/lib/gemini-transcribe";
+import {
+	mergeVtt,
+	transcribeWithGemini,
+	type VttCue,
+} from "@/lib/gemini-transcribe";
 import { startAiGeneration } from "@/lib/generate-ai";
 import { runPromise } from "@/lib/server";
 import { chunkTranscript } from "@/lib/transcript-chunk";
@@ -78,14 +86,26 @@ export async function transcribeVideoWorkflow(
 			),
 		]);
 
-		await saveTranscription(videoId, userId, videoData.video, transcription);
-
-		await chunkEmbedAndStore(
+		await saveTranscription(
 			videoId,
-			transcription,
-			videoData.ownerEncryptedGeminiKey,
-			{ userId, orgId: videoData.orgId },
+			userId,
+			videoData.video,
+			transcription.transcriptVtt,
+			transcription.allComplete,
 		);
+
+		if (transcription.allComplete) {
+			await chunkEmbedAndStore(
+				videoId,
+				transcription.transcriptVtt,
+				videoData.ownerEncryptedGeminiKey,
+				{ userId, orgId: videoData.orgId },
+			);
+		} else {
+			console.warn(
+				`[CAP-TRANSCRIBE] Skipping RAG indexing for ${videoId}: transcription truncated`,
+			);
+		}
 	} catch (error) {
 		await markError(videoId);
 		await cleanupTempAudio(videoId, userId, videoData.video);
@@ -277,12 +297,21 @@ async function resolveVideoSourceUrl(
 	throw new Error("Video file not accessible");
 }
 
+interface TranscriptionResult {
+	transcriptVtt: string;
+	allComplete: boolean;
+}
+
+const CHUNK_THRESHOLD_SEC = 12 * 60; // chunk audio longer than 12 minutes
+const CHUNK_WINDOW_SEC = 10 * 60; // 10-minute windows
+const CHUNK_OVERLAP_SEC = 5; // 5-second overlap to avoid mid-word cuts
+
 async function transcribeAudio(
 	audioUrl: string,
 	videoDuration: number | null,
 	ownerEncryptedGeminiKey: string | null,
 	context: { userId: string; orgId: string; videoId: string },
-): Promise<string> {
+): Promise<TranscriptionResult> {
 	"use step";
 
 	let apiKey: string | undefined;
@@ -308,27 +337,128 @@ async function transcribeAudio(
 	}
 
 	const resolvedApiKey = apiKey;
+	const totalDuration = videoDuration ?? 0;
+	const shouldChunk =
+		totalDuration > CHUNK_THRESHOLD_SEC && Number.isFinite(totalDuration);
 
-	const result = await withCostGuard({
-		orgId: context.orgId,
-		userId: context.userId,
-		videoId: context.videoId,
-		operation: "transcription",
-		model: "gemini-3-flash-preview",
-		fn: async () => {
-			const res = await transcribeWithGemini(audioUrl, {
-				apiKey: resolvedApiKey,
-				audioDurationSec: videoDuration ?? undefined,
+	if (!shouldChunk) {
+		const result = await withCostGuard({
+			orgId: context.orgId,
+			userId: context.userId,
+			videoId: context.videoId,
+			operation: "transcription",
+			model: "gemini-3-flash-preview",
+			fn: async () => {
+				const res = await transcribeWithGemini(audioUrl, {
+					apiKey: resolvedApiKey,
+					audioDurationSec: videoDuration ?? undefined,
+				});
+				console.info(
+					`[CAP-TRANSCRIBE] chunk 1/1 offsetSec=0 durationSec=${totalDuration} finishReason=${res.finishReason} cueCount=${res.cues.length}`,
+				);
+				return {
+					transcriptVtt: res.transcriptVtt,
+					cues: res.cues,
+					finishReason: res.finishReason,
+					isComplete: res.isComplete,
+					inputTokens: res.inputTokens,
+					outputTokens: res.outputTokens,
+				};
+			},
+		});
+
+		console.info(
+			`[CAP-TRANSCRIBE] merged transcript: 1 chunks, ${result.cues.length} total cues, ${totalDuration} total duration sec, allComplete=${result.isComplete}`,
+		);
+
+		return {
+			transcriptVtt: result.transcriptVtt,
+			allComplete: result.isComplete,
+		};
+	}
+
+	// Chunked path — download audio to local disk, slice with ffmpeg, transcribe
+	// each slice with its startOffset, then merge.
+	const { randomUUID } = await import("node:crypto");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const localAudioPath = join(tmpdir(), `audio-full-${randomUUID()}.mp3`);
+	const audioResponse = await fetch(audioUrl);
+	if (!audioResponse.ok) {
+		throw new Error(
+			`Failed to download audio for chunking: ${audioResponse.status}`,
+		);
+	}
+	const audioBuf = Buffer.from(await audioResponse.arrayBuffer());
+	await fs.writeFile(localAudioPath, audioBuf);
+
+	let slices: Awaited<ReturnType<typeof chunkAudio>> = [];
+	const perChunkResults: Array<{ cues: VttCue[]; startOffsetSec: number }> = [];
+	let allComplete = true;
+	let totalCueCount = 0;
+
+	try {
+		slices = await chunkAudio(
+			localAudioPath,
+			totalDuration,
+			CHUNK_WINDOW_SEC,
+			CHUNK_OVERLAP_SEC,
+		);
+
+		for (let i = 0; i < slices.length; i++) {
+			const slice = slices[i];
+			if (!slice) continue;
+			const chunkLabel = `${i + 1}/${slices.length}`;
+
+			const result = await withCostGuard({
+				orgId: context.orgId,
+				userId: context.userId,
+				videoId: context.videoId,
+				operation: "transcription",
+				model: "gemini-3-flash-preview",
+				fn: async () => {
+					const res = await transcribeWithGemini(audioUrl, {
+						apiKey: resolvedApiKey,
+						audioDurationSec: slice.durationSec,
+						audioPath: slice.path,
+						startOffsetSec: slice.startOffsetSec,
+					});
+					console.info(
+						`[CAP-TRANSCRIBE] chunk ${chunkLabel} offsetSec=${slice.startOffsetSec} durationSec=${slice.durationSec} finishReason=${res.finishReason} cueCount=${res.cues.length}`,
+					);
+					return {
+						transcriptVtt: res.transcriptVtt,
+						cues: res.cues,
+						finishReason: res.finishReason,
+						isComplete: res.isComplete,
+						inputTokens: res.inputTokens,
+						outputTokens: res.outputTokens,
+					};
+				},
 			});
-			return {
-				transcriptVtt: res.transcriptVtt,
-				inputTokens: res.inputTokens,
-				outputTokens: res.outputTokens,
-			};
-		},
-	});
 
-	return result.transcriptVtt;
+			// Cues from transcribeWithGemini are already shifted by startOffsetSec —
+			// pass 0 to mergeVtt so we don't double-shift.
+			perChunkResults.push({ cues: result.cues, startOffsetSec: 0 });
+			totalCueCount += result.cues.length;
+			if (!result.isComplete) allComplete = false;
+		}
+	} finally {
+		await Promise.all(slices.map((s) => s.cleanup()));
+		await fs.unlink(localAudioPath).catch(() => {});
+	}
+
+	const merged = mergeVtt(perChunkResults);
+
+	console.info(
+		`[CAP-TRANSCRIBE] merged transcript: ${slices.length} chunks, ${totalCueCount} total cues, ${totalDuration} total duration sec, allComplete=${allComplete}`,
+	);
+
+	return {
+		transcriptVtt: merged.vtt,
+		allComplete,
+	};
 }
 
 async function saveTranscription(
@@ -336,6 +466,7 @@ async function saveTranscription(
 	userId: string,
 	video: typeof videos.$inferSelect,
 	transcription: string,
+	allComplete: boolean,
 ): Promise<void> {
 	"use step";
 
@@ -349,10 +480,22 @@ async function saveTranscription(
 		})
 		.pipe(runPromise);
 
-	await db()
-		.update(videos)
-		.set({ transcriptionStatus: "COMPLETE" })
-		.where(eq(videos.id, videoId as Video.VideoId));
+	if (allComplete) {
+		await db()
+			.update(videos)
+			.set({ transcriptionStatus: "COMPLETE" })
+			.where(eq(videos.id, videoId as Video.VideoId));
+	} else {
+		console.error(
+			`[CAP-TRANSCRIBE] Transcription truncated for ${videoId} — marking ERROR`,
+		);
+		// videos table has no errorMessage column — log the reason and persist
+		// the ERROR status (same path as markError) so UI revalidation triggers.
+		await db()
+			.update(videos)
+			.set({ transcriptionStatus: "ERROR" })
+			.where(eq(videos.id, videoId as Video.VideoId));
+	}
 }
 
 async function chunkEmbedAndStore(

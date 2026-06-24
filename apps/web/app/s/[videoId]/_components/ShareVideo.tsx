@@ -160,6 +160,7 @@ export const ShareVideo = forwardRef<
 		const handleSeek = (time: number) => {
 			if (videoRef.current) {
 				videoRef.current.currentTime = time;
+				videoRef.current.play().catch(() => {});
 				setCurrentTime(time);
 			}
 		};
@@ -446,10 +447,29 @@ export const ShareVideo = forwardRef<
 							chapters={
 								areChaptersDisabled
 									? []
-									: chapters.map((ch) => ({
-											startSec: ch.start,
-											title: ch.title,
-										}))
+									: (() => {
+											const refinedChapters =
+												data.metadata?.aiSummary?.refinedTranscript
+													?.chapters;
+											if (refinedChapters && refinedChapters.length > 0) {
+												return refinedChapters.map((ch) => ({
+													startSec: ch.startSec,
+													title: ch.title,
+												}));
+											}
+											const aiChapters =
+												data.metadata?.aiSummary?.chapters;
+											if (aiChapters && aiChapters.length > 0) {
+												return aiChapters.map((ch) => ({
+													startSec: ch.startSec,
+													title: ch.title,
+												}));
+											}
+											return chapters.map((ch) => ({
+												startSec: ch.start,
+												title: ch.title,
+											}));
+										})()
 							}
 							videoSize={videoSize}
 							onVideoSizeChange={setVideoSize}
@@ -532,6 +552,13 @@ export const ShareVideo = forwardRef<
 						videoId={data.id}
 						transcriptionStatus={data.transcriptionStatus ?? undefined}
 						aiGenerationStatus={undefined}
+						hasAiContent={
+							!!(
+								data.metadata?.aiSummary?.overview ||
+								(data.metadata?.aiSummary?.tasks?.length ?? 0) > 0 ||
+								(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) > 0
+							)
+						}
 					/>
 				)}
 

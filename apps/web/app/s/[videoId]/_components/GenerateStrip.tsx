@@ -2,6 +2,7 @@
 
 import type { Video } from "@cap/web-domain";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getVideoStatus } from "@/actions/videos/get-status";
 import "./generate-strip.css";
 
@@ -9,6 +10,7 @@ interface GenerateStripProps {
   videoId: string;
   transcriptionStatus?: string;
   aiGenerationStatus?: string;
+  hasAiContent: boolean;
 }
 
 type StepState = "idle" | "active" | "done" | "error";
@@ -34,27 +36,65 @@ const TRANSCRIPT_ERROR_STATES = new Set(["ERROR", "NO_AUDIO", "SKIPPED"]);
 const AI_COMPLETE = "COMPLETE";
 const AI_ERROR_STATES = new Set(["ERROR", "SKIPPED"]);
 
+type StripPhase = "hidden" | "regen-link" | "idle" | "running" | "done" | "error-empty" | "error";
+
+function deriveInitialPhase(
+  transcriptionStatus: string | undefined,
+  aiGenerationStatus: string | undefined,
+  hasAiContent: boolean,
+): StripPhase {
+  // Already done and has real content → show quiet regen link
+  if (
+    transcriptionStatus === TRANSCRIPT_COMPLETE &&
+    aiGenerationStatus === AI_COMPLETE &&
+    hasAiContent
+  ) {
+    return "regen-link";
+  }
+
+  // COMPLETE but empty → error-empty state
+  if (aiGenerationStatus === AI_COMPLETE && !hasAiContent) {
+    return "error-empty";
+  }
+
+  // Error/skipped states
+  if (
+    aiGenerationStatus && AI_ERROR_STATES.has(aiGenerationStatus) ||
+    transcriptionStatus && TRANSCRIPT_ERROR_STATES.has(transcriptionStatus)
+  ) {
+    return "error";
+  }
+
+  return "idle";
+}
+
 export function GenerateStrip({
   videoId,
   transcriptionStatus: initialTranscriptionStatus,
   aiGenerationStatus: initialAiGenerationStatus,
+  hasAiContent,
 }: GenerateStripProps) {
-  // "idle" | "running" | "done" — overall strip phase
-  const [phase, setPhase] = useState<"idle" | "running" | "done">(() => {
-    if (
-      initialAiGenerationStatus === AI_COMPLETE ||
-      initialTranscriptionStatus === TRANSCRIPT_COMPLETE
-    ) {
-      if (initialAiGenerationStatus === AI_COMPLETE) return "done";
-    }
-    return "idle";
-  });
+  const router = useRouter();
+  const refreshedRef = useRef(false);
+
+  const [phase, setPhase] = useState<StripPhase>(() =>
+    deriveInitialPhase(
+      initialTranscriptionStatus,
+      initialAiGenerationStatus,
+      hasAiContent,
+    ),
+  );
 
   const [stepStates, setStepStates] = useState<StepState[]>(() =>
     STEPS.map(() => "idle"),
   );
   const [subtitle, setSubtitle] = useState("AI yordamida tahlil qilish");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(() => {
+    if (initialAiGenerationStatus === AI_COMPLETE && !hasAiContent) {
+      return "Kontent yaratilmadi — qayta urinib ko'ring.";
+    }
+    return null;
+  });
 
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Which phase of the pipeline we're in: "transcript" or "ai"
@@ -92,34 +132,6 @@ export function GenerateStrip({
     });
   }, []);
 
-  const startAiPhase = useCallback(async () => {
-    pipelinePhaseRef.current = "ai";
-    aiStepIndexRef.current = 0;
-    // Mark step 1 (Tahrirlash) active
-    markStepActive(1);
-    setSubtitle("Transkript tahrirlanmoqda…");
-
-    try {
-      const res = await fetch(`/api/videos/${videoId}/retry-ai`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        markStepError(1);
-        setErrorMsg(body?.error ?? "AI generation failed.");
-        setPhase("idle");
-        return;
-      }
-      pollAi(0);
-    } catch {
-      markStepError(1);
-      setErrorMsg("Could not start AI generation.");
-      setPhase("idle");
-    }
-  }, [videoId, markStepActive, markStepError]);
-
   const pollAi = useCallback(
     (attempt: number) => {
       pollRef.current = setTimeout(async () => {
@@ -133,6 +145,11 @@ export function GenerateStrip({
               setStepStates(["done", "done", "done", "done", "done"]);
               setSubtitle("Hammasi tayyor");
               setPhase("done");
+              // Fire router.refresh() exactly once when we reach success
+              if (!refreshedRef.current) {
+                refreshedRef.current = true;
+                router.refresh();
+              }
               return;
             }
 
@@ -140,7 +157,7 @@ export function GenerateStrip({
               const activeAiStep = Math.min(1 + aiStepIndexRef.current, 4);
               markStepError(activeAiStep);
               setErrorMsg("AI generation failed. Please try again.");
-              setPhase("idle");
+              setPhase("error");
               return;
             }
 
@@ -174,13 +191,41 @@ export function GenerateStrip({
         if (attempt < 90) {
           pollAi(attempt + 1);
         } else {
-          setPhase("idle");
+          setPhase("error");
           setErrorMsg("Still working — refresh the page in a moment.");
         }
       }, 4000);
     },
-    [videoId, markStepDone, markStepActive, markStepError],
+    [videoId, markStepDone, markStepActive, markStepError, router],
   );
+
+  const startAiPhase = useCallback(async () => {
+    pipelinePhaseRef.current = "ai";
+    aiStepIndexRef.current = 0;
+    // Mark step 1 (Tahrirlash) active
+    markStepActive(1);
+    setSubtitle("Transkript tahrirlanmoqda…");
+
+    try {
+      const res = await fetch(`/api/videos/${videoId}/retry-ai`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        markStepError(1);
+        setErrorMsg(body?.error ?? "AI generation failed.");
+        setPhase("error");
+        return;
+      }
+      pollAi(0);
+    } catch {
+      markStepError(1);
+      setErrorMsg("Could not start AI generation.");
+      setPhase("error");
+    }
+  }, [videoId, markStepActive, markStepError, pollAi]);
 
   const pollTranscript = useCallback(
     (attempt: number) => {
@@ -200,7 +245,7 @@ export function GenerateStrip({
             if (ts && TRANSCRIPT_ERROR_STATES.has(ts)) {
               markStepError(0);
               setErrorMsg("Transcription failed. Please try again.");
-              setPhase("idle");
+              setPhase("error");
               return;
             }
           }
@@ -211,7 +256,7 @@ export function GenerateStrip({
         if (attempt < 90) {
           pollTranscript(attempt + 1);
         } else {
-          setPhase("idle");
+          setPhase("error");
           setErrorMsg("Still working — refresh the page in a moment.");
         }
       }, 4000);
@@ -219,15 +264,23 @@ export function GenerateStrip({
     [videoId, markStepDone, markStepError, startAiPhase],
   );
 
-  const onGenerate = useCallback(async () => {
-    if (phase !== "idle") return;
-
+  // Shared pipeline kick-off used by both Generate and Retry buttons
+  const kickOffPipeline = useCallback(async (skipTranscript: boolean) => {
     setErrorMsg(null);
+    refreshedRef.current = false;
     setPhase("running");
     setStepStates(["active", "idle", "idle", "idle", "idle"]);
     setSubtitle("Audio matnga aylantirilmoqda…");
     pipelinePhaseRef.current = "transcript";
     aiStepIndexRef.current = 0;
+
+    if (skipTranscript) {
+      // Transcription already done — jump straight to AI phase
+      setStepStates(["done", "active", "idle", "idle", "idle"]);
+      setSubtitle("Transkript tayyor, AI tahlil boshlanmoqda…");
+      await startAiPhase();
+      return;
+    }
 
     try {
       const res = await fetch(
@@ -240,24 +293,60 @@ export function GenerateStrip({
         };
         setStepStates(["error", "idle", "idle", "idle", "idle"]);
         setErrorMsg(body?.error ?? "Could not start transcription.");
-        setPhase("idle");
+        setPhase("error");
         return;
       }
       pollTranscript(0);
     } catch {
       setStepStates(["error", "idle", "idle", "idle", "idle"]);
       setErrorMsg("Could not start generation.");
-      setPhase("idle");
+      setPhase("error");
     }
-  }, [phase, videoId, pollTranscript]);
+  }, [videoId, pollTranscript, startAiPhase]);
+
+  const onGenerate = useCallback(async () => {
+    if (phase === "running") return;
+    const transcriptAlreadyDone =
+      initialTranscriptionStatus === TRANSCRIPT_COMPLETE;
+    await kickOffPipeline(transcriptAlreadyDone);
+  }, [phase, initialTranscriptionStatus, kickOffPipeline]);
+
+  const onRetry = useCallback(async () => {
+    await kickOffPipeline(false);
+  }, [kickOffPipeline]);
+
+  const onRegenerate = useCallback(async () => {
+    setPhase("running");
+    setStepStates(["active", "idle", "idle", "idle", "idle"]);
+    setSubtitle("Audio matnga aylantirilmoqda…");
+    setErrorMsg(null);
+    refreshedRef.current = false;
+    pipelinePhaseRef.current = "transcript";
+    aiStepIndexRef.current = 0;
+    await kickOffPipeline(false);
+  }, [kickOffPipeline]);
+
+  // Quiet regen link — shown when content already exists
+  if (phase === "regen-link") {
+    return (
+      <button
+        type="button"
+        className="cap-regen-link"
+        onClick={onRegenerate}
+      >
+        Qayta generatsiya
+      </button>
+    );
+  }
 
   const isRunning = phase === "running";
   const isDone = phase === "done";
+  const isError = phase === "error" || phase === "error-empty";
   const showSteps = isRunning || isDone;
 
   return (
     <div
-      className={["gen-strip", isDone ? "is-done" : ""].filter(Boolean).join(" ")}
+      className={["gen-strip", isDone ? "is-done" : "", isError ? "is-error" : ""].filter(Boolean).join(" ")}
     >
       {/* Blurred drifting aura */}
       <div className="gen-aura" aria-hidden="true" />
@@ -265,44 +354,19 @@ export function GenerateStrip({
       {/* Main row: orb + text + button */}
       <div className="gen-main">
         {/* Spark orb icon */}
-        <div className="gen-orb" aria-hidden="true">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-          </svg>
-        </div>
-
-        {/* Title + live subtitle */}
-        <div className="gen-text">
-          <div className="gen-title">AI insights tayyorlash</div>
-          <div className="gen-sub">{subtitle}</div>
-        </div>
-
-        {/* Primary button */}
-        <button
-          type="button"
-          className="gen-btn"
-          onClick={onGenerate}
-          disabled={isRunning || isDone}
-          aria-label="Generatsiya qilish"
-        >
-          {isRunning ? (
+        <div className={["gen-orb", isError ? "error" : ""].filter(Boolean).join(" ")} aria-hidden="true">
+          {isError ? (
             <svg
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.2"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              className="animate-spin"
-              aria-hidden="true"
+              strokeLinejoin="round"
             >
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           ) : (
             <svg
@@ -312,18 +376,88 @@ export function GenerateStrip({
               strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
-              aria-hidden="true"
             >
               <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
             </svg>
           )}
-          <span className="gen-btn-text">
-            {isDone ? "Bajarildi" : isRunning ? "Jarayonda…" : "Generatsiya qilish"}
-          </span>
-          {!isRunning && !isDone && (
-            <span className="gen-btn-shimmer" aria-hidden="true" />
-          )}
-        </button>
+        </div>
+
+        {/* Title + live subtitle */}
+        <div className="gen-text">
+          <div className="gen-title">
+            {isError ? "Xato yuz berdi" : "AI insights tayyorlash"}
+          </div>
+          <div className="gen-sub">
+            {isError
+              ? (errorMsg ?? "Qayta urinib ko'ring.")
+              : subtitle}
+          </div>
+        </div>
+
+        {/* Primary / Retry button */}
+        {isError ? (
+          <button
+            type="button"
+            className="gen-btn gen-btn--retry"
+            onClick={onRetry}
+            aria-label="Qayta urinish"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span className="gen-btn-text">Retry</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="gen-btn"
+            onClick={onGenerate}
+            disabled={isRunning || isDone}
+            aria-label="Generatsiya qilish"
+          >
+            {isRunning ? (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                className="animate-spin"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+              </svg>
+            )}
+            <span className="gen-btn-text">
+              {isDone ? "Bajarildi" : isRunning ? "Jarayonda…" : "Generatsiya qilish"}
+            </span>
+            {!isRunning && !isDone && (
+              <span className="gen-btn-shimmer" aria-hidden="true" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* 5-step pipeline row */}
@@ -388,8 +522,8 @@ export function GenerateStrip({
         ))}
       </div>
 
-      {/* Per-step error message */}
-      {errorMsg && <p className="gen-error">{errorMsg}</p>}
+      {/* Per-step error message — only shown during running, not in error state (subtitle handles it) */}
+      {errorMsg && phase === "running" && <p className="gen-error">{errorMsg}</p>}
     </div>
   );
 }

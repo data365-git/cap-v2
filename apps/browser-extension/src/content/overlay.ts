@@ -194,14 +194,6 @@ if (!document.getElementById(HOST_ID)) {
   cursor: pointer; font-family: inherit; transition: background .15s;
 }
 .cap-ov-btn-secondary:hover { background: #e5e7eb; }
-.cap-ov-btn-dismiss {
-  background: none; border: none;
-  color: #9ca3af; font-size: 12px;
-  cursor: pointer; font-family: inherit;
-  text-align: center; text-decoration: underline;
-  transition: color .15s;
-}
-.cap-ov-btn-dismiss:hover { color: #6b7280; }
 `;
 	shadow.appendChild(style);
 
@@ -460,15 +452,7 @@ if (!document.getElementById(HOST_ID)) {
 
 		row.append(copy, open);
 
-		const dismiss = document.createElement("button");
-		dismiss.className   = "cap-ov-btn-dismiss";
-		dismiss.textContent = "Dismiss";
-		dismiss.addEventListener("click", () => {
-			host.remove();
-			chrome.runtime.sendMessage({ type: "CANCEL" }).catch(() => {});
-		});
-
-		card.append(row, dismiss);
+		card.append(row);
 		container.appendChild(card);
 	}
 
@@ -481,15 +465,10 @@ if (!document.getElementById(HOST_ID)) {
 		reAnimate();
 
 		const card = mk("div", "cap-ov-card");
-		const btn  = document.createElement("button");
-		btn.className   = "cap-ov-btn-secondary";
-		btn.textContent = "Dismiss";
-		btn.addEventListener("click", () => host.remove());
 
 		card.append(
 			mk("div", "cap-ov-card-title", "Recording error"),
 			mk("div", "cap-ov-url", reason),
-			btn,
 		);
 		container.appendChild(card);
 	}

@@ -3,6 +3,7 @@
 import { Clock, LayoutGrid, List } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GenerateSection } from "../GenerateSection";
+import { RichText } from "../RichText";
 
 interface Task {
 	title: string;
@@ -181,7 +182,7 @@ export function TasksPanel({
 											onClick={() => toggle(i)}
 										/>
 										<div className="task-body">
-											<div className="task-title">{t.title}</div>
+											<div className="task-title"><RichText inline>{t.title}</RichText></div>
 											{(t.assignee || t.deadline) && (
 												<div className="task-meta">
 													{t.assignee && (

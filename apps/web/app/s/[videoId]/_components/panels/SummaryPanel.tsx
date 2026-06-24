@@ -3,6 +3,7 @@
 import { Clock, LayoutGrid, List, ListChecks, Sparkles, Users } from "lucide-react";
 import { useState } from "react";
 import { GenerateSection } from "../GenerateSection";
+import { RichText } from "../RichText";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 type SummaryView = "cards" | "timeline" | "document";
@@ -93,7 +94,7 @@ export function SummaryPanel({
 			{/* Overview lead card */}
 			{aiSummary.overview && (
 				<div className="lead-card">
-					<p>{aiSummary.overview}</p>
+					<RichText>{aiSummary.overview}</RichText>
 				</div>
 			)}
 
@@ -147,7 +148,7 @@ export function SummaryPanel({
 										</div>
 										<div className="topic-text">
 											<b>{topic.title}</b>
-											{topic.body ? <> — {topic.body}</> : null}
+											{topic.body ? <> — <RichText inline>{topic.body}</RichText></> : null}
 										</div>
 									</div>
 								))}
@@ -168,7 +169,7 @@ export function SummaryPanel({
 								{nextSteps.map((step, i) => (
 									<div className="step-item" key={step}>
 										<span className="step-num">{String(i + 1).padStart(2, "0")}</span>
-										<span className="t">{step}</span>
+										<span className="t"><RichText inline>{step}</RichText></span>
 									</div>
 								))}
 							</div>
@@ -227,7 +228,7 @@ export function SummaryPanel({
 								{topics.map((topic) => (
 									<li key={topic.title}>
 										<b>{topic.title}</b>
-										{topic.body ? ` — ${topic.body}` : ""}
+										{topic.body ? <> — <RichText inline>{topic.body}</RichText></> : null}
 									</li>
 								))}
 							</ul>
@@ -239,7 +240,7 @@ export function SummaryPanel({
 							<div className="sec-eyebrow">Next steps</div>
 							<ul>
 								{nextSteps.map((step) => (
-									<li key={step}>{step}</li>
+									<li key={step}><RichText inline>{step}</RichText></li>
 								))}
 							</ul>
 						</>

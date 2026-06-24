@@ -3,6 +3,7 @@
 import { Play } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { GenerateSection } from "../GenerateSection";
+import { RichText } from "../RichText";
 
 interface TranscriptPanelProps {
 	videoId: string;
@@ -207,7 +208,7 @@ export function TranscriptPanel({
 								<span className="transcript-meta-speaker">{cue.speaker}</span>
 								<span className="transcript-meta-time">{cue.timestamp}</span>
 							</div>
-							<div className="transcript-text">{cue.text}</div>
+							<div className="transcript-text"><RichText inline>{cue.text}</RichText></div>
 						</div>
 						<button
 							type="button"

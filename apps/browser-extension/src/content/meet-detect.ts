@@ -4,6 +4,7 @@ type NudgeState =
 	| "default"
 	| "countdown"
 	| "recording"
+	| "uploading"
 	| "finishing"
 	| "complete"
 	| "error"
@@ -38,7 +39,9 @@ type OutboundMessage =
 	| { type: "GET_SETTINGS" }
 	| { type: "STOP" }
 	| { type: "CANCEL" }
-	| { type: "RETRY" };
+	| { type: "RETRY" }
+	| { type: "PAUSE" }
+	| { type: "RESUME" };
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +64,11 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 let shadowHost: HTMLElement | null = null;
 let shadowRoot: ShadowRoot | null = null;
+
+// Module-level reference to the pill element for the flicker-fix guard (Fix 4)
+let pillEl: HTMLElement | null = null;
+// Tracks current paused state so the Pause button click handler reads live state
+let pillPaused = false;
 
 const LATER_MS = 12 * 60 * 1000;
 
@@ -209,35 +217,52 @@ const NUDGE_CSS = `
 	55%       { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
 }
 
+/* Fix 2 — horizontal bar */
 .cap-nudge-card {
 	background: #ffffff;
-	border-radius: 12px;
+	border-radius: 10px;
 	box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-	padding: 16px;
-	width: 320px;
+	padding: 8px 14px;
+	max-width: 560px;
 	box-sizing: border-box;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12px;
 	animation: cap-nudge-in .25s cubic-bezier(.2,.8,.4,1) both;
 }
 
 .cap-nudge-card.cap-nudge-leaving { animation: cap-nudge-out .2s ease-in both; }
 
+.cap-nudge-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
 .cap-nudge-title {
 	font-weight: 700;
 	font-size: 15px;
-	margin: 0 0 4px 0;
+	margin: 0;
 	color: #111;
 }
 
 .cap-nudge-subtitle {
 	font-size: 12px;
 	color: #666;
-	margin: 0 0 14px 0;
+	margin: 0;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	white-space: nowrap;
+	flex: 1 1 auto;
 }
 
 .cap-nudge-buttons {
 	display: flex;
 	gap: 8px;
 	align-items: center;
+	flex-shrink: 0;
 }
 
 .cap-nudge-btn-primary {
@@ -291,23 +316,6 @@ const NUDGE_CSS = `
 	outline: 2px solid #6366f1;
 	outline-offset: 2px;
 }
-
-.cap-nudge-btn-dismiss {
-	background: transparent;
-	border: none;
-	color: #9ca3af;
-	font-size: 12px;
-	cursor: pointer;
-	font-family: inherit;
-	padding: 4px 8px;
-	text-decoration: underline;
-	white-space: nowrap;
-	transition: color .15s, opacity .1s;
-}
-
-.cap-nudge-btn-dismiss:hover { color: #6b7280; }
-
-.cap-nudge-btn-dismiss:active { opacity: 0.5; }
 
 .cap-nudge-btn-cancel {
 	display: block;
@@ -374,6 +382,28 @@ const NUDGE_CSS = `
 .cap-nudge-paused-label {
 	font-size: 11px;
 	color: #9ca3af;
+}
+
+/* Fix 3 — Pause/Resume icon button */
+.cap-nudge-btn-pause {
+	background: transparent;
+	color: #f9fafb;
+	border: 1px solid rgba(255,255,255,0.25);
+	border-radius: 6px;
+	padding: 4px 8px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: inherit;
+	line-height: 1;
+	transition: background .15s, transform .1s;
+}
+
+.cap-nudge-btn-pause:hover { background: rgba(255,255,255,0.1); }
+
+.cap-nudge-btn-pause:active {
+	transform: scale(0.97);
+	opacity: 0.85;
 }
 
 .cap-nudge-btn-stop {
@@ -525,6 +555,7 @@ function clearNudge(onRemoved?: () => void): void {
 		onRemoved?.();
 		return;
 	}
+	pillEl = null;
 	const child = container.firstChild as HTMLElement;
 	child.classList.add("cap-nudge-leaving");
 	setTimeout(() => {
@@ -574,20 +605,24 @@ function renderDefaultNudge(): void {
 	container.textContent = "";
 	const card = makeEl("div", "cap-nudge-card");
 
+	// Fix 2: text wrapper child for stacked title+subtitle
+	const textWrap = makeEl("div", "cap-nudge-text");
 	const title = makeEl("div", "cap-nudge-title", "Record this meeting?");
 	const subtitle = makeEl(
 		"div",
 		"cap-nudge-subtitle",
 		"Make sure participants have agreed.",
 	);
+	textWrap.append(title, subtitle);
+
 	const buttons = makeEl("div", "cap-nudge-buttons");
 
+	// Fix 1: no Dismiss button
 	const btnRecord = makeBtn("cap-nudge-btn-primary", "Record now");
 	const btnLater = makeBtn("cap-nudge-btn-secondary", "Later");
-	const btnDismiss = makeBtn("cap-nudge-btn-dismiss", "Dismiss");
 
-	buttons.append(btnRecord, btnLater, btnDismiss);
-	card.append(title, subtitle, buttons);
+	buttons.append(btnRecord, btnLater);
+	card.append(textWrap, buttons);
 	container.appendChild(card);
 	nudgeState = "default";
 
@@ -597,7 +632,6 @@ function renderDefaultNudge(): void {
 		// while we await + retry; keep the nudge and surface an error on failure.
 		btnRecord.disabled = true;
 		btnLater.disabled = true;
-		btnDismiss.disabled = true;
 		btnRecord.textContent = "Starting…";
 
 		const res = await sendToBackgroundAwait({
@@ -613,7 +647,6 @@ function renderDefaultNudge(): void {
 			// No ack after retries — keep the nudge so the user can retry.
 			btnRecord.disabled = false;
 			btnLater.disabled = false;
-			btnDismiss.disabled = false;
 			btnRecord.textContent = "Record now";
 			showNudgeError(card, "Couldn't start recording — tap to try again.");
 		}
@@ -622,13 +655,6 @@ function renderDefaultNudge(): void {
 	btnLater.addEventListener("click", () => {
 		void sendToBackgroundAwait({ type: "MEET_NUDGE_LATER" });
 		laterUntil = Date.now() + LATER_MS;
-		clearNudge();
-		nudgeState = "hidden";
-	});
-
-	btnDismiss.addEventListener("click", () => {
-		void sendToBackgroundAwait({ type: "MEET_NUDGE_DISMISS" });
-		dismissed = true;
 		clearNudge();
 		nudgeState = "hidden";
 	});
@@ -698,15 +724,23 @@ function stopCountdown(): void {
 	}
 }
 
+// Fix 3 — helper to set pause/play icon text on the button
+function setPauseBtnIcon(btn: HTMLButtonElement, paused: boolean): void {
+	btn.textContent = paused ? "▶" : "||";
+	btn.title = paused ? "Resume recording" : "Pause recording";
+}
+
 function renderRecordingPill(paused = false): void {
 	const root = ensureShadowRoot();
 	const container = root.getElementById("cap-nudge-container");
 	if (!container) return;
 
 	container.textContent = "";
+	pillEl = null;
 	if (recordingStartTime === 0) recordingStartTime = Date.now();
 
 	const pill = makeEl("div", "cap-nudge-pill");
+	pill.id = "cap-pill";
 	const dot = makeEl("span", "cap-nudge-dot");
 	const elapsed = makeEl(
 		"span",
@@ -714,16 +748,27 @@ function renderRecordingPill(paused = false): void {
 		formatElapsed(Date.now() - recordingStartTime),
 	);
 	elapsed.id = "cap-elapsed";
+
+	// Fix 3 — Pause/Resume button; reads pillPaused (module var) so it's always live
+	pillPaused = paused;
+	const btnPause = document.createElement("button");
+	btnPause.className = "cap-nudge-btn-pause";
+	setPauseBtnIcon(btnPause, pillPaused);
+	btnPause.addEventListener("click", () => {
+		chrome.runtime.sendMessage({ type: pillPaused ? "RESUME" : "PAUSE" }).catch(() => {});
+	});
+
 	const btnStop = makeBtn("cap-nudge-btn-stop", "Stop");
 
 	if (paused) {
 		const pausedLabel = makeEl("span", "cap-nudge-paused-label", "Paused");
-		pill.append(dot, elapsed, pausedLabel, btnStop);
+		pill.append(dot, elapsed, pausedLabel, btnPause, btnStop);
 	} else {
-		pill.append(dot, elapsed, btnStop);
+		pill.append(dot, elapsed, btnPause, btnStop);
 	}
 
 	container.appendChild(pill);
+	pillEl = pill;
 	nudgeState = "recording";
 
 	if (elapsedTimer !== null) clearInterval(elapsedTimer);
@@ -739,12 +784,90 @@ function renderRecordingPill(paused = false): void {
 	});
 }
 
+// Fix 4 — update pill in-place without rebuilding DOM (avoids flicker)
+function updateRecordingPillInPlace(paused: boolean): void {
+	if (!pillEl) return;
+
+	// Update module-level paused state so the pause button click uses live value
+	pillPaused = paused;
+
+	// Sync pause icon
+	const btnPause = pillEl.querySelector<HTMLButtonElement>(".cap-nudge-btn-pause");
+	if (btnPause) {
+		setPauseBtnIcon(btnPause, paused);
+	}
+
+	// Manage Paused label
+	let pausedLabel = pillEl.querySelector<HTMLElement>(".cap-nudge-paused-label");
+	if (paused && !pausedLabel) {
+		pausedLabel = makeEl("span", "cap-nudge-paused-label", "Paused");
+		const elapsedEl = pillEl.querySelector("#cap-elapsed");
+		if (elapsedEl) {
+			elapsedEl.after(pausedLabel);
+		}
+		// Stop the elapsed timer while paused — don't clear pillEl or elapsedTimer
+		if (elapsedTimer !== null) {
+			clearInterval(elapsedTimer);
+			elapsedTimer = null;
+		}
+	} else if (!paused && pausedLabel) {
+		pausedLabel.remove();
+		// Restart elapsed timer
+		if (elapsedTimer !== null) clearInterval(elapsedTimer);
+		const container = getNudgeContainer();
+		if (container) {
+			elapsedTimer = setInterval(() => {
+				const el = container.querySelector("#cap-elapsed");
+				if (el) el.textContent = formatElapsed(Date.now() - recordingStartTime);
+			}, 1000);
+		}
+	}
+}
+
+function renderUploadingPill(pct: number): void {
+	const root = ensureShadowRoot();
+	const container = root.getElementById("cap-nudge-container");
+	if (!container) return;
+
+	container.textContent = "";
+	pillEl = null;
+	if (elapsedTimer !== null) {
+		clearInterval(elapsedTimer);
+		elapsedTimer = null;
+	}
+
+	const pill = makeEl("div", "cap-nudge-pill");
+	const dot = makeEl("span", "cap-nudge-dot");
+	dot.style.background = "#3182ce";
+	dot.style.animation = "none";
+	const label = makeEl(
+		"span",
+		"cap-nudge-elapsed",
+		pct > 0 ? `Uploading… ${pct}%` : "Uploading…",
+	);
+	label.id = "cap-upload-label";
+	pill.append(dot, label);
+	container.appendChild(pill);
+	pillEl = pill;
+	nudgeState = "uploading";
+}
+
+// Update the uploading pill's percent text WITHOUT rebuilding DOM (same
+// flicker-fix discipline as the recording pill — progress ticks should not
+// reset animations or re-trigger entrance transitions).
+function updateUploadingPillInPlace(pct: number): void {
+	if (!pillEl) return;
+	const label = pillEl.querySelector<HTMLElement>("#cap-upload-label");
+	if (label) label.textContent = pct > 0 ? `Uploading… ${pct}%` : "Uploading…";
+}
+
 function renderFinishingPill(): void {
 	const root = ensureShadowRoot();
 	const container = root.getElementById("cap-nudge-container");
 	if (!container) return;
 
 	container.textContent = "";
+	pillEl = null;
 	if (elapsedTimer !== null) {
 		clearInterval(elapsedTimer);
 		elapsedTimer = null;
@@ -766,6 +889,7 @@ function renderCompletePill(shareUrl: string): void {
 	if (!container) return;
 
 	container.textContent = "";
+	pillEl = null;
 	if (elapsedTimer !== null) {
 		clearInterval(elapsedTimer);
 		elapsedTimer = null;
@@ -795,15 +919,9 @@ function renderCompletePill(shareUrl: string): void {
 		window.open(shareUrl, "_blank");
 	});
 
-	const dismissBtn = makeBtn("cap-nudge-btn-dismiss", "Dismiss");
-	dismissBtn.addEventListener("click", () => {
-		sendToBackground({ type: "CANCEL" } as OutboundMessage);
-		clearNudge();
-		nudgeState = "hidden";
-	});
-
+	// Fix 1: no Dismiss button in complete card
 	buttons.append(copyBtn, openBtn);
-	card.append(check, title, urlEl, buttons, dismissBtn);
+	card.append(check, title, urlEl, buttons);
 	container.appendChild(card);
 	nudgeState = "complete";
 }
@@ -814,6 +932,7 @@ function renderErrorCard(reason: string, recoverable: boolean): void {
 	if (!container) return;
 
 	container.textContent = "";
+	pillEl = null;
 	if (elapsedTimer !== null) {
 		clearInterval(elapsedTimer);
 		elapsedTimer = null;
@@ -834,14 +953,15 @@ function renderErrorCard(reason: string, recoverable: boolean): void {
 		buttons.appendChild(retryBtn);
 	}
 
-	const dismissBtn = makeBtn("cap-nudge-btn-secondary", "Dismiss");
-	dismissBtn.addEventListener("click", () => {
+	// Fix 1: "Dismiss" renamed to a close action; keep it as secondary in error
+	const closeBtn = makeBtn("cap-nudge-btn-secondary", "Close");
+	closeBtn.addEventListener("click", () => {
 		sendToBackground({ type: "CANCEL" } as OutboundMessage);
 		clearNudge();
 		nudgeState = "hidden";
 	});
 
-	buttons.appendChild(dismissBtn);
+	buttons.appendChild(closeBtn);
 	card.append(title, msg, buttons);
 	container.appendChild(card);
 	nudgeState = "error";
@@ -955,15 +1075,37 @@ function handleStateChange(state: StateChangedMessage["state"]): void {
 			if (recordingStartTime === 0) {
 				recordingStartTime = state.startedAt ?? Date.now();
 			}
-			clearNudge(() => renderRecordingPill(state.paused ?? false));
+			// Fix 4 — guard: if pill already showing and still recording, update in place
+			if (nudgeState === "recording" && pillEl) {
+				updateRecordingPillInPlace(state.paused ?? false);
+			} else {
+				clearNudge(() => renderRecordingPill(state.paused ?? false));
+			}
 			break;
-		case "uploading":
+		case "uploading": {
+			const up = state.uploadedBytes ?? 0;
+			const tot = state.totalBytes ?? 0;
+			const pct = tot > 0 ? Math.round((up / tot) * 100) : 0;
+			// In-place update if already showing the uploading pill — avoids
+			// rebuilding DOM on every progress tick (which would re-trigger the
+			// cap-nudge-in entrance animation and visibly flicker).
+			if (nudgeState === "uploading" && pillEl) {
+				updateUploadingPillInPlace(pct);
+			} else {
+				clearNudge(() => renderUploadingPill(pct));
+			}
+			break;
+		}
 		case "finishing":
 			clearNudge(() => renderFinishingPill());
 			break;
 		case "complete":
 			if (state.shareUrl) {
-				clearNudge(() => renderCompletePill(state.shareUrl as string));
+				const shareUrl = state.shareUrl as string;
+				console.info(
+					`[CAP-LIFECYCLE] in-page complete rendered with shareUrl=${shareUrl}`,
+				);
+				clearNudge(() => renderCompletePill(shareUrl));
 			}
 			break;
 		case "error":

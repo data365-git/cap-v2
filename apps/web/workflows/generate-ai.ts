@@ -78,6 +78,13 @@ const AiSummarySchema = z.object({
 		.default([]),
 	refinedTranscript: z
 		.object({
+			intro: z
+				.object({
+					participants: z.array(z.string()).default([]),
+					duration: z.string().default(""),
+					purpose: z.string().default(""),
+				})
+				.optional(),
 			chapters: z
 				.array(
 					z.object({
@@ -145,6 +152,8 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 	const result = await generateWithAi(
 		transcript,
 		videoData.aiGenerationLanguage,
+		videoData.video.duration ?? null,
+		videoId,
 	);
 
 	if (result._usage) {
@@ -261,12 +270,31 @@ async function markSkipped(
 async function generateWithAi(
 	transcript: TranscriptData,
 	language: AiGenerationLanguage,
+	videoDurationSec: number | null,
+	videoId: string,
 ): Promise<AiResult> {
 	"use step";
 
 	const chunks = chunkTranscriptWithTimestamps(transcript.segments);
 
-	const videoDuration = getVideoDuration(transcript.segments);
+	let videoDuration: number;
+	if (videoDurationSec != null && Number.isFinite(videoDurationSec) && videoDurationSec > 0) {
+		videoDuration = videoDurationSec;
+	} else {
+		const fallback = getVideoDuration(transcript.segments);
+		console.warn(
+			`[CAP-AI] video.duration missing for ${videoId}, falling back to transcript-derived duration=${fallback}s`,
+		);
+		videoDuration = fallback;
+	}
+
+	console.info(
+		`[CAP-AI] starting AI gen for video=${videoId}, duration=${videoDuration} sec, transcriptCues=${transcript.segments.length}`,
+	);
+	console.info(
+		`[CAP-AI] path=${chunks.length === 1 ? "short" : "long"}, chunks=${chunks.length}`,
+	);
+
 	const languageInstruction = getAiLanguageInstruction(language);
 
 	let result: AiResult;
@@ -279,6 +307,7 @@ async function generateWithAi(
 	} else {
 		result = await generateMultipleChunks(
 			chunks,
+			transcript.segments,
 			videoDuration,
 			languageInstruction,
 		);
@@ -286,6 +315,43 @@ async function generateWithAi(
 
 	if (result.chapters) {
 		result.chapters = clampChapters(result.chapters, videoDuration);
+	}
+
+	// Clamp aiSummary.chapters and refinedTranscript.chapters to real duration
+	if (result.aiSummary) {
+		const beforeChapters = result.aiSummary.chapters.length;
+		result.aiSummary.chapters = result.aiSummary.chapters.filter(
+			(ch) => ch.startSec >= 0 && ch.startSec <= videoDuration,
+		);
+		if (result.aiSummary.chapters.length !== beforeChapters) {
+			console.warn(
+				`[CAP-AI] clamped aiSummary.chapters: ${beforeChapters} -> ${result.aiSummary.chapters.length} (duration=${videoDuration}s)`,
+			);
+		}
+		const refined = result.aiSummary.refinedTranscript;
+		if (refined?.chapters) {
+			const beforeRefined = refined.chapters.length;
+			refined.chapters = refined.chapters.filter(
+				(ch) => ch.startSec >= 0 && ch.startSec <= videoDuration,
+			);
+			if (refined.chapters.length !== beforeRefined) {
+				console.warn(
+					`[CAP-AI] clamped refinedTranscript.chapters: ${beforeRefined} -> ${refined.chapters.length} (duration=${videoDuration}s)`,
+				);
+			}
+		}
+
+		const introCount = result.aiSummary.refinedTranscript?.intro?.participants?.length ?? 0;
+		if (!result.aiSummary.refinedTranscript?.intro) {
+			console.warn(`[CAP-AI] missing refinedTranscript.intro for video=${videoId}`);
+		}
+		console.info(
+			`[CAP-AI] final AI output: tasks=${result.aiSummary.tasks.length}, topics=${result.aiSummary.topics.length}, refined.chapters=${result.aiSummary.refinedTranscript?.chapters.length ?? 0}, intro.participants=${introCount}`,
+		);
+	}
+
+	if (!result.aiSummary) {
+		throw new Error("[CAP-AI] AI generation produced no parseable summary");
 	}
 
 	return result;
@@ -531,19 +597,7 @@ function cleanJsonResponse(content: string): string {
 	return content;
 }
 
-async function generateSingleChunk(
-	segments: VttSegment[],
-	videoDuration: number,
-	languageInstruction: string,
-): Promise<AiResult> {
-	const transcriptWithTimestamps = segments
-		.map(
-			(s) =>
-				`[${Math.floor(s.start / 60)}:${String(s.start % 60).padStart(2, "0")}] ${s.text}`,
-		)
-		.join("\n");
-
-	const schemaExample = `{
+const MASTER_SCHEMA_EXAMPLE = `{
   "title": "Weekly Team Sync",
   "summary": "The team discussed Q3 roadmap priorities and resolved the deployment blocker.",
   "chapters": [{"title": "Intro", "start": 0}],
@@ -554,27 +608,95 @@ async function generateSingleChunk(
     "tasks": [{"title": "Update roadmap", "assignee": "Alice", "priority": "high", "deadline": "2024-07-05", "done": false}],
     "chapters": [{"startSec": 0, "title": "Intro", "body": "Brief intro and agenda."}, {"startSec": 45, "title": "Q3 Roadmap", "body": "Discussion of top priorities."}],
     "refinedTranscript": {
+      "intro": {
+        "participants": ["Alice", "Bob"],
+        "duration": "21 daqiqa 30 soniya",
+        "purpose": "Discuss Q3 roadmap and unblock deployment."
+      },
       "chapters": [{"startSec": 0, "title": "Intro", "paragraphs": ["Welcome everyone.", "Today we cover roadmap and blockers."]}]
     }
   }
 }`;
 
-	const prompt = `You are analyzing a meeting/video transcript. The content may be in Uzbek, Russian, or English. Respond in the same language as the content.
+function formatTimestampsForPrompt(segments: VttSegment[]): string {
+	return segments
+		.map(
+			(s) =>
+				`[${Math.floor(s.start / 60)}:${String(Math.floor(s.start % 60)).padStart(2, "0")}] ${s.text}`,
+		)
+		.join("\n");
+}
 
-The video is ${videoDuration} seconds long. ${languageInstruction}
+function buildMasterPrompt(
+	videoDuration: number,
+	transcriptWithTimestamps: string,
+	languageInstruction: string,
+): string {
+	return `You are a professional Uzbek meeting analyst. From the timestamped transcript below,
+produce ONE JSON object with this exact structure (keep property names exactly):
+${MASTER_SCHEMA_EXAMPLE}
 
-Extract structured data in JSON format. Return ONLY valid JSON with this exact structure:
-${schemaExample}
+${languageInstruction}
+
+LANGUAGE & FORMATTING RULES (apply to every text field you output):
+- Write Uzbek words only in Uzbek Latin — never Cyrillic.
+- Russian words stay in Cyrillic and bold: **сразу**, **дефицит**.
+- English words stay in Latin and bold: **deadline**, **CRM**, **dashboard**.
+- Do not translate or transliterate foreign words. Bold every foreign word/phrase.
+- If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
+- Respond in the same language as the transcript.
+
+A) refinedTranscript — the cleaned, readable version of the WHOLE meeting.
+   - refinedTranscript.intro: {
+       participants: string[],   // names spoken in the audio; if none, []
+       duration: string,         // a human phrase like "21 daqiqa 30 soniya"
+       purpose: string           // 1-2 sentence statement of the meeting's purpose
+     }
+   - refinedTranscript.chapters: array of {startSec, title, paragraphs[]} in chronological order.
+     * startSec: a number from the transcript's timestamps.
+     * title: short descriptive section title.
+     * paragraphs: 2-4 clean prose paragraphs covering that section. Remove filler/stutters/
+       false starts; keep the meaning and intent. Attribute speakers inline when it matters
+       ("Aziz:" style) but write flowing paragraphs, not raw cue lines. Cover the entire meeting.
+
+B) overview + topics — the SUMMARY.
+   - overview: 2-4 sentence executive summary of what the meeting was about and what was decided.
+   - topics[]: each major theme as {title, body}. Body = 1-3 sentences with concrete points,
+     decisions, numbers, names. 3-8 topics typical.
+
+C) nextSteps[] + tasks[] — ACTION ITEMS.
+   - nextSteps[]: short follow-up phrases that are agreed but not owned ("Share roadmap by Friday").
+   - tasks[]: concrete, owned action items. For each:
+       title    = imperative action ("Update the CRM pipeline").
+       assignee = the person responsible as named in the audio; if nobody is named, "Unassigned".
+       priority = high | medium | low, judged from urgency/impact cues.
+       deadline = ISO date (YYYY-MM-DD) ONLY if a concrete date is stated or unambiguously derivable; otherwise "". Never guess.
+       done     = false (unless the transcript says it was already completed).
+   - Extract tasks only from real commitments. Do not fabricate.
+
+D) chapters[] — VIDEO TIMELINE markers {startSec, title, body}.
+   - One per topic shift, startSec between 0 and ${videoDuration} (the REAL video duration).
+   - These drive the segmented progress bar; align them with the refinedTranscript chapters.
 
 Rules:
-- All chapter "start" / "startSec" values must be between 0 and ${videoDuration} seconds; derive them from the transcript timestamps
-- tasks[].priority must be "high", "medium", or "low"
-- tasks[].done is always false unless explicitly resolved in the transcript
-- refinedTranscript cleans filler words and restructures the speech into readable paragraphs
-- Keep ALL JSON property names exactly as shown
+- All startSec/start values between 0 and ${videoDuration}, derived from the timestamps — never invented.
+- Return ONLY valid JSON, no markdown, no commentary.
 
 Transcript:
 ${transcriptWithTimestamps}`;
+}
+
+async function generateSingleChunk(
+	segments: VttSegment[],
+	videoDuration: number,
+	languageInstruction: string,
+): Promise<AiResult> {
+	const transcriptWithTimestamps = formatTimestampsForPrompt(segments);
+	const prompt = buildMasterPrompt(
+		videoDuration,
+		transcriptWithTimestamps,
+		languageInstruction,
+	);
 
 	const apiResult = await callAiApi(prompt);
 	const parsed = parseAiResponse(apiResult.content);
@@ -588,8 +710,142 @@ ${transcriptWithTimestamps}`;
 	};
 }
 
+interface ChunkSegments {
+	segments: VttSegment[];
+	startTime: number;
+	endTime: number;
+}
+
+function chunkSegmentsForRefine(segments: VttSegment[]): ChunkSegments[] {
+	const result: ChunkSegments[] = [];
+	let current: VttSegment[] = [];
+	let currentLength = 0;
+
+	for (const segment of segments) {
+		if (
+			currentLength + segment.text.length > MAX_CHARS_PER_CHUNK &&
+			current.length > 0
+		) {
+			result.push({
+				segments: current,
+				startTime: current[0]?.start ?? 0,
+				endTime: current[current.length - 1]?.start ?? 0,
+			});
+			current = [];
+			currentLength = 0;
+		}
+		current.push(segment);
+		currentLength += segment.text.length + 1;
+	}
+
+	if (current.length > 0) {
+		result.push({
+			segments: current,
+			startTime: current[0]?.start ?? 0,
+			endTime: current[current.length - 1]?.start ?? 0,
+		});
+	}
+
+	return result;
+}
+
+async function refineChunkToChapters(
+	chunk: ChunkSegments,
+	chunkIndex: number,
+	totalChunks: number,
+	videoDuration: number,
+	languageInstruction: string,
+): Promise<{
+	chapters: { startSec: number; title: string; paragraphs: string[] }[];
+	inputTokens: number;
+	outputTokens: number;
+	model: string;
+}> {
+	const transcriptWithTimestamps = formatTimestampsForPrompt(chunk.segments);
+
+	const prompt = `You are a professional Uzbek meeting analyst refining a section of a long meeting transcript.
+This is section ${chunkIndex + 1} of ${totalChunks}, covering seconds ${chunk.startTime}–${chunk.endTime}
+of a video that is ${videoDuration} seconds long.
+
+Produce ONE JSON object with this exact shape:
+{
+  "chapters": [
+    { "startSec": <number between ${chunk.startTime} and ${chunk.endTime}>,
+      "title": "<short descriptive section title>",
+      "paragraphs": ["<clean prose paragraph>", "<another>"] }
+  ]
+}
+
+${languageInstruction}
+
+LANGUAGE & FORMATTING RULES (apply to every text field):
+- Write Uzbek words only in Uzbek Latin — never Cyrillic.
+- Russian words stay in Cyrillic and bold: **сразу**, **дефицит**.
+- English words stay in Latin and bold: **deadline**, **CRM**, **dashboard**.
+- Do not translate or transliterate foreign words. Bold every foreign word/phrase.
+- If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
+- Respond in the same language as the transcript.
+
+Rules for chapters:
+- Break this section into 1-4 topical chapters in chronological order.
+- Each chapter has 2-4 clean prose paragraphs. Remove filler/stutters/false starts; keep meaning.
+- Attribute speakers inline when it matters ("Aziz:" style) but write flowing paragraphs, not raw cue lines.
+- startSec must come from the actual timestamps and stay within [${chunk.startTime}, ${chunk.endTime}].
+- Return ONLY valid JSON, no markdown, no commentary.
+
+Transcript section:
+${transcriptWithTimestamps}`;
+
+	const apiResult = await callAiApi(prompt);
+	try {
+		const parsed = JSON.parse(cleanJsonResponse(apiResult.content).trim());
+		const chapters = Array.isArray(parsed.chapters)
+			? parsed.chapters
+					.filter(
+						(ch: { startSec?: number; title?: string; paragraphs?: unknown }) =>
+							typeof ch.startSec === "number" &&
+							typeof ch.title === "string" &&
+							Array.isArray(ch.paragraphs),
+					)
+					.map((ch: { startSec: number; title: string; paragraphs: string[] }) => ({
+						startSec: ch.startSec,
+						title: ch.title,
+						paragraphs: ch.paragraphs.filter(
+							(p: unknown): p is string => typeof p === "string",
+						),
+					}))
+			: [];
+
+		const paragraphCount = chapters.reduce(
+			(n: number, c: { paragraphs: string[] }) => n + c.paragraphs.length,
+			0,
+		);
+		console.info(
+			`[CAP-AI] per-chunk refine: chunk ${chunkIndex + 1}/${totalChunks} cues=${chunk.segments.length} → paragraphs=${paragraphCount}`,
+		);
+
+		return {
+			chapters,
+			inputTokens: apiResult.inputTokens,
+			outputTokens: apiResult.outputTokens,
+			model: apiResult.model,
+		};
+	} catch {
+		console.warn(
+			`[CAP-AI] per-chunk refine: chunk ${chunkIndex + 1}/${totalChunks} parse failed`,
+		);
+		return {
+			chapters: [],
+			inputTokens: apiResult.inputTokens,
+			outputTokens: apiResult.outputTokens,
+			model: apiResult.model,
+		};
+	}
+}
+
 async function generateMultipleChunks(
 	chunks: { text: string; startTime: number; endTime: number }[],
+	allSegments: VttSegment[],
 	videoDuration: number,
 	languageInstruction: string,
 ): Promise<AiResult> {
@@ -605,15 +861,16 @@ async function generateMultipleChunks(
 	let totalOutputTokens = 0;
 	let usedModel = "unknown";
 
+	// ---------- PIPELINE A: per-chunk section summaries ----------
 	for (let i = 0; i < chunks.length; i++) {
 		const chunk = chunks[i];
 		if (!chunk) continue;
 
-		const chunkPrompt = `You are Cap AI, an expert at analyzing video content. This is section ${i + 1} of ${chunks.length} from a video that is ${videoDuration} seconds long (${Math.floor(videoDuration / 60)}:${String(Math.floor(videoDuration % 60)).padStart(2, "0")} total). This section covers timestamp ${Math.floor(chunk.startTime / 60)}:${String(chunk.startTime % 60).padStart(2, "0")} to ${Math.floor(chunk.endTime / 60)}:${String(chunk.endTime % 60).padStart(2, "0")}.
+		const chunkPrompt = `You are Cap AI, an expert at analyzing video content. This is section ${i + 1} of ${chunks.length} from a video that is ${videoDuration} seconds long (${Math.floor(videoDuration / 60)}:${String(Math.floor(videoDuration % 60)).padStart(2, "0")} total). This section covers timestamp ${Math.floor(chunk.startTime / 60)}:${String(Math.floor(chunk.startTime % 60)).padStart(2, "0")} to ${Math.floor(chunk.endTime / 60)}:${String(Math.floor(chunk.endTime % 60)).padStart(2, "0")}.
 
 Analyze this section thoroughly and provide JSON:
 {
-  "summary": "string (detailed summary of this section - capture ALL key points, topics discussed, decisions made, or concepts explained. Include specific details like names, numbers, action items, and conclusions. This should be 3-6 sentences minimum.)",
+  "summary": "string (detailed summary of this section - capture ALL key points, topics discussed, decisions made, or concepts explained. Include specific details like names, numbers, action items, and conclusions. 3-6 sentences minimum.)",
   "keyPoints": ["string (specific key point or takeaway)", ...],
   "chapters": [{"title": "string (descriptive title for this topic/section)", "start": number (seconds from video start)}]
 }
@@ -621,7 +878,6 @@ Analyze this section thoroughly and provide JSON:
 ${languageInstruction}
 Keep JSON property names exactly as shown.
 IMPORTANT: All chapter "start" values MUST be between ${chunk.startTime} and ${chunk.endTime} seconds. The total video is only ${videoDuration} seconds long.
-Be thorough - this summary will be combined with other sections to create a comprehensive overview.
 Return ONLY valid JSON without any markdown formatting or code blocks.
 Transcript section:
 ${chunk.text}`;
@@ -658,106 +914,128 @@ ${chunk.text}`;
 
 	const sectionDetails = chunkSummaries
 		.map((c, i) => {
-			const timeRange = `${Math.floor(c.startTime / 60)}:${String(c.startTime % 60).padStart(2, "0")} - ${Math.floor(c.endTime / 60)}:${String(c.endTime % 60).padStart(2, "0")}`;
+			const timeRange = `${Math.floor(c.startTime / 60)}:${String(Math.floor(c.startTime % 60)).padStart(2, "0")} - ${Math.floor(c.endTime / 60)}:${String(Math.floor(c.endTime % 60)).padStart(2, "0")}`;
 			const keyPointsList =
 				c.keyPoints.length > 0 ? `\nKey points: ${c.keyPoints.join("; ")}` : "";
 			return `Section ${i + 1} (${timeRange}):\n${c.summary}${keyPointsList}`;
 		})
 		.join("\n\n");
 
-	const aiSummaryChaptersFromChunks = chunkSummaries.flatMap((c) =>
-		c.chapters.map((ch) => ({
-			startSec: ch.start,
-			title: ch.title,
-			body: "",
-		})),
-	);
+	// Final master pass — overview/topics/nextSteps/tasks/chapters/refined.intro
+	const finalPrompt = `You are a professional Uzbek meeting analyst. From these section analyses of a longer meeting (total duration ${videoDuration} seconds), produce ONE JSON object with this exact structure (keep property names exactly):
+${MASTER_SCHEMA_EXAMPLE}
 
-	const schemaExample = `{
-  "title": "Weekly Team Sync",
-  "summary": "The team discussed Q3 roadmap priorities and resolved the deployment blocker.",
-  "aiSummary": {
-    "overview": "A weekly sync covering roadmap and blockers.",
-    "topics": [{"title": "Q3 Roadmap", "body": "The team aligned on three key priorities."}],
-    "nextSteps": ["Share updated roadmap doc by Friday"],
-    "tasks": [{"title": "Update roadmap", "assignee": "Alice", "priority": "high", "deadline": "2024-07-05", "done": false}],
-    "chapters": [{"startSec": 0, "title": "Intro", "body": "Brief intro and agenda."}, {"startSec": 45, "title": "Q3 Roadmap", "body": "Discussion of top priorities."}],
-    "refinedTranscript": {
-      "chapters": [{"startSec": 0, "title": "Intro", "paragraphs": ["Welcome everyone.", "Today we cover roadmap and blockers."]}]
-    }
-  }
-}`;
+${languageInstruction}
 
-	const finalPrompt = `You are analyzing a meeting/video transcript. The content may be in Uzbek, Russian, or English. Respond in the same language as the content.
+LANGUAGE & FORMATTING RULES (apply to every text field you output):
+- Write Uzbek words only in Uzbek Latin — never Cyrillic.
+- Russian words stay in Cyrillic and bold: **сразу**, **дефицит**.
+- English words stay in Latin and bold: **deadline**, **CRM**, **dashboard**.
+- Do not translate or transliterate foreign words. Bold every foreign word/phrase.
+- If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
+- Respond in the same language as the section analyses.
 
-Based on these section analyses, produce a final JSON summary. ${languageInstruction}
+For this pass produce these fields:
+- title: short meeting title.
+- summary: 2-4 sentence executive summary.
+- chapters: top-level timeline markers (legacy field — array of {title, start}) covering the whole video.
+- aiSummary.overview: 2-4 sentence executive summary.
+- aiSummary.topics[]: each major theme as {title, body}. Body = 1-3 sentences with concrete points,
+  decisions, numbers, names. 3-8 topics typical.
+- aiSummary.nextSteps[]: short follow-up phrases ("Share roadmap by Friday").
+- aiSummary.tasks[]: concrete, owned action items. For each:
+    title    = imperative action.
+    assignee = the person responsible if named; otherwise "Unassigned".
+    priority = high | medium | low.
+    deadline = YYYY-MM-DD only if stated/derivable; otherwise "".
+    done     = false (unless transcript says completed).
+- aiSummary.chapters[]: {startSec, title, body} timeline markers, startSec in [0, ${videoDuration}].
+- aiSummary.refinedTranscript.intro: {participants[], duration (human phrase), purpose (1-2 sentences)}.
+- aiSummary.refinedTranscript.chapters: leave as [] in THIS pass — a separate pass produces them.
+
+Return ONLY valid JSON, no markdown, no commentary.
 
 Section analyses:
 ${sectionDetails}
 
-${allKeyPoints.length > 0 ? `All key points identified:\n${allKeyPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n` : ""}
-
-Return ONLY valid JSON with this exact structure:
-${schemaExample}
-
-Rules:
-- aiSummary.chapters[].startSec must be between 0 and ${videoDuration}; use the section timestamps provided above
-- tasks[].priority must be "high", "medium", or "low"
-- refinedTranscript restructures speech into clean readable paragraphs
-- Keep ALL JSON property names exactly as shown`;
+${allKeyPoints.length > 0 ? `All key points identified:\n${allKeyPoints.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n` : ""}`;
 
 	const finalResult = await callAiApi(finalPrompt);
 	totalInputTokens += finalResult.inputTokens;
 	totalOutputTokens += finalResult.outputTokens;
 	usedModel = finalResult.model;
-	try {
-		const parsed = JSON.parse(cleanJsonResponse(finalResult.content).trim());
-		const aiSummaryRaw = parsed.aiSummary ?? {
-			overview: parsed.summary ?? "",
-			topics: [],
-			nextSteps: [],
-			tasks: [],
-			chapters: aiSummaryChaptersFromChunks,
-			refinedTranscript: { chapters: [] },
-		};
-		return {
-			title: parsed.title,
-			summary: parsed.summary,
-			chapters: allChapters,
-			aiSummary: parseAiSummary(aiSummaryRaw),
-			_usage: {
-				model: usedModel,
-				inputTokens: totalInputTokens,
-				outputTokens: totalOutputTokens,
-			},
-		};
-	} catch {
-		const fallbackSummary = chunkSummaries
-			.map((c, i) => `**Part ${i + 1}:** ${c.summary}`)
-			.join("\n\n");
-		const keyPointsSummary =
-			allKeyPoints.length > 0
-				? `\n\n**Key Points:**\n${allKeyPoints.map((p) => `- ${p}`).join("\n")}`
-				: "";
-		return {
-			title: "Video Summary",
-			summary: fallbackSummary + keyPointsSummary,
-			chapters: allChapters,
-			aiSummary: parseAiSummary({
-				overview: fallbackSummary,
-				topics: [],
-				nextSteps: [],
-				tasks: [],
-				chapters: aiSummaryChaptersFromChunks,
-				refinedTranscript: { chapters: [] },
-			}),
-			_usage: {
-				model: usedModel,
-				inputTokens: totalInputTokens,
-				outputTokens: totalOutputTokens,
-			},
-		};
+
+	const parsedFinal = (() => {
+		try {
+			return JSON.parse(cleanJsonResponse(finalResult.content).trim()) as {
+				title?: string;
+				summary?: string;
+				chapters?: { title: string; start: number }[];
+				aiSummary?: unknown;
+			};
+		} catch {
+			return null;
+		}
+	})();
+
+	if (!parsedFinal) {
+		throw new Error("[CAP-AI] long-path final summary pass failed to parse JSON");
 	}
+
+	// ---------- PIPELINE B: per-chunk refined transcript chapters ----------
+	const refineChunks = chunkSegmentsForRefine(allSegments);
+	const refinedChapters: {
+		startSec: number;
+		title: string;
+		paragraphs: string[];
+	}[] = [];
+
+	for (let i = 0; i < refineChunks.length; i++) {
+		const refineChunk = refineChunks[i];
+		if (!refineChunk) continue;
+		const res = await refineChunkToChapters(
+			refineChunk,
+			i,
+			refineChunks.length,
+			videoDuration,
+			languageInstruction,
+		);
+		totalInputTokens += res.inputTokens;
+		totalOutputTokens += res.outputTokens;
+		usedModel = res.model;
+		refinedChapters.push(...res.chapters);
+	}
+
+	// Sort chronologically and dedupe at min-gap
+	refinedChapters.sort((a, b) => a.startSec - b.startSec);
+
+	// Merge: take parsedFinal.aiSummary and overlay refinedTranscript.chapters
+	const aiSummaryObj = (parsedFinal.aiSummary ?? {}) as {
+		refinedTranscript?: {
+			intro?: { participants: string[]; duration: string; purpose: string };
+			chapters?: unknown[];
+		};
+	};
+
+	const mergedAiSummary = {
+		...(aiSummaryObj as Record<string, unknown>),
+		refinedTranscript: {
+			intro: aiSummaryObj.refinedTranscript?.intro,
+			chapters: refinedChapters,
+		},
+	};
+
+	return {
+		title: parsedFinal.title,
+		summary: parsedFinal.summary,
+		chapters: allChapters,
+		aiSummary: parseAiSummary(mergedAiSummary),
+		_usage: {
+			model: usedModel,
+			inputTokens: totalInputTokens,
+			outputTokens: totalOutputTokens,
+		},
+	};
 }
 
 async function recordSummaryUsage(
