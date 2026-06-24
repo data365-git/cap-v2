@@ -67,9 +67,9 @@ export async function transcribeVideoWorkflow(
 	}
 
 	try {
-		const audioUrl = await extractAudio(videoId, userId, videoData.video);
+		const audio = await extractAudio(videoId, userId, videoData.video);
 
-		if (!audioUrl) {
+		if (!audio) {
 			await markNoAudio(videoId);
 			return {
 				success: true,
@@ -79,8 +79,12 @@ export async function transcribeVideoWorkflow(
 
 		const [transcription] = await Promise.all([
 			transcribeAudio(
-				audioUrl,
-				videoData.video.duration,
+				audio.audioUrl,
+				// Prefer the freshly probed duration; videoData.video.duration is the
+				// stale pre-probe value (often 0 for imports) and would suppress the
+				// chunking decision, sending the whole audio to Gemini in one call →
+				// MAX_TOKENS truncation → ERROR.
+				audio.durationSec ?? videoData.video.duration,
 				videoData.ownerEncryptedGeminiKey,
 				{ userId, orgId: videoData.orgId, videoId },
 			),
@@ -201,7 +205,7 @@ async function extractAudio(
 	videoId: string,
 	userId: string,
 	video: typeof videos.$inferSelect,
-): Promise<string | null> {
+): Promise<{ audioUrl: string; durationSec: number | null } | null> {
 	"use step";
 
 	const [bucket] = await Storage.getAccessForVideo(
@@ -253,7 +257,7 @@ async function extractAudio(
 		.getInternalSignedObjectUrl(audioKey)
 		.pipe(runPromise);
 
-	return audioSignedUrl;
+	return { audioUrl: audioSignedUrl, durationSec: probe.durationSec ?? null };
 }
 
 async function resolveVideoSourceUrl(
