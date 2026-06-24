@@ -28,10 +28,19 @@ export function discardUpload(): void {
 	inMemoryBuffer = new Uint8Array(0);
 }
 
-// The recording is always stored at result.mp4 (the proven multipart key). The
-// REAL container may be WebM — correctness of playback comes from the stored
-// Content-Type (set at initiate, preserved on complete), not the key extension.
-const RESULT_SUBPATH = "result.mp4";
+// Store under a key reflecting the REAL container so the stored object, the
+// presigned PUT's signed Content-Type, and the playlist lookup all agree.
+function resultSubpath(mime: string): string {
+	const base = (mime || "").split(";")[0].trim().toLowerCase();
+	return base.includes("webm") ? "result.webm" : "result.mp4";
+}
+
+// Must match the Content-Type the server signs the presigned PUT with, which it
+// derives from the key extension (signed.ts): .webm → video/webm, else video/mp4.
+// Sending a different Content-Type than was signed → R2 SignatureDoesNotMatch (403).
+function contentTypeForSubpath(subpath: string): string {
+	return subpath.endsWith(".webm") ? "video/webm" : "video/mp4";
+}
 
 // ── Duration patching ─────────────────────────────────────────────────────
 // MediaRecorder produces WebM with Duration=0 and fragmented MP4 with
@@ -249,37 +258,48 @@ export async function handleChunk(
 }
 
 // Upload the whole recording with one presigned PUT to ${ownerId}/${videoId}/
-// result.mp4 (the exact key the playlist route reads). Retries transiently while
-// the bytes are still in memory. Returns true on success.
+// <subpath> (the exact key the playlist route reads). Retries transiently while
+// the bytes are still in memory. Returns { ok, detail } so the caller can surface
+// the exact failure (status + body) instead of failing silently.
 async function putRecording(
 	api: ReturnType<typeof createCapApi>,
 	videoId: string,
 	bytes: Uint8Array,
 	durationInSecs: number | undefined,
-): Promise<boolean> {
+	subpath: string,
+): Promise<{ ok: boolean; detail?: string }> {
+	// Match the Content-Type the server signed the PUT with (derived from the key
+	// extension). Sending anything else → SignatureDoesNotMatch (403).
+	const contentType = contentTypeForSubpath(subpath);
+	let detail = "";
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
 			const { url, headers } = await api.signedPut({
 				videoId,
-				subpath: RESULT_SUBPATH,
+				subpath,
 				durationInSecs,
 			});
-			// The presigned URL is signed for a specific Content-Type; `headers`
-			// (from the server) carries it and must win over our default.
 			const res = await fetch(url, {
 				method: "PUT",
 				body: bytes,
-				headers: { "Content-Type": "video/webm", ...headers },
+				// Default to the derived Content-Type; let any server-provided header
+				// (the value it actually signed) win to stay byte-identical.
+				headers: { "Content-Type": contentType, ...headers },
 			});
-			if (res.ok) return true;
+			console.log(
+				`[upload] signed PUT ${subpath} → ${res.status} (${bytes.length} bytes, ${contentType})`,
+			);
+			if (res.ok) return { ok: true };
 			const text = await res.text().catch(() => "");
-			console.error(`[upload] signed PUT failed ${res.status}: ${text}`);
+			detail = `PUT ${res.status}: ${text.slice(0, 300)}`;
+			console.error(`[upload] signed PUT failed — ${detail}`);
 		} catch (err) {
-			console.error("[upload] signed PUT attempt failed:", err);
+			detail = err instanceof Error ? err.message : String(err);
+			console.error("[upload] signed PUT attempt error:", detail);
 		}
 		if (attempt < 2) await sleep((BACKOFF_SECONDS[attempt] ?? 4) * 1000);
 	}
-	return false;
+	return { ok: false, detail };
 }
 
 export async function finalizeUpload(durationMs = 0): Promise<void> {
@@ -293,6 +313,11 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 	const uploadedBytes =
 		"uploadedBytes" in state ? (state.uploadedBytes as number) : 0;
 	const { videoId } = state;
+
+	// Pick the key/format from the real recorder MIME so the stored key, the
+	// signed Content-Type, and the playlist lookup all agree.
+	const mime = state.kind === "recording" ? state.mime : "video/mp4";
+	const subpath = resultSubpath(mime);
 
 	// Real measured recording length → stored server-side as videos.duration so the
 	// player shows the true duration even if the container header is unreliable.
@@ -326,14 +351,20 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 		return;
 	}
 
-	const uploaded = await putRecording(api, videoId, remaining, durationInSecs);
-	if (!uploaded) {
+	const uploaded = await putRecording(
+		api,
+		videoId,
+		remaining,
+		durationInSecs,
+		subpath,
+	);
+	if (!uploaded.ok) {
 		// Bytes only live in memory, so a queued retry can't re-upload them — record
-		// it for visibility and surface the failure so the user can re-record.
+		// it for visibility and surface the EXACT failure so it's never silent.
 		await addToRetryQueue({ kind: "signed-put", payload: { videoId } });
 		await setState({
 			kind: "error",
-			reason: `Upload failed — ${remaining.length} bytes captured but the upload did not complete. Check network and try again.`,
+			reason: `Upload failed (${remaining.length} bytes captured): ${uploaded.detail ?? "the PUT did not complete"}. Check network and try again.`,
 			recoverable: true,
 			previousVideoId: videoId,
 		});

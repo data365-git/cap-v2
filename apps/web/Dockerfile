@@ -60,7 +60,7 @@ ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
 
 # Cache-bust: bump this value to force a fresh `next build` when the Railway
 # builder over-caches the build layer (source-only changes weren't rebuilding).
-ARG BUILD_REV=2026-06-23-e
+ARG BUILD_REV=2026-06-23-f
 RUN echo "build rev: $BUILD_REV"
 
 # Build upstream packages first (database, env, utils, web-backend, web-domain)

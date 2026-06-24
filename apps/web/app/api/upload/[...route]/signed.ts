@@ -24,7 +24,7 @@ function contentTypeForSubpath(subpath: string): string {
 	if (subpath.endsWith(".jpg") || subpath.endsWith(".jpeg"))
 		return "image/jpeg";
 	if (subpath.endsWith(".aac")) return "audio/aac";
-	if (subpath.endsWith(".webm")) return "audio/webm";
+	if (subpath.endsWith(".webm")) return "video/webm";
 	if (subpath.endsWith(".m3u8")) return "application/x-mpegURL";
 	return "application/octet-stream";
 }
@@ -138,7 +138,7 @@ app.post(
 			const contentType = fileKey.endsWith(".aac")
 				? "audio/aac"
 				: fileKey.endsWith(".webm")
-					? "audio/webm"
+					? "video/webm"
 					: fileKey.endsWith(".mp4")
 						? "video/mp4"
 						: fileKey.endsWith(".mp3")
