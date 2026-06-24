@@ -38,6 +38,7 @@ export const ImportFilePage = ({
 	);
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [pendingFile, setPendingFile] = useState<File | null>(null);
+	const [uploadSpeedLabel, setUploadSpeedLabel] = useState<string | null>(null);
 
 	const processFile = useCallback(
 		async (file: File) => {
@@ -54,6 +55,7 @@ export const ImportFilePage = ({
 				activeOrganization.organization.id,
 				setUploadStatus,
 				context,
+				setUploadSpeedLabel,
 			);
 			if (ok)
 				router.push(
@@ -66,12 +68,7 @@ export const ImportFilePage = ({
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0];
 		if (!file) return;
-		const maxSize = 500 * 1024 * 1024;
-		if (file.size > maxSize) {
-			void processFile(file);
-		} else {
-			setPendingFile(file);
-		}
+		void processFile(file);
 		if (inputRef.current) inputRef.current.value = "";
 	};
 
@@ -89,12 +86,7 @@ export const ImportFilePage = ({
 				toast.error("Please drop a video file.");
 				return;
 			}
-			const maxSize = 500 * 1024 * 1024;
-			if (file.size > maxSize) {
-				void processFile(file);
-			} else {
-				setPendingFile(file);
-			}
+			void processFile(file);
 		},
 		[processFile],
 	);
@@ -168,7 +160,9 @@ export const ImportFilePage = ({
 						</span>
 						<span className="flex flex-col items-center gap-1">
 							<span className="text-sm font-medium text-gray-12">
-								{statusLabel}
+								{uploadStatus?.status === "uploadingVideo" && uploadSpeedLabel
+									? uploadSpeedLabel
+									: statusLabel}
 							</span>
 							{progressPercent !== null && (
 								<span className="w-48 h-1.5 rounded-full bg-gray-4 mt-2 overflow-hidden">
@@ -233,6 +227,7 @@ async function uploadVideoForServerProcessing(
 	orgId: Organisation.OrganisationId,
 	setUploadStatus: (state: UploadStatus | undefined) => void,
 	context: "meeting" | "instruction" = "instruction",
+	setSpeedLabel: (label: string | null) => void = () => {},
 ) {
 	try {
 		setUploadStatus({ status: "parsing" });
@@ -270,6 +265,8 @@ async function uploadVideoForServerProcessing(
 			folderId,
 			orgId,
 			context,
+			fileType: file.type,
+			fileName: file.name,
 		});
 
 		const uploadId = videoData.id;
@@ -332,13 +329,66 @@ async function uploadVideoForServerProcessing(
 
 		const progressTracker = createProgressTracker();
 
+		const uploadStartTime = Date.now();
+		const speedSamples: number[] = [];
+		let lastProgressUpdate = 0;
+
 		try {
 			await uploadWithTarget({
 				target: videoData.uploadTarget,
 				body: file,
 				fileName: file.name,
+				contentType: videoData.contentType,
 				onProgress: ({ loaded, total }) => {
 					const percent = (loaded / total) * 100;
+					const now = Date.now();
+					const elapsedMs = now - uploadStartTime;
+
+					if (now - lastProgressUpdate >= 500 || loaded >= total) {
+						lastProgressUpdate = now;
+
+						if (elapsedMs > 0) {
+							const instantSpeed = loaded / (elapsedMs / 1000);
+							speedSamples.push(instantSpeed);
+							if (speedSamples.length > 3) speedSamples.shift();
+						}
+						const avgSpeed =
+							speedSamples.length > 0
+								? speedSamples.reduce((a, b) => a + b, 0) / speedSamples.length
+								: 0;
+
+						const remaining = total - loaded;
+						const etaSec = avgSpeed > 0 ? remaining / avgSpeed : null;
+
+						const speedStr =
+							avgSpeed > 1024 * 1024
+								? `${(avgSpeed / (1024 * 1024)).toFixed(1)} MB/s`
+								: avgSpeed > 1024
+									? `${(avgSpeed / 1024).toFixed(1)} KB/s`
+									: `${Math.round(avgSpeed)} B/s`;
+
+						let etaStr = "";
+						if (etaSec !== null && loaded < total) {
+							if (etaSec < 10) etaStr = " · ~few sec left";
+							else if (etaSec < 60) etaStr = ` · ~${Math.round(etaSec)}s left`;
+							else if (etaSec < 3600) {
+								const m = Math.floor(etaSec / 60);
+								const s = Math.round(etaSec % 60);
+								etaStr = ` · ~${m}m ${s}s left`;
+							} else {
+								etaStr = " · more than 1h";
+							}
+						}
+
+						const label =
+							avgSpeed > 0
+								? `Uploading ${Math.round(percent)}% · ${speedStr}${etaStr}`
+								: `Uploading ${Math.round(percent)}%`;
+
+						console.log(`[CAP-IMPORT] ${label}`);
+						setSpeedLabel(label);
+					}
+
 					setUploadStatus({
 						status: "uploadingVideo",
 						capId: uploadId,
@@ -352,11 +402,13 @@ async function uploadVideoForServerProcessing(
 		} catch (uploadError) {
 			if (!progressTracker.didFinishSending()) {
 				progressTracker.cleanup();
+				const reason = uploadError instanceof Error ? uploadError.message : "Network error";
+				console.error(`[CAP-IMPORT] Upload failed — ${reason}`, uploadError);
 				throw uploadError;
 			}
 
 			console.warn(
-				"Upload request failed after all bytes were sent; verifying object before processing:",
+				"[CAP-IMPORT] Upload request failed after all bytes were sent; verifying object before processing:",
 				uploadError,
 			);
 		}
@@ -376,29 +428,34 @@ async function uploadVideoForServerProcessing(
 				bucketId: videoData.bucketId,
 			});
 		} catch (triggerError) {
-			console.error("Failed to trigger processing:", triggerError);
-			toast.error("Failed to start video processing. Please try again.");
+			console.error("[CAP-IMPORT] Processing trigger failed:", triggerError);
+			toast.error("Upload succeeded but processing failed to start. Please try again.");
 			setUploadStatus(undefined);
+			setSpeedLabel(null);
 			return false;
 		}
 
 		setUploadStatus(undefined);
+		setSpeedLabel(null);
 		toast.success(
 			"Video uploaded! Processing will continue in the background.",
 		);
 		return true;
 	} catch (err) {
-		console.error("Video upload failed", err);
+		const reason =
+			err instanceof Error ? err.message : "Unknown error";
+		console.error(`[CAP-IMPORT] Upload failed — ${reason}`, err);
 
 		if (err instanceof Error && err.message === "upgrade_required") {
 			toast.error(
 				"Video duration exceeds the limit for free accounts. Please upgrade to Pro.",
 			);
 		} else {
-			toast.error("Failed to upload video. Please try again.");
+			toast.error(`Upload failed: ${reason}`);
 		}
 	}
 
 	setUploadStatus(undefined);
+	setSpeedLabel(null);
 	return false;
 }

@@ -180,6 +180,14 @@ export function CapVideoPlayer({
 	const [iosLevelPatchedUrl, setIosLevelPatchedUrl] = useState<string | null>(
 		null,
 	);
+	const [loadState, setLoadState] = useState<
+		"ok" | "refreshing" | "retrying" | "failed"
+	>("ok");
+	const networkRetryRef = useRef<{
+		attempt: number;
+		timeoutId: ReturnType<typeof setTimeout> | null;
+		savedTime: number;
+	}>({ attempt: 0, timeoutId: null, savedTime: 0 });
 	const queryClient = useQueryClient();
 
 	const uploadProgressRaw = useUploadProgress(
@@ -384,6 +392,11 @@ export function CapVideoPlayer({
 		const handleLoadedData = () => {
 			setVideoLoaded(true);
 			setHasError(false);
+			setLoadState("ok");
+			networkRetryRef.current.attempt = 0;
+			console.info(
+				`[CAP-PLAY] video=${videoId} loaded src=${resolvedSrc.data?.type ?? "unknown"} size=${video.duration > 0 ? Math.round(video.duration) + "s" : "unknown"}`,
+			);
 			if (!hasPlayedOnce) {
 				setShowPlayButton(true);
 			}
@@ -402,6 +415,93 @@ export function CapVideoPlayer({
 		};
 
 		const handleError = () => {
+			const videoEl = video;
+			const errCode = videoEl.error?.code ?? 0;
+
+			console.info(
+				`[CAP-PLAY] error video=${videoId} videoEl.code=${errCode} readyState=${videoEl.readyState} networkState=${videoEl.networkState}`,
+			);
+
+			// For MEDIA_ERR_NETWORK, attempt a transparent URL refresh + replay
+			// before falling back to the raw source or surfacing an error.
+			if (errCode === MediaError.MEDIA_ERR_NETWORK) {
+				const retry = networkRetryRef.current;
+
+				if (retry.attempt < 3) {
+					const attempt = retry.attempt + 1;
+					networkRetryRef.current.attempt = attempt;
+					const backoffMs = [1000, 3000, 9000][attempt - 1] ?? 9000;
+
+					console.info(
+						`[CAP-PLAY] refresh src=${videoId} attempt=${attempt}/3 backoff=${backoffMs}ms`,
+					);
+
+					setLoadState(attempt === 1 ? "refreshing" : "retrying");
+
+					retry.timeoutId = setTimeout(async () => {
+						// Save current playback position before reloading
+						const savedTime = videoEl.currentTime;
+						networkRetryRef.current.savedTime = savedTime;
+
+						try {
+							// Re-probe the playlist endpoint to get a fresh URL
+							const refreshUrl = videoSrc.includes("?")
+								? `${videoSrc}&_refresh=${Date.now()}`
+								: `${videoSrc}?_refresh=${Date.now()}`;
+
+							const res = await fetch(refreshUrl, {
+								headers: { range: "bytes=0-0" },
+							});
+
+							if (!res.ok && res.status !== 206 && res.status !== 416) {
+								throw new Error(`Refresh probe failed: ${res.status}`);
+							}
+
+							// Use the (possibly redirected) URL as the new src
+							const newSrc = res.redirected ? res.url : refreshUrl;
+							videoEl.src = newSrc;
+
+							// Restore position after metadata loads
+							const onLoaded = () => {
+								videoEl.removeEventListener("loadedmetadata", onLoaded);
+								if (savedTime > 0) {
+									videoEl.currentTime = savedTime;
+								}
+								videoEl
+									.play()
+									.catch(() => {
+										/* user gesture required — ok */
+									});
+								networkRetryRef.current.attempt = 0;
+								setLoadState("ok");
+								console.info(
+									`[CAP-PLAY] recovered after attempt=${attempt}`,
+								);
+							};
+							videoEl.addEventListener("loadedmetadata", onLoaded);
+							videoEl.load();
+						} catch (err) {
+							console.warn(
+								`[CAP-PLAY] gave up after 3 attempts; final error=${String(err)}`,
+							);
+							networkRetryRef.current.attempt = 0;
+							setLoadState("failed");
+							setHasError(true);
+						}
+					}, backoffMs);
+
+					return;
+				}
+
+				// 3 attempts exhausted — fall through to normal error handling
+				networkRetryRef.current.attempt = 0;
+				console.warn(
+					`[CAP-PLAY] gave up after 3 attempts; final error=MEDIA_ERR_NETWORK`,
+				);
+				setLoadState("failed");
+			}
+
+			// Existing raw-fallback logic (preserved)
 			if (
 				shouldFallbackToRawPlaybackSource(
 					resolvedSrc.data?.type,
@@ -492,6 +592,11 @@ export function CapVideoPlayer({
 			video.textTracks.removeEventListener("removetrack", handleTrackChange);
 			if (captionTrack) {
 				captionTrack.removeEventListener("cuechange", handleCueChange);
+			}
+			// Cancel any pending retry timeout
+			if (networkRetryRef.current.timeoutId !== null) {
+				clearTimeout(networkRetryRef.current.timeoutId);
+				networkRetryRef.current.timeoutId = null;
 			}
 		};
 	}, [
@@ -837,7 +942,9 @@ export function CapVideoPlayer({
 			<MediaPlayerLoading />
 			{!isUploading &&
 				!showUploadFailureOverlay &&
-				!showPlaybackResolutionError && <MediaPlayerError />}
+				!showPlaybackResolutionError && (
+					<MediaPlayerError loadState={loadState} />
+				)}
 			<MediaPlayerVolumeIndicator />
 			{showFloatingVolumeControl &&
 				videoLoaded &&

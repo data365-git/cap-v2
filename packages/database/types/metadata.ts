@@ -59,6 +59,24 @@ export interface VideoMetadata {
 	enhancedAudioStatus?: "PROCESSING" | "COMPLETE" | "ERROR" | "SKIPPED";
 	isDemo?: boolean;
 	aiSummary?: AiSummary | null;
+	/**
+	 * Server-side probe results from ffprobe / ffmpeg -i (process-video workflow).
+	 * Duration / width / height are also written to the top-level video columns;
+	 * codec/container live here because they are diagnostic only.
+	 */
+	videoCodec?: string;
+	audioCodec?: string;
+	containerFormat?: string;
+	/**
+	 * True once a Safari-friendly MP4 has been written at <owner>/<videoId>/transcoded.mp4.
+	 * The playlist route prefers transcoded.mp4 over the raw upload when this is true.
+	 */
+	mp4Ready?: boolean;
+	/**
+	 * Generation status for the screen-capture thumbnail + animated preview.
+	 * "pending" is the implicit default for old rows (treat undefined as pending).
+	 */
+	thumbnailStatus?: "pending" | "ready" | "failed";
 }
 
 export type VideoEditRange = {

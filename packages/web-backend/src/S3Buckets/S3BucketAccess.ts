@@ -11,7 +11,7 @@ import { type Cause, Effect, Option, Stream } from "effect";
 
 import { S3BucketClientProvider } from "./S3BucketClientProvider.ts";
 
-const DEFAULT_PRESIGNED_GET_EXPIRES_SECONDS = 3600;
+const DEFAULT_PRESIGNED_GET_EXPIRES_SECONDS = 7200;
 const DEFAULT_PRESIGNED_PUT_EXPIRES_SECONDS = 3600;
 
 type NodeReadableWebStream = Parameters<typeof Readable.fromWeb>[0];

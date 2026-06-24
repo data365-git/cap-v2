@@ -15,14 +15,15 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMutation } from "@tanstack/react-query";
 import clsx from "clsx";
 import { motion } from "framer-motion";
-import { Check, Globe2, Lock, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Globe2, Lock, Mail, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { shareCap } from "@/actions/caps/share";
 import {
 	removeVideoPassword,
 	setVideoPassword,
 } from "@/actions/videos/password";
+import { sendShareLinkByEmail } from "@/actions/videos/send-share-link";
 import { useDashboardContext } from "@/app/(org)/dashboard/Contexts";
 import type { Spaces } from "@/app/(org)/dashboard/dashboard-data";
 import type { CurrentUser } from "@/app/Layout/AuthContext";
@@ -93,6 +94,47 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 		useState(hasPassword);
 	const tabs = ["Share", "Embed"] as const;
 	const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("Share");
+
+	const [emailRecipient, setEmailRecipient] = useState("");
+	const [emailMessage, setEmailMessage] = useState("");
+	const [emailSentTo, setEmailSentTo] = useState<string | null>(null);
+	const [emailError, setEmailError] = useState<string | null>(null);
+	const [emailSending, setEmailSending] = useState(false);
+	const emailSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const handleSendEmail = async () => {
+		const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+		const trimmed = emailRecipient.trim();
+		if (!EMAIL_REGEX.test(trimmed)) {
+			setEmailError("Please enter a valid email address");
+			return;
+		}
+		setEmailError(null);
+		setEmailSending(true);
+		try {
+			const result = await sendShareLinkByEmail({
+				videoId: capId,
+				recipientEmail: trimmed,
+				message: emailMessage.trim() || undefined,
+			});
+			if (result.ok) {
+				setEmailSentTo(trimmed);
+				setEmailRecipient("");
+				setEmailMessage("");
+				if (emailSuccessTimer.current) clearTimeout(emailSuccessTimer.current);
+				emailSuccessTimer.current = setTimeout(
+					() => setEmailSentTo(null),
+					4000,
+				);
+			} else {
+				setEmailError(result.error ?? "Failed to send email");
+			}
+		} catch {
+			setEmailError("Failed to send email");
+		} finally {
+			setEmailSending(false);
+		}
+	};
 
 	const updateSharing = useMutation({
 		mutationFn: async ({
@@ -240,7 +282,14 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 			setInitialPasswordEnabled(hasPassword);
 			setSearchTerm("");
 			setActiveTab(tabs[0]);
+			setEmailRecipient("");
+			setEmailMessage("");
+			setEmailSentTo(null);
+			setEmailError(null);
 		}
+		return () => {
+			if (emailSuccessTimer.current) clearTimeout(emailSuccessTimer.current);
+		};
 	}, [isOpen, sharedSpaces, isPublic, hasPassword, tabs[0]]);
 
 	const isSpaceSharedViaOrganization = useCallback(
@@ -497,6 +546,56 @@ export const SharingDialog: React.FC<SharingDialogProps> = ({
 										</p>
 									</div>
 								)}
+							</div>
+
+							{/* Send to a client */}
+							<div className="mt-4 rounded-lg border bg-gray-1 border-gray-4 overflow-hidden">
+								<div className="flex gap-3 items-center p-3 border-b border-gray-4">
+									<div className="flex justify-center items-center w-8 h-8 rounded-full bg-gray-3">
+										<Mail className="w-4 h-4 text-gray-11" />
+									</div>
+									<p className="text-sm font-medium text-gray-12">
+										Send to a client
+									</p>
+								</div>
+								<div className="p-3 space-y-2">
+									<Input
+										type="email"
+										placeholder="client@example.com"
+										value={emailRecipient}
+										onChange={(e) => {
+											setEmailRecipient(e.target.value);
+											if (emailError) setEmailError(null);
+										}}
+									/>
+									<textarea
+										className="w-full rounded-md border border-gray-4 bg-gray-2 px-3 py-2 text-sm text-gray-12 placeholder:text-gray-9 focus:outline-none focus:ring-2 focus:ring-gray-8 resize-none"
+										rows={2}
+										placeholder="Optional message to include in the email"
+										value={emailMessage}
+										onChange={(e) => setEmailMessage(e.target.value)}
+									/>
+									{emailError && (
+										<p className="text-xs text-red-500">{emailError}</p>
+									)}
+									{emailSentTo ? (
+										<div className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+											<Check size={12} />
+											Sent to {emailSentTo}
+										</div>
+									) : (
+										<Button
+											size="sm"
+											variant="dark"
+											className="w-full"
+											spinner={emailSending}
+											disabled={emailSending}
+											onClick={handleSendEmail}
+										>
+											{emailSending ? "Sending..." : "Send"}
+										</Button>
+									)}
+								</div>
 							</div>
 						</>
 					) : (

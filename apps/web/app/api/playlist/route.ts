@@ -213,10 +213,18 @@ const getPlaylistResponse = (
 		// container: extension/web MediaRecorder uploads are usually WebM
 		// (result.webm); desktop MP4 is result.mp4. Resolve whichever actually
 		// exists so the key and the upload agree (fixes the result.mp4 404).
+		//
+		// `transcoded.mp4` is the server-rendered Safari-friendly variant
+		// produced by the process-video workflow. Prefer it over the raw
+		// upload whenever it exists so WebM-source videos play in Safari.
 		const resolveResultKey = (v: Video.Video) =>
 			Effect.gen(function* () {
 				const base = `${v.ownerId}/${v.id}`;
-				for (const key of [`${base}/result.mp4`, `${base}/result.webm`]) {
+				for (const key of [
+					`${base}/transcoded.mp4`,
+					`${base}/result.mp4`,
+					`${base}/result.webm`,
+				]) {
 					const head = yield* bucket.headObject(key).pipe(Effect.option);
 					if (Option.isSome(head) && (head.value.ContentLength ?? 0) > 0) {
 						return Option.some(key);

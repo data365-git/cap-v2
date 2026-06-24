@@ -300,4 +300,26 @@ const ProgressCircle = ({
 	);
 };
 
+export function FailedUploadCard({ className }: { className?: string }) {
+  return (
+    <div
+      className={clsx(
+        "flex flex-col items-center justify-center gap-3 p-4 text-center",
+        className,
+      )}
+    >
+      <p className="text-sm font-semibold text-red-400">Upload failed</p>
+      <p className="text-xs text-white/60 max-w-[160px]">
+        File bytes were not kept.{" "}
+        <a
+          href="/dashboard/import/file"
+          className="underline text-white/80 hover:text-white"
+        >
+          Re-upload from Import
+        </a>
+      </p>
+    </div>
+  );
+}
+
 export default ProgressCircle;

@@ -92,6 +92,13 @@ const nextConfig = {
 				source: "/dashboard/:path*",
 				headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
 			},
+			{
+				source: "/dashboard/import/:path*",
+				headers: [
+					{ key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+					{ key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+				],
+			},
 		];
 	},
 	async rewrites() {

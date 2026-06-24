@@ -32,6 +32,7 @@ export function PreUploadTrimmer({ file, onConfirm, onCancel }: Props) {
 	const [mode, setMode] = useState<TrimMode>("lossless");
 	const [trimming, setTrimming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [showTrimControls, setShowTrimControls] = useState(false);
 	const { trim, loading: ffmpegLoading, progress } = useFFmpeg();
 
 	const videoUrl = useMemo(() => URL.createObjectURL(file), [file]);
@@ -135,61 +136,70 @@ export function PreUploadTrimmer({ file, onConfirm, onCancel }: Props) {
 					>
 						<track kind="captions" />
 					</video>
-					<Timeline
-						duration={duration}
-						inSec={inSec}
-						outSec={outSec}
-						currentSec={currentSec}
-						onInChange={setInSec}
-						onOutChange={setOutSec}
-						onSeek={seek}
-					/>
-					<div className="flex items-center gap-4 text-sm">
-						<label className="flex items-center gap-2 cursor-pointer">
-							<input
-								type="radio"
-								checked={mode === "lossless"}
-								onChange={() => setMode("lossless")}
-							/>
-							<span>Lossless (instant)</span>
-						</label>
-						<label className="flex items-center gap-2 cursor-pointer">
-							<input
-								type="radio"
-								checked={mode === "precise"}
-								onChange={() => setMode("precise")}
-							/>
-							<span>Precise (frame-accurate)</span>
-						</label>
-					</div>
-					<div className="text-xs text-gray-10">
-						Original: {Math.floor(duration / 60)}:
-						{String(Math.floor(duration % 60)).padStart(2, "0")} (
-						{fmtBytes(originalBytes)})
-						{trimmedDuration > 0 && trimmedDuration < duration && (
-							<>
-								{" → "}
-								After trim: {Math.floor(trimmedDuration / 60)}:
-								{String(Math.floor(trimmedDuration % 60)).padStart(2, "0")} (~
-								{fmtBytes(estTrimmedBytes)})
-								{originalBytes > estTrimmedBytes && (
-									<> — save ~{fmtBytes(originalBytes - estTrimmedBytes)}</>
-								)}
-							</>
-						)}
-					</div>
-					<p className="text-[11px] text-gray-9">
-						Shortcuts: <kbd>I</kbd> set in, <kbd>O</kbd> set out,{" "}
-						<kbd>Space</kbd> play, <kbd>Esc</kbd> cancel
-					</p>
-					{trimming && (
-						<div className="text-xs text-gray-10">
-							{ffmpegLoading
-								? "Loading trimmer…"
-								: `Trimming… ${Math.round(progress * 100)}%`}
-						</div>
+					{!showTrimControls && (
+						<p className="text-sm text-gray-10">
+							Optionally trim your video before uploading.
+						</p>
 					)}
-					{error && <div className="text-xs text-red-600">{error}</div>}
+					{showTrimControls && (
+						<>
+							<Timeline
+								duration={duration}
+								inSec={inSec}
+								outSec={outSec}
+								currentSec={currentSec}
+								onInChange={setInSec}
+								onOutChange={setOutSec}
+								onSeek={seek}
+							/>
+							<div className="flex items-center gap-4 text-sm">
+								<label className="flex items-center gap-2 cursor-pointer">
+									<input
+										type="radio"
+										checked={mode === "lossless"}
+										onChange={() => setMode("lossless")}
+									/>
+									<span>Lossless (instant)</span>
+								</label>
+								<label className="flex items-center gap-2 cursor-pointer">
+									<input
+										type="radio"
+										checked={mode === "precise"}
+										onChange={() => setMode("precise")}
+									/>
+									<span>Precise (frame-accurate)</span>
+								</label>
+							</div>
+							<div className="text-xs text-gray-10">
+								Original: {Math.floor(duration / 60)}:
+								{String(Math.floor(duration % 60)).padStart(2, "0")} (
+								{fmtBytes(originalBytes)})
+								{trimmedDuration > 0 && trimmedDuration < duration && (
+									<>
+										{" → "}
+										After trim: {Math.floor(trimmedDuration / 60)}:
+										{String(Math.floor(trimmedDuration % 60)).padStart(2, "0")} (~
+										{fmtBytes(estTrimmedBytes)})
+										{originalBytes > estTrimmedBytes && (
+											<> — save ~{fmtBytes(originalBytes - estTrimmedBytes)}</>
+										)}
+									</>
+								)}
+							</div>
+							<p className="text-[11px] text-gray-9">
+								Shortcuts: <kbd>I</kbd> set in, <kbd>O</kbd> set out,{" "}
+								<kbd>Space</kbd> play, <kbd>Esc</kbd> cancel
+							</p>
+							{trimming && (
+								<div className="text-xs text-gray-10">
+									{ffmpegLoading
+										? "Loading trimmer…"
+										: `Trimming… ${Math.round(progress * 100)}%`}
+								</div>
+							)}
+							{error && <div className="text-xs text-red-600">{error}</div>}
+						</>
+					)}
 				</div>
 				<div className="p-4 border-t border-gray-4 flex justify-end gap-2">
 					<Button
@@ -200,14 +210,33 @@ export function PreUploadTrimmer({ file, onConfirm, onCancel }: Props) {
 					>
 						Cancel
 					</Button>
-					<Button
-						type="button"
-						variant="dark"
-						onClick={handleConfirm}
-						disabled={trimming || trimmedDuration < 0.5}
-					>
-						{trimming ? "Working…" : "Upload trimmed video"}
-					</Button>
+					{!showTrimControls ? (
+						<>
+							<Button
+								type="button"
+								variant="gray"
+								onClick={() => setShowTrimControls(true)}
+							>
+								Trim first
+							</Button>
+							<Button
+								type="button"
+								variant="dark"
+								onClick={() => onConfirm(file)}
+							>
+								Upload original (no trim)
+							</Button>
+						</>
+					) : (
+						<Button
+							type="button"
+							variant="dark"
+							onClick={handleConfirm}
+							disabled={trimming || trimmedDuration < 0.5}
+						>
+							{trimming ? "Working…" : "Apply trim"}
+						</Button>
+					)}
 				</div>
 			</div>
 		</div>

@@ -102,7 +102,7 @@ export class S3Buckets extends Effect.Service<S3Buckets>()("S3Buckets", {
 						signingArgs?: RequestPresigningArguments,
 					) => {
 						const url = `${cloudfrontEnvs.bucketUrl}/${key}`;
-						const expiresIn = signingArgs?.expiresIn ?? 3600;
+						const expiresIn = signingArgs?.expiresIn ?? 7200;
 						const expires = Math.floor((Date.now() + expiresIn * 1000) / 1000);
 
 						const policy = {

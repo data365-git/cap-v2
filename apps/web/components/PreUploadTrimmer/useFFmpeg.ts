@@ -6,7 +6,18 @@ import { useCallback, useRef, useState } from "react";
 
 export type TrimMode = "lossless" | "precise";
 
+export const FFMPEG_LOAD_TIMEOUT_MS = 20000;
+
 const CORE_BASE = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, msg: string): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<T>((_, reject) =>
+			setTimeout(() => reject(new Error(msg)), ms)
+		),
+	]);
+}
 
 export function useFFmpeg() {
 	const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -19,16 +30,25 @@ export function useFFmpeg() {
 		setLoading(true);
 		const ffmpeg = new FFmpeg();
 		ffmpeg.on("progress", ({ progress: p }) => setProgress(p));
-		await ffmpeg.load({
-			coreURL: await toBlobURL(
-				`${CORE_BASE}/ffmpeg-core.js`,
-				"text/javascript",
-			),
-			wasmURL: await toBlobURL(
-				`${CORE_BASE}/ffmpeg-core.wasm`,
-				"application/wasm",
-			),
-		});
+		try {
+			await withTimeout(
+				ffmpeg.load({
+					coreURL: await toBlobURL(
+						`${CORE_BASE}/ffmpeg-core.js`,
+						"text/javascript",
+					),
+					wasmURL: await toBlobURL(
+						`${CORE_BASE}/ffmpeg-core.wasm`,
+						"application/wasm",
+					),
+				}),
+				FFMPEG_LOAD_TIMEOUT_MS,
+				"FFmpeg load timed out",
+			);
+		} catch (e) {
+			setLoading(false);
+			throw e;
+		}
 		ffmpegRef.current = ffmpeg;
 		setLoaded(true);
 		setLoading(false);
@@ -81,7 +101,7 @@ export function useFFmpeg() {
 							"aac",
 							outputName,
 						];
-			await ffmpeg.exec(args);
+			await withTimeout(ffmpeg.exec(args), 60000, "FFmpeg exec timed out");
 			const data = await ffmpeg.readFile(outputName);
 			await ffmpeg.deleteFile(inputName).catch(() => {});
 			await ffmpeg.deleteFile(outputName).catch(() => {});

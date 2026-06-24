@@ -1108,6 +1108,7 @@ interface MediaPlayerErrorProps extends React.ComponentProps<"div"> {
 	onRetry?: () => void;
 	onReload?: () => void;
 	asChild?: boolean;
+	loadState?: "ok" | "refreshing" | "retrying" | "failed";
 }
 
 function MediaPlayerError(props: MediaPlayerErrorProps) {
@@ -1120,6 +1121,7 @@ function MediaPlayerError(props: MediaPlayerErrorProps) {
 		asChild,
 		className,
 		children,
+		loadState,
 		...errorProps
 	} = props;
 
@@ -1178,6 +1180,10 @@ function MediaPlayerError(props: MediaPlayerErrorProps) {
 	const errorLabel = React.useMemo(() => {
 		if (label) return label;
 
+		// During retry/refresh cycle show transient status instead of error label
+		if (loadState === "refreshing") return "Refreshing access...";
+		if (loadState === "retrying") return "Reconnecting...";
+
 		if (!error) return "Playback Error";
 
 		const labelMap: Record<number, string> = {
@@ -1188,17 +1194,23 @@ function MediaPlayerError(props: MediaPlayerErrorProps) {
 		};
 
 		return labelMap[error.code] ?? "Playback Error";
-	}, [label, error]);
+	}, [label, error, loadState]);
 
 	const errorDescription = React.useMemo(() => {
 		if (description) return description;
+
+		// During retry/refresh cycle show transient status
+		if (loadState === "refreshing")
+			return "Getting a fresh link to your video...";
+		if (loadState === "retrying")
+			return "Network issue detected — retrying playback...";
 
 		if (!error) return "An unknown error occurred";
 
 		const descriptionMap: Record<number, string> = {
 			[MediaError.MEDIA_ERR_ABORTED]: "Media playback was aborted",
 			[MediaError.MEDIA_ERR_NETWORK]:
-				"A network error occurred while loading the media",
+				"Video failed to load after multiple retries. Check your connection and try again.",
 			[MediaError.MEDIA_ERR_DECODE]:
 				"An error occurred while decoding the media",
 			[MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]:
@@ -1206,7 +1218,10 @@ function MediaPlayerError(props: MediaPlayerErrorProps) {
 		};
 
 		return descriptionMap[error.code] ?? "An unknown error occurred";
-	}, [description, error]);
+	}, [description, error, loadState]);
+
+	// Suppress the error overlay while a transparent retry is in progress
+	if (loadState === "refreshing" || loadState === "retrying") return null;
 
 	if (!error) return null;
 
