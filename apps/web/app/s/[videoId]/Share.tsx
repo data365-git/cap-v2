@@ -534,29 +534,30 @@ export const Share = ({
 				{/* Design shell: main content flex, gap 20px, top-aligned; sidebar
 				    sticky 320px while the long left column scrolls. */}
 				<div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+					{/* The flex-1 wrapper is the sticky containing block for the pinned
+					    video inside ShareVideo. Previously there was an intermediate
+					    bg-white + aspect-video card here that capped the sticky's range
+					    to one video-height and showed a visible white gap on scroll —
+					    removed in favor of ShareVideo's own single-frame wrapper. */}
 					<div className="flex-1 min-w-0">
-						<div className="overflow-visible relative bg-white rounded-2xl border aspect-video border-gray-5">
-							<div className="absolute inset-3 w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] overflow-visible rounded-xl">
-								<ShareVideo
-									data={{ ...data, transcriptionStatus }}
-									comments={comments}
-									areChaptersDisabled={areChaptersDisabled}
-									areCaptionsDisabled={areCaptionsDisabled}
-									areCommentStampsDisabled={areCommentStampsDisabled}
-									areReactionStampsDisabled={areReactionStampsDisabled}
-									chapters={aiData?.chapters || []}
-									aiGenerationStatus={aiData?.aiGenerationStatus}
-									isOwner={viewerId === data.owner.id}
-									canRetryProcessing={viewerId === data.owner.id}
-									canFinalizeDesktopSegments={viewerId === data.owner.id}
-									showPlaybackStatusBadge={viewerId === data.owner.id}
-									isEditProcessing={isEditProcessing}
-									recordingStopped={recordingStopped}
-									defaultPlaybackSpeed={defaultPlaybackSpeed}
-									ref={playerRef}
-								/>
-							</div>
-						</div>
+						<ShareVideo
+							data={{ ...data, transcriptionStatus }}
+							comments={comments}
+							areChaptersDisabled={areChaptersDisabled}
+							areCaptionsDisabled={areCaptionsDisabled}
+							areCommentStampsDisabled={areCommentStampsDisabled}
+							areReactionStampsDisabled={areReactionStampsDisabled}
+							chapters={aiData?.chapters || []}
+							aiGenerationStatus={aiData?.aiGenerationStatus}
+							isOwner={viewerId === data.owner.id}
+							canRetryProcessing={viewerId === data.owner.id}
+							canFinalizeDesktopSegments={viewerId === data.owner.id}
+							showPlaybackStatusBadge={viewerId === data.owner.id}
+							isEditProcessing={isEditProcessing}
+							recordingStopped={recordingStopped}
+							defaultPlaybackSpeed={defaultPlaybackSpeed}
+							ref={playerRef}
+						/>
 					</div>
 
 					{!allSettingsDisabled && (
