@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Copy, Check, Square, RefreshCw } from "lucide-react";
 import {
 	LiquidGlassContainer,
 	type LiquidGlassHandle,
@@ -11,6 +14,8 @@ interface Message {
 	id: string;
 	role: "user" | "assistant";
 	content: string;
+	stopped?: boolean;
+	error?: boolean;
 }
 
 let msgIdCounter = 0;
@@ -46,89 +51,156 @@ const QUICK_ACTIONS = [
 
 function parseMmSsToSeconds(mmss: string): number {
 	const parts = mmss.split(":");
+	if (parts.length === 3) {
+		return (
+			parseInt(parts[0] ?? "0", 10) * 3600 +
+			parseInt(parts[1] ?? "0", 10) * 60 +
+			parseInt(parts[2] ?? "0", 10)
+		);
+	}
 	if (parts.length === 2) {
 		return parseInt(parts[0] ?? "0", 10) * 60 + parseInt(parts[1] ?? "0", 10);
 	}
 	return 0;
 }
 
-function splitByLineBreak(text: string, keyOffset: number): React.ReactNode[] {
-	const lines = text.split("\n");
-	const result: React.ReactNode[] = [];
-	for (let n = 0; n < lines.length; n++) {
-		if (n > 0) result.push(<br key={`br-${keyOffset}-${String(n)}`} />);
-		result.push(lines[n]);
-	}
-	return result;
-}
+// Pre-process markdown text to turn [MM:SS] / [HH:MM:SS] into a custom token
+// that ReactMarkdown can detect in a text node, since react-markdown doesn't
+// provide a low-level "text" component override in v9+.
+// We wrap timestamps with a special delimiter that we then split on.
+const TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g;
 
-function renderBoldAndBreaks(
+function splitTimestamps(
 	text: string,
-	keyOffset: number,
+	onVideoJump: (s: number) => void,
 ): React.ReactNode[] {
-	const boldRegex = /\*\*(.+?)\*\*/g;
-	const segments: React.ReactNode[] = [];
-	let last = 0;
-	let match: RegExpExecArray | null;
-	let i = keyOffset;
-
-	while (true) {
-		match = boldRegex.exec(text);
-		if (match === null) break;
-		const before = text.slice(last, match.index);
-		if (before) {
-			segments.push(...splitByLineBreak(before, i));
-			i++;
-		}
-		segments.push(<strong key={`b-${i++}`}>{match[1]}</strong>);
-		last = match.index + match[0].length;
-	}
-
-	const tail = text.slice(last);
-	if (tail) {
-		segments.push(...splitByLineBreak(tail, i));
-	}
-
-	return segments;
-}
-
-function renderMessageContent(
-	content: string,
-	onVideoJump: (seconds: number) => void,
-): React.ReactNode[] {
-	const citationRegex = /\[(\d{1,2}:\d{2})\]/g;
 	const parts: React.ReactNode[] = [];
 	let last = 0;
-	let match: RegExpExecArray | null;
-
-	while (true) {
-		match = citationRegex.exec(content);
-		if (match === null) break;
-		const before = content.slice(last, match.index);
-		if (before) {
-			parts.push(...renderBoldAndBreaks(before, parts.length));
-		}
-		const timestamp = match[1] ?? "";
-		const seconds = parseMmSsToSeconds(timestamp);
+	let m: RegExpExecArray | null;
+	TIMESTAMP_RE.lastIndex = 0;
+	while ((m = TIMESTAMP_RE.exec(text)) !== null) {
+		if (m.index > last) parts.push(text.slice(last, m.index));
+		const ts = m[1] ?? "";
+		const secs = parseMmSsToSeconds(ts);
 		parts.push(
 			<button
-				key={`cite-${match.index}`}
+				key={`ts-${m.index}`}
 				type="button"
 				className="ai-citation"
-				onClick={() => onVideoJump(seconds)}
+				onClick={() => onVideoJump(secs)}
+				aria-label={`Jump to ${ts}`}
 			>
-				{match[0]}
+				{m[0]}
 			</button>,
 		);
-		last = match.index + match[0].length;
+		last = m.index + m[0].length;
 	}
-
-	const tail = content.slice(last);
-	if (tail) {
-		parts.push(...renderBoldAndBreaks(tail, parts.length + 1000));
-	}
-
+	if (last < text.length) parts.push(text.slice(last));
 	return parts;
+}
+
+// Custom ReactMarkdown text renderer that intercepts timestamp patterns.
+// We use the `components` prop's `text` override only available in some versions;
+// instead we render timestamps inside the `p` / `li` etc overrides by walking children.
+// Simplest robust approach: wrap text children through a helper.
+function processChildren(
+	children: React.ReactNode,
+	onVideoJump: (s: number) => void,
+): React.ReactNode {
+	if (typeof children === "string") {
+		const parts = splitTimestamps(children, onVideoJump);
+		if (parts.length === 1 && typeof parts[0] === "string") return parts[0];
+		return <>{parts}</>;
+	}
+	if (Array.isArray(children)) {
+		return children.map((child, i) => {
+			if (typeof child === "string") {
+				const parts = splitTimestamps(child, onVideoJump);
+				if (parts.length === 1 && typeof parts[0] === "string") return parts[0];
+				return <span key={i}>{parts}</span>;
+			}
+			return child;
+		});
+	}
+	return children;
+}
+
+function MarkdownContent({
+	text,
+	onVideoJump,
+}: {
+	text: string;
+	onVideoJump: (s: number) => void;
+}) {
+	return (
+		<div className="prose-chat">
+			<ReactMarkdown
+				remarkPlugins={[remarkGfm]}
+				components={{
+					p: ({ children }) => (
+						<p>{processChildren(children, onVideoJump)}</p>
+					),
+					li: ({ children }) => (
+						<li>{processChildren(children, onVideoJump)}</li>
+					),
+					ul: ({ children }) => <ul>{children}</ul>,
+					ol: ({ children }) => <ol>{children}</ol>,
+					strong: ({ children }) => <strong>{children}</strong>,
+					em: ({ children }) => <em>{children}</em>,
+					code: ({ children, className }) => {
+						const isBlock = className?.includes("language-");
+						return isBlock ? (
+							<code style={{ display: "block", overflowX: "auto" }}>
+								{children}
+							</code>
+						) : (
+							<code>{children}</code>
+						);
+					},
+					pre: ({ children }) => <pre>{children}</pre>,
+					a: ({ href, children }) => (
+						<a
+							href={href}
+							target={href?.startsWith("/") ? "_self" : "_blank"}
+							rel={href?.startsWith("/") ? undefined : "noreferrer"}
+						>
+							{children}
+						</a>
+					),
+					blockquote: ({ children }) => <blockquote>{children}</blockquote>,
+					hr: () => <hr />,
+				}}
+			>
+				{text}
+			</ReactMarkdown>
+		</div>
+	);
+}
+
+function CopyButton({ text }: { text: string }) {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = async () => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		} catch {
+			// clipboard unavailable — silent fail
+		}
+	};
+
+	return (
+		<button
+			type="button"
+			className="ai-msg-action"
+			onClick={handleCopy}
+			aria-label={copied ? "Copied" : "Copy message"}
+			title={copied ? "Copied!" : "Copy"}
+		>
+			{copied ? <Check size={13} /> : <Copy size={13} />}
+		</button>
+	);
 }
 
 function OrbIcon() {
@@ -236,6 +308,8 @@ export function AIChatPopup({
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [input, setInput] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
+	const [lastUserPrompt, setLastUserPrompt] = useState<string>("");
+	const bodyRef = useRef<HTMLDivElement>(null);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
@@ -250,6 +324,13 @@ export function AIChatPopup({
 		startH: number;
 	} | null>(null);
 
+	// Stop in-flight stream when popup closes
+	useEffect(() => {
+		if (!isOpen && isStreaming) {
+			abortRef.current?.abort();
+		}
+	}, [isOpen, isStreaming]);
+
 	useEffect(() => {
 		const handleKey = (e: KeyboardEvent) => {
 			if (e.key === "Escape") onClose();
@@ -258,11 +339,16 @@ export function AIChatPopup({
 		return () => window.removeEventListener("keydown", handleKey);
 	}, [onClose]);
 
-	const messageCount = messages.length;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll trigger on message count and streaming state changes
+	// Streaming-aware auto-scroll: "auto" while streaming (fast, no jank), "smooth" otherwise
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll trigger
 	useEffect(() => {
-		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [messageCount, isStreaming]);
+		const el = bodyRef.current;
+		if (!el) return;
+		const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 60;
+		if (isNearBottom) {
+			el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "auto" : "smooth" });
+		}
+	}, [messages, isStreaming]);
 
 	const adjustTextarea = () => {
 		const el = textareaRef.current;
@@ -271,10 +357,27 @@ export function AIChatPopup({
 		el.style.height = `${Math.min(el.scrollHeight, 90)}px`;
 	};
 
+	const stopStreaming = useCallback(() => {
+		abortRef.current?.abort();
+		abortRef.current = null;
+		setIsStreaming(false);
+		// Mark the last assistant message as stopped
+		setMessages((prev) => {
+			const updated = [...prev];
+			const last = updated[updated.length - 1];
+			if (last?.role === "assistant") {
+				updated[updated.length - 1] = { ...last, stopped: true };
+			}
+			return updated;
+		});
+	}, []);
+
 	const sendMessage = useCallback(
 		async (text: string) => {
 			const trimmed = text.trim();
 			if (!trimmed || isStreaming) return;
+
+			setLastUserPrompt(trimmed);
 
 			const userMsg: Message = {
 				id: nextMsgId(),
@@ -292,6 +395,7 @@ export function AIChatPopup({
 			abortRef.current = controller;
 
 			let assistantContent = "";
+			const assistantId = nextMsgId();
 
 			try {
 				const response = await fetch("/api/video/ai/chat", {
@@ -311,7 +415,6 @@ export function AIChatPopup({
 					throw new Error(`Request failed: ${response.status}`);
 				}
 
-				const assistantId = nextMsgId();
 				setMessages((prev) => [
 					...prev,
 					{ id: assistantId, role: "assistant", content: "" },
@@ -340,7 +443,7 @@ export function AIChatPopup({
 								setMessages((prev) => {
 									const updated = [...prev];
 									const last = updated[updated.length - 1];
-									if (last?.role === "assistant") {
+									if (last?.role === "assistant" && last.id === assistantId) {
 										updated[updated.length - 1] = {
 											...last,
 											content: assistantContent,
@@ -355,16 +458,32 @@ export function AIChatPopup({
 					}
 				}
 			} catch (err) {
-				if ((err as Error).name !== "AbortError") {
-					setMessages((prev) => [
+				if ((err as Error).name === "AbortError") {
+					// Handled by stopStreaming — leave partial message in place
+					return;
+				}
+				// Real error: mark the assistant message (or add one) with error flag
+				setMessages((prev) => {
+					const updated = [...prev];
+					const last = updated[updated.length - 1];
+					if (last?.role === "assistant" && last.id === assistantId) {
+						updated[updated.length - 1] = {
+							...last,
+							content: last.content || "Something went wrong. Please try again.",
+							error: true,
+						};
+						return updated;
+					}
+					return [
 						...prev,
 						{
 							id: nextMsgId(),
 							role: "assistant",
 							content: "Something went wrong. Please try again.",
+							error: true,
 						},
-					]);
-				}
+					];
+				});
 			} finally {
 				setIsStreaming(false);
 				abortRef.current = null;
@@ -372,6 +491,20 @@ export function AIChatPopup({
 		},
 		[videoId, messages, isStreaming],
 	);
+
+	const regenerate = useCallback(() => {
+		if (!lastUserPrompt || isStreaming) return;
+		// Remove the last assistant error message, then re-send
+		setMessages((prev) => {
+			const updated = [...prev];
+			if (updated[updated.length - 1]?.role === "assistant") {
+				updated.pop();
+			}
+			return updated;
+		});
+		// Use a microtask so state update settles before sendMessage reads messages
+		setTimeout(() => sendMessage(lastUserPrompt), 0);
+	}, [lastUserPrompt, isStreaming, sendMessage]);
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key === "Enter" && !e.shiftKey) {
@@ -444,7 +577,7 @@ export function AIChatPopup({
 					type="button"
 					className="ai-x"
 					onClick={onClose}
-					aria-label="Close"
+					aria-label="Close AI chat"
 				>
 					<svg
 						width="16"
@@ -460,7 +593,7 @@ export function AIChatPopup({
 				</button>
 			</div>
 
-			<div className="ai-body">
+			<div ref={bodyRef} className="ai-body">
 				{!hasMessages && (
 					<>
 						<div className="ai-welcome">
@@ -499,10 +632,39 @@ export function AIChatPopup({
 								<OrbIcon />
 							</div>
 						)}
-						<div className="bubble">
-							{msg.role === "assistant"
-								? renderMessageContent(msg.content, onVideoJump)
-								: msg.content}
+						<div className="bubble-wrap">
+							<div className="bubble">
+								{msg.role === "assistant" ? (
+									<MarkdownContent
+										text={msg.content}
+										onVideoJump={onVideoJump}
+									/>
+								) : (
+									msg.content
+								)}
+							</div>
+							{msg.stopped && (
+								<span className="ai-stopped-badge">stopped</span>
+							)}
+							{msg.error && (
+								<div className="ai-error-row">
+									<span className="ai-error-label">⚠ Error</span>
+									<button
+										type="button"
+										className="ai-regenerate"
+										onClick={regenerate}
+										aria-label="Regenerate response"
+									>
+										<RefreshCw size={13} />
+										Retry
+									</button>
+								</div>
+							)}
+							{msg.role === "assistant" && !msg.error && (
+								<div className="ai-msg-actions">
+									<CopyButton text={msg.content} />
+								</div>
+							)}
 						</div>
 					</div>
 				))}
@@ -512,10 +674,12 @@ export function AIChatPopup({
 						<div className="av">
 							<OrbIcon />
 						</div>
-						<div className="ai-typing">
-							<span />
-							<span />
-							<span />
+						<div className="bubble-wrap">
+							<div className="ai-typing">
+								<span />
+								<span />
+								<span />
+							</div>
 						</div>
 					</div>
 				)}
@@ -536,27 +700,39 @@ export function AIChatPopup({
 						}}
 						onKeyDown={handleKeyDown}
 						disabled={isStreaming}
+						aria-label="Message input"
 					/>
-					<button
-						type="button"
-						className="ai-send"
-						onClick={() => sendMessage(input)}
-						disabled={!input.trim() || isStreaming}
-						aria-label="Send"
-					>
-						<svg
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2.4"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							aria-hidden="true"
+					{isStreaming ? (
+						<button
+							type="button"
+							className="ai-send ai-stop"
+							onClick={stopStreaming}
+							aria-label="Stop generating"
 						>
-							<path d="M12 20V5" />
-							<path d="m6 11 6-6 6 6" />
-						</svg>
-					</button>
+							<Square size={14} fill="currentColor" />
+						</button>
+					) : (
+						<button
+							type="button"
+							className="ai-send"
+							onClick={() => sendMessage(input)}
+							disabled={!input.trim() || isStreaming}
+							aria-label="Send message"
+						>
+							<svg
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2.4"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M12 20V5" />
+								<path d="m6 11 6-6 6 6" />
+							</svg>
+						</button>
+					)}
 				</div>
 				<div className="ai-disclaimer">
 					AI javoblari tekshirilishi kerak bo&apos;lishi mumkin

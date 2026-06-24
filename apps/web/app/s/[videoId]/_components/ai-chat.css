@@ -731,3 +731,184 @@
 	color: var(--g-text-3);
 	margin-top: 8px;
 }
+
+/* ========== Stop button (replaces Send while streaming) ========== */
+.ai-send.ai-stop {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.ai-send.ai-stop:hover {
+	background: rgba(255, 255, 255, 0.18);
+	filter: none;
+}
+
+/* ========== Bubble wrapper (holds bubble + per-message controls) ========== */
+.ai-msg .bubble-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-width: 84%;
+}
+.ai-msg.user .bubble-wrap {
+	align-items: flex-end;
+}
+.ai-msg.ai .bubble-wrap {
+	align-items: flex-start;
+}
+/* Override max-width on bubble so bubble-wrap controls it */
+.ai-msg .bubble-wrap .bubble {
+	max-width: 100%;
+}
+
+/* ========== Per-message action row (Copy) ========== */
+.ai-msg-actions {
+	display: flex;
+	gap: 4px;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+.ai-msg:hover .ai-msg-actions {
+	opacity: 1;
+}
+.ai-msg-action {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 6px;
+	border: 1px solid var(--g-border);
+	background: var(--g-surface);
+	color: var(--g-text-2);
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+.ai-msg-action:hover {
+	background: var(--g-surface-2);
+	color: var(--g-text);
+}
+
+/* ========== Stopped badge ========== */
+.ai-stopped-badge {
+	font-size: 10px;
+	color: var(--g-text-3);
+	font-style: italic;
+	padding: 1px 6px;
+	border-radius: 4px;
+	border: 1px solid var(--g-border);
+	background: var(--g-surface);
+	align-self: flex-start;
+}
+
+/* ========== Error row + Regenerate button ========== */
+.ai-error-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.ai-error-label {
+	font-size: 11px;
+	color: #f87171;
+}
+.ai-regenerate {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	color: var(--g-text-2);
+	background: var(--g-surface);
+	border: 1px solid var(--g-border);
+	border-radius: 8px;
+	padding: 4px 10px;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+.ai-regenerate:hover {
+	background: var(--g-surface-2);
+	color: var(--g-text);
+}
+
+/* ========== prose-chat: ReactMarkdown typography ========== */
+.prose-chat {
+	font-size: 13px;
+	line-height: 1.65;
+	color: var(--g-text);
+}
+.prose-chat p {
+	margin: 0 0 0.55em;
+}
+.prose-chat p:last-child {
+	margin-bottom: 0;
+}
+.prose-chat ul,
+.prose-chat ol {
+	margin: 0.4em 0 0.55em 1.25em;
+	padding: 0;
+}
+.prose-chat li {
+	margin-bottom: 0.2em;
+}
+.prose-chat li > p {
+	margin: 0;
+}
+.prose-chat strong {
+	font-weight: 630;
+	color: var(--g-text);
+}
+.prose-chat em {
+	font-style: italic;
+}
+.prose-chat code {
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 11.5px;
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 4px;
+	padding: 1px 5px;
+}
+.prose-chat pre {
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 8px;
+	padding: 10px 12px;
+	overflow-x: auto;
+	margin: 0.5em 0;
+}
+.prose-chat pre code {
+	background: none;
+	border: none;
+	padding: 0;
+	font-size: 11.5px;
+}
+.prose-chat a {
+	color: #93c5fd;
+	text-decoration: underline;
+	word-break: break-all;
+}
+.prose-chat blockquote {
+	border-left: 3px solid var(--g-accent);
+	margin: 0.5em 0;
+	padding-left: 12px;
+	color: var(--g-text-2);
+}
+.prose-chat hr {
+	border: none;
+	border-top: 1px solid var(--g-border);
+	margin: 0.75em 0;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	margin: 0.7em 0 0.3em;
+	color: var(--g-text);
+}
+.prose-chat h1 { font-size: 15px; }
+.prose-chat h2 { font-size: 14px; }
+.prose-chat h3 { font-size: 13.5px; }
