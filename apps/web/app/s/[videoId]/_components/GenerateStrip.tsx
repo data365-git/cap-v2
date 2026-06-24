@@ -146,6 +146,9 @@ export function GenerateStrip({
   const [currentPhaseKey, setCurrentPhaseKey] = useState<string>("");
   const [activeLabel, setActiveLabel] = useState("AI insights tayyorlash");
 
+  // Subtitle text keyed to the active pipeline phase
+  const [phaseSubtitle, setPhaseSubtitle] = useState("AI insights tayyorlash");
+
   // Overall progress bar
   const [progressPct, setProgressPct] = useState(0);
   const maxPctRef = useRef(0);
@@ -291,10 +294,17 @@ export function GenerateStrip({
       setPipelinePhases(phases);
       setCurrentPhaseKey(pp.currentPhase);
 
-      // Active label
+      // Active label + phase subtitle (FIX 1: bind subtitle to live currentPhase)
       const activePhase = phases.find((p) => p.status === "active");
       if (activePhase) {
         setActiveLabel(`${activePhase.label} bajarilmoqda…`);
+        const subtitleMap: Record<string, string> = {
+          audio: "Audio tayyorlash bajarilmoqda…",
+          transcribe: "Transkripsiya bajarilmoqda…",
+          index: "AI indekslash bajarilmoqda…",
+          analyze: "AI tahlil: Xulosa, vazifalar va tahrirlangan transkript tayyorlanmoqda…",
+        };
+        setPhaseSubtitle(subtitleMap[activePhase.key] ?? `${activePhase.label} bajarilmoqda…`);
       }
 
       // Overall pct (monotonic)
@@ -346,6 +356,7 @@ export function GenerateStrip({
     setPipelinePhases([]);
     setCurrentPhaseKey("");
     setActiveLabel("AI insights tayyorlash");
+    setPhaseSubtitle("AI insights tayyorlash");
     stopCountdown();
   }, [stopCountdown]);
 
@@ -587,7 +598,9 @@ export function GenerateStrip({
           <div className="gen-sub">
             {isError
               ? (errorMsg ?? "Qayta urinib ko'ring.")
-              : activeLabel}
+              : isRunning
+                ? phaseSubtitle
+                : activeLabel}
           </div>
         </div>
 
@@ -647,10 +660,13 @@ export function GenerateStrip({
           {pipelinePhases.map((p) => {
             const detail = renderPhaseDetail(p);
             const isAnalyzeActive = p.key === "analyze" && p.status === "active";
+            const isAnalyzeDone = p.key === "analyze" && p.status === "done";
             const isAudioSpinner = p.key === "audio" && p.status === "active" && p.total === 0;
+            const isIndexChip = p.key === "index";
             return (
               <div
                 key={p.key}
+                title={isIndexChip ? "AI suhbat uchun (chat-da javob berish uchun ma'lumotlar tayyorlanmoqda)" : undefined}
                 className={[
                   "gen-chip",
                   p.status,
@@ -665,13 +681,34 @@ export function GenerateStrip({
                 {p.status === "active" && (
                   <div className="gen-chip-detail">
                     {isAnalyzeActive ? (
-                      <span className="gen-chip-shimmer-text">taxminan ~{ANALYZE_SEC}s</span>
+                      <>
+                        <span className="gen-chip-shimmer-text">taxminan ~{ANALYZE_SEC}s</span>
+                        <ul className="gen-chip-sublist">
+                          {(["Xulosa", "Vazifalar", "Tahrirlangan transkript", "Bo'limlar"] as const).map((item) => (
+                            <li key={item} className="gen-chip-subitem">
+                              <span className="gen-chip-subitem-pulse" aria-hidden="true" />
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
                     ) : detail ? (
                       detail
                     ) : isAudioSpinner ? (
                       <span className="gen-chip-spinner-inline" aria-hidden="true" />
                     ) : null}
                   </div>
+                )}
+                {/* Sub-checklist shown when analyze is done — all ✓ together */}
+                {isAnalyzeDone && (
+                  <ul className="gen-chip-sublist">
+                    {(["Xulosa", "Vazifalar", "Tahrirlangan transkript", "Bo'limlar"] as const).map((item) => (
+                      <li key={item} className="gen-chip-subitem gen-chip-subitem--done">
+                        <span className="gen-chip-subitem-check" aria-hidden="true" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             );

@@ -1,9 +1,10 @@
 import { Button } from "@cap/ui";
+import { Loader2Icon } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 
 interface CommentInputProps {
-	onSubmit?: (content: string) => void;
+	onSubmit?: (content: string) => void | Promise<void>;
 	onCancel?: () => void;
 	placeholder?: string;
 	showCancelButton?: boolean;
@@ -24,6 +25,7 @@ const CommentInput: React.FC<CommentInputProps> = ({
 	defaultValue = "",
 }) => {
 	const [content, setContent] = useState(defaultValue);
+	const [pending, setPending] = useState(false);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 
 	useEffect(() => {
@@ -32,11 +34,15 @@ const CommentInput: React.FC<CommentInputProps> = ({
 		}
 	}, [autoFocus]);
 
-	const handleSubmit = (e?: React.FormEvent) => {
+	const handleSubmit = async (e?: React.FormEvent) => {
 		e?.preventDefault();
-		if (content.trim()) {
-			onSubmit?.(content);
+		if (!content.trim() || pending) return;
+		setPending(true);
+		try {
+			await onSubmit?.(content);
 			setContent("");
+		} finally {
+			setPending(false);
 		}
 	};
 
@@ -59,11 +65,11 @@ const CommentInput: React.FC<CommentInputProps> = ({
 						id="comment-input"
 						data-comment-input
 						value={content}
-						disabled={disabled}
+						disabled={disabled || pending}
 						onChange={(e) => setContent(e.target.value)}
 						onKeyDown={handleKeyDown}
 						placeholder={placeholder || "Leave a comment..."}
-						className="w-full placeholder:text-gray-8 text-sm leading-[22px] text-gray-12 bg-transparent focus:outline-none"
+						className={`w-full placeholder:text-gray-8 text-sm leading-[22px] text-gray-12 bg-transparent focus:outline-none transition-opacity${pending ? " opacity-60" : ""}`}
 						aria-label="Write a comment"
 					/>
 					<div className="flex items-center mt-2 space-x-2">
@@ -71,9 +77,13 @@ const CommentInput: React.FC<CommentInputProps> = ({
 							size="xs"
 							variant="primary"
 							onClick={() => handleSubmit()}
-							disabled={!content}
+							disabled={!content || pending}
 						>
-							{buttonLabel}
+							{pending ? (
+								<Loader2Icon className="size-3 animate-spin" />
+							) : (
+								buttonLabel
+							)}
 						</Button>
 						{showCancelButton && onCancel && (
 							<Button size="xs" variant="outline" onClick={onCancel}>

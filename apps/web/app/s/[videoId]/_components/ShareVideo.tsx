@@ -571,6 +571,17 @@ export const ShareVideo = forwardRef<
 					/>
 				)}
 
+				{/* FIX 3b: hide tabs block when nothing exists and nothing is in flight */}
+				{(
+					!!(data.metadata?.aiSummary?.overview) ||
+					(data.metadata?.aiSummary?.tasks?.length ?? 0) > 0 ||
+					(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) > 0 ||
+					data.transcriptionStatus === "COMPLETE" ||
+					data.transcriptionStatus === "PROCESSING" ||
+					data.transcriptionStatus === "QUEUED" ||
+					aiGenerationStatus === "PROCESSING" ||
+					aiGenerationStatus === "QUEUED"
+				) && (
 				<div className="mt-4">
 					<BelowVideoTabs
 						isOwner={isOwner}
@@ -621,6 +632,7 @@ export const ShareVideo = forwardRef<
 						}
 					/>
 				</div>
+				)}
 
 				<div className={`ai-aura${aiChatOpen ? " show" : ""}`} />
 				<AIChatPopup

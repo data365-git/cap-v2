@@ -38,6 +38,7 @@ export function AIFab({ onClick, isOpen }: AIFabProps) {
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					aria-hidden="true"
+					style={{ transform: "translateY(1px)" }}
 				>
 					<path d="M12 3v2M12 19v2M5 12H3M21 12h-2" />
 					<path

@@ -4,7 +4,7 @@ import { Button, Dialog, DialogContent, Input, Logo } from "@cap/ui";
 import type { Video } from "@cap/web-domain";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { verifyVideoPassword } from "@/actions/videos/password";
 
@@ -18,6 +18,8 @@ export const PasswordOverlay: React.FC<PasswordOverlayProps> = ({
 	videoId,
 }) => {
 	const [password, setPassword] = useState("");
+	const [errorMsg, setErrorMsg] = useState<string | null>(null);
+	const passwordInputRef = useRef<HTMLInputElement>(null);
 	const router = useRouter();
 
 	const verifyPassword = useMutation({
@@ -27,11 +29,14 @@ export const PasswordOverlay: React.FC<PasswordOverlayProps> = ({
 				throw new Error(v.error);
 			}),
 		onSuccess: (result) => {
+			setErrorMsg(null);
 			toast.success(result);
 			router.refresh();
 		},
 		onError: (e) => {
+			setErrorMsg(e.message);
 			toast.error(e.message);
+			setTimeout(() => passwordInputRef.current?.focus(), 0);
 		},
 	});
 
@@ -61,14 +66,23 @@ export const PasswordOverlay: React.FC<PasswordOverlayProps> = ({
 								Password
 							</label>
 							<Input
+								ref={passwordInputRef}
 								id="password"
 								type="password"
 								value={password}
-								onChange={(e) => setPassword(e.target.value)}
+								onChange={(e) => {
+									setPassword(e.target.value);
+									if (errorMsg) setErrorMsg(null);
+								}}
 								placeholder="Enter password"
 								className="w-full"
 								autoFocus
 							/>
+							{errorMsg && (
+								<p role="alert" className="text-xs text-red-500 mt-1">
+									{errorMsg}
+								</p>
+							)}
 						</div>
 						<Button
 							type="button"

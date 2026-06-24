@@ -466,6 +466,60 @@
   color: rgba(255, 255, 255, 0.35);
 }
 
+/* === Analyze sub-checklist (FIX 2) === */
+.gen-chip-sublist {
+  list-style: none;
+  margin: 5px 0 0 0;
+  padding: 0 0 0 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gen-chip-subitem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Pulse dot while analyze is active */
+.gen-chip-subitem-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #60a5fa;
+  animation: chipPulse 1.4s ease-in-out infinite;
+}
+
+/* Check mark when analyze done */
+.gen-chip-subitem--done {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.gen-chip-subitem-check {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #34d399;
+  position: relative;
+}
+
+.gen-chip-subitem-check::after {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 3.5px;
+  border: solid #0f172a;
+  border-width: 0 1px 1px 0;
+  transform: rotate(45deg) translate(0.5px, -0.5px);
+  margin: 0 auto;
+}
+
 /* === UX polish: press/active + standard easing === */
 .gen-btn, .cap-regen-link {
   transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1);
