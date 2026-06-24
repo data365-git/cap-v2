@@ -24,6 +24,30 @@ export interface AiSummary {
 	};
 }
 
+export type PipelinePhaseKey = "audio" | "transcribe" | "analyze" | "index";
+
+export interface PipelinePhase {
+	key: PipelinePhaseKey;
+	/** Uzbek: Audio tayyorlash | Transkripsiya | AI tahlil | AI indekslash */
+	label: string;
+	status: "queued" | "active" | "done" | "error";
+	/** units completed */
+	done: number;
+	/** total units (chunks); audio: 100 if % parsed else 0; analyze: 1 (atomic) */
+	total: number;
+	startedAt?: string; // ISO
+	completedAt?: string; // ISO
+	/** transcribe/index: per-chunk wall-clock durations in ms (for median ETA) */
+	unitTimesMs?: number[];
+}
+
+export interface PipelineProgress {
+	currentPhase: PipelinePhaseKey;
+	phases: PipelinePhase[];
+	startedAt: string; // overall ISO
+	updatedAt: string; // ISO
+}
+
 /**
  * Video metadata structure
  */
@@ -80,16 +104,16 @@ export interface VideoMetadata {
 	/**
 	 * Live progress for the transcription → AI generation pipeline.
 	 * Written by the transcribe + generate-ai workflows; read-modify-write into
-	 * the metadata JSON (no DB column). The bar advances monotonically through
-	 * the five phases; AI phase total is always 4.
+	 * the metadata JSON (no DB column). Exposes the real units of work per phase
+	 * so the frontend can build a counting-down ETA (per-chunk wall-clock times)
+	 * and a real audio-conversion %.
+	 *
+	 * The two workflows share this single `phases` array via read-modify-write:
+	 * transcribe.ts initializes all four phases, advances audio/transcribe/index;
+	 * generate-ai.ts flips the analyze phase. Phases are ordered to match real
+	 * execution order: audio → transcribe → index → analyze.
 	 */
-	pipelineProgress?: {
-		phase: "transcribe" | "refine" | "summary" | "tasks" | "index";
-		done: number;
-		total: number;
-		startedAt: string; // ISO
-		updatedAt: string; // ISO
-	};
+	pipelineProgress?: PipelineProgress;
 	/**
 	 * Human-readable reason the transcription failed (videos table has no
 	 * errorMessage column). Cleared at the start of every transcription run.

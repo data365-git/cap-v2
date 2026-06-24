@@ -1,7 +1,13 @@
 import { db } from "@cap/database";
 import { nanoId } from "@cap/database/helpers";
 import { aiUsageEvents, organizations, videos } from "@cap/database/schema";
-import type { AiSummary, VideoMetadata } from "@cap/database/types";
+import type {
+	AiSummary,
+	PipelinePhase,
+	PipelinePhaseKey,
+	PipelineProgress,
+	VideoMetadata,
+} from "@cap/database/types";
 import { serverEnv } from "@cap/env";
 import { priceForMicros } from "@cap/utils";
 import { Storage } from "@cap/web-backend";
@@ -149,20 +155,15 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 		};
 	}
 
-	// Pipeline progress: 4 logical steps (refine → summary → tasks → index).
-	// The transcript-only Gemini pipeline has no separable refine/summary/tasks
-	// boundaries, so we map them onto the single master AI call: once
-	// generateWithAi returns, refine+summary+tasks are all done (done:3, phase
-	// "index"); saveResults persisting the result completes index (done:4).
-	const aiStartedAt = new Date().toISOString();
-	await patchVideoMetadata(videoId, {
-		pipelineProgress: {
-			phase: "refine",
-			done: 0,
-			total: 4,
-			startedAt: aiStartedAt,
-			updatedAt: aiStartedAt,
-		},
+	// analyze phase — the single master AI call. Atomic: total:1, flips done
+	// together once generateWithAi returns and the result is persisted. Shares
+	// the same `phases` array seeded by the transcribe workflow (read-modify-write).
+	const analyzeStart = Date.now();
+	await patchPipelinePhase(videoId, "analyze", {
+		status: "active",
+		done: 0,
+		total: 1,
+		startedAt: new Date().toISOString(),
 	});
 
 	const result = await generateWithAi(
@@ -171,16 +172,6 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 		videoData.video.duration ?? null,
 		videoId,
 	);
-
-	await patchVideoMetadata(videoId, {
-		pipelineProgress: {
-			phase: "index",
-			done: 3,
-			total: 4,
-			startedAt: aiStartedAt,
-			updatedAt: new Date().toISOString(),
-		},
-	});
 
 	if (result._usage) {
 		await recordSummaryUsage(
@@ -193,31 +184,78 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 
 	await saveResults(videoId, videoData, result);
 
-	await patchVideoMetadata(videoId, {
-		pipelineProgress: {
-			phase: "index",
-			done: 4,
-			total: 4,
-			startedAt: aiStartedAt,
-			updatedAt: new Date().toISOString(),
-		},
+	await patchPipelinePhase(videoId, "analyze", {
+		status: "done",
+		done: 1,
+		total: 1,
+		completedAt: new Date().toISOString(),
+		unitTimesMs: [Date.now() - analyzeStart],
 	});
 
 	return { success: true, message: "AI generation completed successfully" };
 }
 
+const PHASE_LABELS: Record<PipelinePhaseKey, string> = {
+	audio: "Audio tayyorlash",
+	transcribe: "Transkripsiya",
+	analyze: "AI tahlil",
+	index: "AI indekslash",
+};
+
+// Mirrors the transcribe workflow's real execution order so a fresh init (e.g.
+// if AI is retried independently) produces the same unified 4-phase shape.
+const PHASE_ORDER: PipelinePhaseKey[] = [
+	"audio",
+	"transcribe",
+	"index",
+	"analyze",
+];
+
+function initialPhases(): PipelinePhase[] {
+	return PHASE_ORDER.map((key) => ({
+		key,
+		label: PHASE_LABELS[key],
+		status: "queued" as const,
+		done: 0,
+		total: key === "analyze" ? 1 : 0,
+	}));
+}
+
 /**
- * Read-modify-write a partial patch into the video's metadata JSON so we never
- * clobber sibling fields (aiSummary, refinedTranscript, transcriptionError…).
+ * Read-modify-write a single phase entry inside metadata.pipelineProgress. The
+ * analyze workflow advances only its own phase; the array is shared with the
+ * transcribe workflow via the metadata JSON (no DB column, no migration).
  */
-async function patchVideoMetadata(
+async function patchPipelinePhase(
 	videoId: string,
-	patch: Partial<VideoMetadata>,
+	phaseKey: PipelinePhaseKey,
+	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
 ): Promise<void> {
 	const current = await getCurrentVideoMetadata(videoId, {});
+	const now = new Date().toISOString();
+
+	const existing = current.pipelineProgress;
+	const base: PipelineProgress = existing ?? {
+		currentPhase: phaseKey,
+		phases: initialPhases(),
+		startedAt: now,
+		updatedAt: now,
+	};
+
+	const phases = base.phases.map((p) =>
+		p.key === phaseKey ? { ...p, ...patch } : p,
+	);
+
+	const next: PipelineProgress = {
+		...base,
+		phases,
+		currentPhase: phaseKey,
+		updatedAt: now,
+	};
+
 	await db()
 		.update(videos)
-		.set({ metadata: { ...current, ...patch } })
+		.set({ metadata: { ...current, pipelineProgress: next } })
 		.where(eq(videos.id, videoId as Video.VideoId));
 }
 

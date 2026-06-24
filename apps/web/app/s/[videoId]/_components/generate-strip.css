@@ -180,137 +180,160 @@
   display: none;
 }
 
-/* Steps pipeline */
-.gen-steps {
+/* === Phase chips (replaces 5-step grid) === */
+.gen-chips {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition:
-    max-height 400ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 300ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    margin-top 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  margin-top: 0;
-}
-
-.gen-steps.visible {
-  max-height: 80px;
-  opacity: 1;
-  margin-top: 14px;
-}
-
-.gen-step {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 11px;
-  border-radius: 11px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.gen-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 11px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 11.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.45);
   transition:
-    background 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    border-color 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    color 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    background 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    flex 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.gen-step .gs-ic {
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
+.gen-chip-header {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  gap: 7px;
 }
 
-.gen-step .gs-ic svg {
-  width: 14px;
-  height: 14px;
-}
-
-.gen-step .gs-lbl {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.gen-step .gs-state {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.gen-step .gs-state::before {
-  content: "";
-  position: absolute;
-  inset: 0;
+/* State dot */
+.gen-chip-state {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  border: 1.6px solid rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 280ms ease;
 }
 
-/* Active step — spinner ring */
-.gen-step.active {
-  background: rgba(96, 165, 250, 0.16);
-  border-color: rgba(96, 165, 250, 0.42);
+.gen-chip-label {
+  white-space: nowrap;
+}
+
+/* Detail line under active chip */
+.gen-chip-detail {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.55);
+  padding-left: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* queued — already dim by default */
+
+/* active */
+.gen-chip.active {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.4);
   color: #fff;
+  flex: 1;
+  min-width: 140px;
 }
 
-.gen-step.active .gs-state::before {
-  border-color: transparent;
-  border-top-color: #93c5fd;
-  border-right-color: #93c5fd;
-  animation: gsSpin 0.85s linear infinite;
+.gen-chip.active .gen-chip-state {
+  background: #60a5fa;
+  animation: chipPulse 1.4s ease-in-out infinite;
 }
 
-@keyframes gsSpin {
-  to {
-    transform: rotate(360deg);
-  }
+@keyframes chipPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
 }
 
-/* Done step — green check */
-.gen-step.done {
-  color: rgba(255, 255, 255, 0.92);
-  background: rgba(52, 211, 153, 0.1);
-  border-color: rgba(52, 211, 153, 0.32);
+/* done — green */
+.gen-chip.done {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.28);
 }
 
-.gen-step.done .gs-state::before {
-  border-color: #34d399;
+.gen-chip.done .gen-chip-state {
   background: #34d399;
 }
 
-.gen-step.done .gs-state::after {
+/* done dot checkmark via box-shadow trick */
+.gen-chip.done .gen-chip-state::after {
   content: "";
-  position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 4px;
-  height: 8px;
+  display: block;
+  width: 3px;
+  height: 5px;
   border: solid #0f172a;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg) translate(0.5px, -0.5px);
+  margin: 0 auto;
 }
 
-/* Error step */
-.gen-step.error {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.4);
+/* error */
+.gen-chip.error {
   color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
-.gen-step.error .gs-state::before {
-  border-color: #ef4444;
+.gen-chip.error .gen-chip-state {
   background: #ef4444;
+}
+
+/* Shimmer text for analyze */
+.gen-chip-shimmer-text {
+  display: inline-block;
+  background: linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.7) 50%, rgba(255,255,255,0.35) 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerScroll 1.8s linear infinite;
+}
+
+@keyframes shimmerScroll {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+/* Inline spinner for audio with no % */
+.gen-chip-spinner-inline {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  border-top-color: #93c5fd;
+  border-radius: 50%;
+  animation: chipSpin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+/* Small spinner next to label for audio total=0 */
+.gen-chip-spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  border-top-color: #93c5fd;
+  border-radius: 50%;
+  animation: chipSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes chipSpin {
+  to { transform: rotate(360deg); }
 }
 
 /* Done state — compact ribbon */

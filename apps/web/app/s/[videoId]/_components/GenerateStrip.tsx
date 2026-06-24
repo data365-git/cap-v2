@@ -13,21 +13,6 @@ interface GenerateStripProps {
   hasAiContent: boolean;
 }
 
-type StepState = "idle" | "active" | "done" | "error";
-
-interface Step {
-  key: string;
-  label: string;
-}
-
-const STEPS: Step[] = [
-  { key: "transcript", label: "Transkripsiya" },
-  { key: "refined", label: "Tahrirlash" },
-  { key: "summary", label: "Xulosa" },
-  { key: "tasks", label: "Vazifalar" },
-  { key: "rag", label: "AI indekslash" },
-];
-
 // Transcript terminal states
 const TRANSCRIPT_COMPLETE = "COMPLETE";
 const TRANSCRIPT_ERROR_STATES = new Set(["ERROR", "NO_AUDIO", "SKIPPED"]);
@@ -38,12 +23,46 @@ const AI_ERROR_STATES = new Set(["ERROR", "SKIPPED"]);
 
 type StripPhase = "hidden" | "regen-link" | "idle" | "running" | "done" | "error-empty" | "error";
 
+// Phase weights for overall progress
+const PHASE_WEIGHTS: Record<string, number> = {
+  audio: 0.08,
+  transcribe: 0.60,
+  index: 0.12,
+  analyze: 0.20,
+};
+
+// ETA constants (seconds)
+const DEFAULT_CHUNK_SEC = 45;
+const ANALYZE_SEC = 25;
+const INDEX_SEC = 15;
+const AUDIO_SEC = 20;
+
+// Max upward nudge when re-anchoring ETA (10% of current)
+const ETA_UP_CAP_RATIO = 0.10;
+
+interface PipelinePhase {
+  key: "audio" | "transcribe" | "analyze" | "index";
+  label: string;
+  status: "queued" | "active" | "done" | "error";
+  done: number;
+  total: number;
+  startedAt?: string;
+  completedAt?: string;
+  unitTimesMs?: number[];
+}
+
+interface PipelineProgress {
+  currentPhase: "audio" | "transcribe" | "analyze" | "index";
+  phases: PipelinePhase[];
+  startedAt: string;
+  updatedAt: string;
+}
+
 function deriveInitialPhase(
   transcriptionStatus: string | undefined,
   aiGenerationStatus: string | undefined,
   hasAiContent: boolean,
 ): StripPhase {
-  // Already done and has real content → show quiet regen link
   if (
     transcriptionStatus === TRANSCRIPT_COMPLETE &&
     aiGenerationStatus === AI_COMPLETE &&
@@ -51,27 +70,51 @@ function deriveInitialPhase(
   ) {
     return "regen-link";
   }
-
-  // COMPLETE but empty → error-empty state
   if (aiGenerationStatus === AI_COMPLETE && !hasAiContent) {
     return "error-empty";
   }
-
-  // Error/skipped states
   if (
-    aiGenerationStatus && AI_ERROR_STATES.has(aiGenerationStatus) ||
-    transcriptionStatus && TRANSCRIPT_ERROR_STATES.has(transcriptionStatus)
+    (aiGenerationStatus && AI_ERROR_STATES.has(aiGenerationStatus)) ||
+    (transcriptionStatus && TRANSCRIPT_ERROR_STATES.has(transcriptionStatus))
   ) {
     return "error";
   }
-
   return "idle";
 }
 
-function formatDuration(sec: number): string {
+function medianOf(values: number[]): number {
+  if (values.length === 0) return DEFAULT_CHUNK_SEC * 1000;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function formatCountdown(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatPhaseEta(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  if (m > 0) return `~${m}m ${s}s`;
+  return `~${s}s`;
+}
+
+function computeRemainingConstants(phases: PipelinePhase[], excludeKey?: string): number {
+  let extra = 0;
+  for (const p of phases) {
+    if (p.key === excludeKey) continue;
+    if (p.status === "done") continue;
+    if (p.key === "analyze") extra += ANALYZE_SEC;
+    else if (p.key === "index") extra += INDEX_SEC;
+    else if (p.key === "audio") extra += AUDIO_SEC;
+  }
+  return extra;
 }
 
 export function GenerateStrip({
@@ -91,10 +134,6 @@ export function GenerateStrip({
     ),
   );
 
-  const [stepStates, setStepStates] = useState<StepState[]>(() =>
-    STEPS.map(() => "idle"),
-  );
-  const [subtitle, setSubtitle] = useState("AI yordamida tahlil qilish");
   const [errorMsg, setErrorMsg] = useState<string | null>(() => {
     if (initialAiGenerationStatus === AI_COMPLETE && !hasAiContent) {
       return "Kontent yaratilmadi — qayta urinib ko'ring.";
@@ -102,151 +141,215 @@ export function GenerateStrip({
     return null;
   });
 
-  // Progress bar state
+  // Phase chips from pipelineProgress
+  const [pipelinePhases, setPipelinePhases] = useState<PipelinePhase[]>([]);
+  const [currentPhaseKey, setCurrentPhaseKey] = useState<string>("");
+  const [activeLabel, setActiveLabel] = useState("AI insights tayyorlash");
+
+  // Overall progress bar
   const [progressPct, setProgressPct] = useState(0);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [etaDisplay, setEtaDisplay] = useState<string>("Hisoblanmoqda…");
-
-  // Refs for monotonic pct and ETA smoothing
   const maxPctRef = useRef(0);
-  const startedAtRef = useRef<Date | null>(null);
-  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Rolling buffer for ETA smoothing (last 3 estimates)
-  const etaBufferRef = useRef<number[]>([]);
 
+  // ETA state
+  const [etaDisplay, setEtaDisplay] = useState<string>("Hisoblanmoqda…");
+  // ETA internals — use refs so the countdown interval can read/write them
+  const remainingSecRef = useRef<number | null>(null);
+  const lastTickAtRef = useRef<number>(Date.now());
+  const etaAnchoredRef = useRef(false); // has initial anchor been set?
+  // When re-anchor wants to go UP, we store a range [lo, hi]
+  const etaRangeHiRef = useRef<number | null>(null);
+  // Previous transcribe done count to detect chunk completion
+  const prevTranscribeDoneRef = useRef(0);
+  // Previous unitTimesMs length
+  const prevUnitTimesMsLenRef = useRef(0);
+
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Which phase of the pipeline we're in: "transcript" or "ai"
-  const pipelinePhaseRef = useRef<"transcript" | "ai">("transcript");
-  // Track how many AI sub-steps we've advanced through (0–3 = steps 1-4)
-  const aiStepIndexRef = useRef(0);
 
-  // Start the elapsed ticker from a given startedAt date
-  const startElapsedTimer = useCallback((startedAt: Date) => {
-    if (elapsedTimerRef.current) return; // already running
-    startedAtRef.current = startedAt;
-    elapsedTimerRef.current = setInterval(() => {
-      const nowSec = (Date.now() - startedAt.getTime()) / 1000;
-      setElapsedSec(Math.floor(nowSec));
-    }, 1000);
-  }, []);
+  // --- ETA countdown tick (called every 1s) ---
+  const tickEta = useCallback(() => {
+    if (remainingSecRef.current === null) return;
+    const now = Date.now();
+    const elapsed = (now - lastTickAtRef.current) / 1000;
+    lastTickAtRef.current = now;
 
-  const stopElapsedTimer = useCallback(() => {
-    if (elapsedTimerRef.current) {
-      clearInterval(elapsedTimerRef.current);
-      elapsedTimerRef.current = null;
+    const newVal = Math.max(0, remainingSecRef.current - elapsed);
+    remainingSecRef.current = newVal;
+
+    // Narrow range hi on each tick too
+    if (etaRangeHiRef.current !== null) {
+      etaRangeHiRef.current = Math.max(newVal, etaRangeHiRef.current - elapsed);
+      // Collapse range when hi ≈ lo
+      if (etaRangeHiRef.current - newVal < 5) {
+        etaRangeHiRef.current = null;
+      }
+    }
+
+    // Format for display
+    if (newVal === 0) {
+      setEtaDisplay("deyarli tayyor…");
+    } else if (etaRangeHiRef.current !== null) {
+      const loMin = Math.ceil(newVal / 60);
+      const hiMin = Math.ceil(etaRangeHiRef.current / 60);
+      if (loMin === hiMin) {
+        setEtaDisplay(`≈ ${formatCountdown(newVal)} qoldi`);
+      } else {
+        setEtaDisplay(`≈ ${loMin}–${hiMin} daqiqa`);
+      }
+    } else {
+      setEtaDisplay(`≈ ${formatCountdown(newVal)} qoldi`);
     }
   }, []);
 
-  // Compute and update progress from pipelineProgress data
-  const applyProgress = useCallback(
-    (pipelineProgress: {
-      phase: "transcribe" | "refine" | "summary" | "tasks" | "index";
-      done: number;
-      total: number;
-      startedAt: string;
-      updatedAt: string;
-    } | undefined) => {
-      if (!pipelineProgress) return;
+  const startCountdown = useCallback(() => {
+    if (countdownIntervalRef.current) return;
+    lastTickAtRef.current = Date.now();
+    countdownIntervalRef.current = setInterval(tickEta, 1000);
+  }, [tickEta]);
 
-      const { phase: pPhase, done, total, startedAt } = pipelineProgress;
+  const stopCountdown = useCallback(() => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  }, []);
 
-      // Compute raw pct with phase weighting
-      const ratio = total > 0 ? done / total : 0;
-      let rawPct: number;
-      if (pPhase === "transcribe") {
-        rawPct = 0.70 * ratio;
+  // --- Re-anchor ETA from real data ---
+  const reanchorEta = useCallback((phases: PipelinePhase[]) => {
+    const transcribe = phases.find((p) => p.key === "transcribe");
+    if (!transcribe || transcribe.total === 0) return;
+
+    const unitMs = transcribe.unitTimesMs ?? [];
+    const medianMs = medianOf(unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000]);
+    const medianSec = medianMs / 1000;
+    const remainingChunks = Math.max(0, transcribe.total - transcribe.done);
+    const constants = computeRemainingConstants(phases, "transcribe");
+    const newRemaining = remainingChunks * medianSec + constants;
+
+    const current = remainingSecRef.current;
+
+    if (current === null) {
+      // First anchor
+      remainingSecRef.current = newRemaining;
+      etaAnchoredRef.current = true;
+      lastTickAtRef.current = Date.now();
+      startCountdown();
+    } else if (newRemaining < current) {
+      // New estimate is lower — adopt freely (let it drop)
+      remainingSecRef.current = newRemaining;
+      etaRangeHiRef.current = null;
+    } else {
+      // New estimate is higher — don't jump up; nudge by at most 10%, store range
+      const cap = current * ETA_UP_CAP_RATIO;
+      const nudged = current + Math.min(newRemaining - current, cap);
+      remainingSecRef.current = nudged;
+      // Store original hi for range display
+      etaRangeHiRef.current = newRemaining;
+    }
+  }, [startCountdown]);
+
+  // --- Initial anchor before any chunks complete (just has total) ---
+  const initialAnchorEta = useCallback((phases: PipelinePhase[]) => {
+    if (etaAnchoredRef.current) return;
+    const transcribe = phases.find((p) => p.key === "transcribe");
+    if (!transcribe || transcribe.total === 0) return;
+
+    const constants = computeRemainingConstants(phases, "transcribe");
+    const initial = transcribe.total * DEFAULT_CHUNK_SEC + constants;
+    remainingSecRef.current = initial;
+    etaAnchoredRef.current = true;
+    lastTickAtRef.current = Date.now();
+    startCountdown();
+    setEtaDisplay(`≈ ${formatCountdown(initial)} qoldi`);
+  }, [startCountdown]);
+
+  // --- Compute overall % from phases ---
+  const computeOverallPct = useCallback((phases: PipelinePhase[]): number => {
+    let sum = 0;
+    for (const p of phases) {
+      const weight = PHASE_WEIGHTS[p.key] ?? 0;
+      let prog: number;
+      if (p.status === "done") {
+        prog = 1;
+      } else if (p.status === "queued") {
+        prog = 0;
+      } else if (p.key === "analyze" || p.total === 0) {
+        // atomic or unknown — use 0.5 while active
+        prog = p.status === "active" ? 0.5 : 0;
       } else {
-        // refine / summary / tasks / index → AI phase (30%)
-        rawPct = 0.70 + 0.30 * ratio;
+        prog = Math.min(1, Math.max(0, p.done / p.total));
       }
-      // Clamp to [0, 1] and make monotonic
-      rawPct = Math.min(1, Math.max(0, rawPct));
-      const monotonicPct = Math.max(rawPct, maxPctRef.current);
-      maxPctRef.current = monotonicPct;
-      setProgressPct(monotonicPct);
+      sum += weight * prog;
+    }
+    return Math.min(1, Math.max(0, sum));
+  }, []);
 
-      // Start the elapsed timer if not already running
-      const startDate = new Date(startedAt);
-      if (!elapsedTimerRef.current) {
-        startElapsedTimer(startDate);
+  // --- Apply incoming pipelineProgress ---
+  const applyPipelineProgress = useCallback(
+    (pp: PipelineProgress) => {
+      const phases = pp.phases;
+      setPipelinePhases(phases);
+      setCurrentPhaseKey(pp.currentPhase);
+
+      // Active label
+      const activePhase = phases.find((p) => p.status === "active");
+      if (activePhase) {
+        setActiveLabel(`${activePhase.label} bajarilmoqda…`);
       }
 
-      // Compute ETA with exponential smoothing
-      const elapsed = (Date.now() - startDate.getTime()) / 1000;
-      if (monotonicPct > 0.005) {
-        const rawEta = elapsed * (1 - monotonicPct) / monotonicPct;
-        // Rolling average of last 3 estimates
-        etaBufferRef.current.push(rawEta);
-        if (etaBufferRef.current.length > 3) etaBufferRef.current.shift();
-        const smoothedEta =
-          etaBufferRef.current.reduce((a, b) => a + b, 0) /
-          etaBufferRef.current.length;
+      // Overall pct (monotonic)
+      const rawPct = computeOverallPct(phases);
+      const mono = Math.max(rawPct, maxPctRef.current);
+      maxPctRef.current = mono;
+      setProgressPct(mono);
 
-        if (smoothedEta < 1) {
-          setEtaDisplay("deyarli tayyor");
-        } else {
-          setEtaDisplay(`≈ ${formatDuration(smoothedEta)} qoldi`);
+      // ETA logic
+      const transcribe = phases.find((p) => p.key === "transcribe");
+      if (transcribe && transcribe.total > 0) {
+        const unitLen = (transcribe.unitTimesMs ?? []).length;
+        const doneIncreased = transcribe.done > prevTranscribeDoneRef.current;
+        const unitsIncreased = unitLen > prevUnitTimesMsLenRef.current;
+
+        if (!etaAnchoredRef.current) {
+          initialAnchorEta(phases);
+        } else if (doneIncreased || unitsIncreased) {
+          reanchorEta(phases);
         }
-      } else {
+
+        prevTranscribeDoneRef.current = transcribe.done;
+        prevUnitTimesMsLenRef.current = unitLen;
+      } else if (!etaAnchoredRef.current) {
+        // No transcribe total yet — just show computing
         setEtaDisplay("Hisoblanmoqda…");
       }
-
-      // Map overall pct to the active step for the 5-step row
-      // transcribe (0–70%) → step 0
-      // AI phases (70–100%) → steps 1–4 (refine=1, summary=2, tasks=3, index=4)
-      const phaseToStep: Record<string, number> = {
-        transcribe: 0,
-        refine: 1,
-        summary: 2,
-        tasks: 3,
-        index: 4,
-      };
-      const activeStep = phaseToStep[pPhase] ?? 0;
-
-      setStepStates((prev) => {
-        const next = [...prev];
-        for (let i = 0; i < next.length; i++) {
-          if (i < activeStep) next[i] = "done";
-          else if (i === activeStep) next[i] = "active";
-          else if (next[i] !== "done") next[i] = "idle";
-        }
-        return next;
-      });
     },
-    [startElapsedTimer],
+    [computeOverallPct, initialAnchorEta, reanchorEta],
   );
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
-      stopElapsedTimer();
+      stopCountdown();
     };
-  }, [stopElapsedTimer]);
+  }, [stopCountdown]);
 
-  const markStepDone = useCallback((index: number) => {
-    setStepStates((prev) => {
-      const next = [...prev];
-      next[index] = "done";
-      return next;
-    });
-  }, []);
+  const resetRunState = useCallback(() => {
+    maxPctRef.current = 0;
+    remainingSecRef.current = null;
+    etaAnchoredRef.current = false;
+    etaRangeHiRef.current = null;
+    prevTranscribeDoneRef.current = 0;
+    prevUnitTimesMsLenRef.current = 0;
+    setProgressPct(0);
+    setEtaDisplay("Hisoblanmoqda…");
+    setPipelinePhases([]);
+    setCurrentPhaseKey("");
+    setActiveLabel("AI insights tayyorlash");
+    stopCountdown();
+  }, [stopCountdown]);
 
-  const markStepActive = useCallback((index: number) => {
-    setStepStates((prev) => {
-      const next = [...prev];
-      next[index] = "active";
-      return next;
-    });
-  }, []);
-
-  const markStepError = useCallback((index: number) => {
-    setStepStates((prev) => {
-      const next = [...prev];
-      next[index] = "error";
-      return next;
-    });
-  }, []);
-
+  // Poll AI generation status
   const pollAi = useCallback(
     (attempt: number) => {
       pollRef.current = setTimeout(async () => {
@@ -254,25 +357,17 @@ export function GenerateStrip({
           const status = await getVideoStatus(videoId as Video.VideoId);
           if (status && "aiGenerationStatus" in status) {
             const aiStatus = status.aiGenerationStatus;
-            const pipelineProgress = (status as Record<string, unknown>).pipelineProgress as
-              | { phase: "transcribe" | "refine" | "summary" | "tasks" | "index"; done: number; total: number; startedAt: string; updatedAt: string }
-              | undefined;
+            const pp = (status as Record<string, unknown>).pipelineProgress as PipelineProgress | undefined;
 
-            // Apply real progress data if available
-            if (pipelineProgress) {
-              applyProgress(pipelineProgress);
-            }
+            if (pp) applyPipelineProgress(pp);
 
             if (aiStatus === AI_COMPLETE) {
-              // Mark all remaining AI steps done
-              setStepStates(["done", "done", "done", "done", "done"]);
+              stopCountdown();
               setProgressPct(1);
               maxPctRef.current = 1;
-              setSubtitle("Hammasi tayyor");
-              setEtaDisplay("Bajarildi");
-              stopElapsedTimer();
+              setEtaDisplay("");
+              setActiveLabel("Hammasi tayyor");
               setPhase("done");
-              // Fire router.refresh() exactly once when we reach success
               if (!refreshedRef.current) {
                 refreshedRef.current = true;
                 router.refresh();
@@ -281,10 +376,7 @@ export function GenerateStrip({
             }
 
             if (aiStatus && AI_ERROR_STATES.has(aiStatus)) {
-              const activeAiStep = Math.min(1 + aiStepIndexRef.current, 4);
-              markStepError(activeAiStep);
-              stopElapsedTimer();
-              // Surface real transcription error if available, then AI error
+              stopCountdown();
               const transcriptionError = (status as Record<string, unknown>).transcriptionError as string | undefined;
               const aiDetail = ((status as Record<string, unknown>).aiGenerationError as string | undefined) ?? "";
               if (transcriptionError) {
@@ -299,64 +391,29 @@ export function GenerateStrip({
               setPhase("error");
               return;
             }
-
-            // Fall back to fake step advancement only when no pipelineProgress
-            if (!pipelineProgress) {
-              const currentAiStep = Math.min(
-                1 + Math.floor(attempt / 3),
-                4,
-              );
-              if (currentAiStep > aiStepIndexRef.current + 1) {
-                const prev = aiStepIndexRef.current + 1;
-                for (let i = prev; i < currentAiStep; i++) {
-                  markStepDone(i);
-                }
-                markStepActive(currentAiStep);
-                aiStepIndexRef.current = currentAiStep - 1;
-
-                const subLabels = [
-                  "Tahrirlash…",
-                  "Xulosa tuzilmoqda…",
-                  "Vazifalar aniqlanmoqda…",
-                  "AI suhbat uchun indekslanmoqda…",
-                ];
-                setSubtitle(subLabels[currentAiStep - 1] ?? "Qayta ishlanmoqda…");
-              }
-            }
           }
         } catch {
-          // Ignore transient errors and keep polling
+          // Ignore transient errors
         }
 
         if (attempt < 90) {
           pollAi(attempt + 1);
         } else {
-          stopElapsedTimer();
+          stopCountdown();
           setPhase("error");
           setErrorMsg("Still working — refresh the page in a moment.");
         }
       }, 4000);
     },
-    [videoId, applyProgress, markStepDone, markStepActive, markStepError, stopElapsedTimer, router],
+    [videoId, applyPipelineProgress, stopCountdown, router],
   );
 
   const startAiPhase = useCallback(async () => {
-    pipelinePhaseRef.current = "ai";
-    aiStepIndexRef.current = 0;
-    // Mark step 1 (Tahrirlash) active
-    markStepActive(1);
-    setSubtitle("Transkript tahrirlanmoqda…");
-
     try {
-      const res = await fetch(`/api/videos/${videoId}/retry-ai`, {
-        method: "POST",
-      });
+      const res = await fetch(`/api/videos/${videoId}/retry-ai`, { method: "POST" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        markStepError(1);
-        stopElapsedTimer();
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        stopCountdown();
         if (res.status === 429 || /rate.limit|cost.cap/i.test(body?.error ?? "")) {
           setErrorMsg("Lavozimga yetdik. Boshqa generatsiya keyinroq.");
         } else {
@@ -367,13 +424,13 @@ export function GenerateStrip({
       }
       pollAi(0);
     } catch {
-      markStepError(1);
-      stopElapsedTimer();
+      stopCountdown();
       setErrorMsg("Could not start AI generation.");
       setPhase("error");
     }
-  }, [videoId, markStepActive, markStepError, stopElapsedTimer, pollAi]);
+  }, [videoId, stopCountdown, pollAi]);
 
+  // Poll transcription status
   const pollTranscript = useCallback(
     (attempt: number) => {
       pollRef.current = setTimeout(async () => {
@@ -381,26 +438,17 @@ export function GenerateStrip({
           const status = await getVideoStatus(videoId as Video.VideoId);
           if (status && "transcriptionStatus" in status) {
             const ts = status.transcriptionStatus;
-            const pipelineProgress = (status as Record<string, unknown>).pipelineProgress as
-              | { phase: "transcribe" | "refine" | "summary" | "tasks" | "index"; done: number; total: number; startedAt: string; updatedAt: string }
-              | undefined;
+            const pp = (status as Record<string, unknown>).pipelineProgress as PipelineProgress | undefined;
 
-            // Apply real progress data if available
-            if (pipelineProgress) {
-              applyProgress(pipelineProgress);
-            }
+            if (pp) applyPipelineProgress(pp);
 
             if (ts === TRANSCRIPT_COMPLETE) {
-              markStepDone(0);
-              setSubtitle("Transkript tayyor, AI tahlil boshlanmoqda…");
               await startAiPhase();
               return;
             }
 
             if (ts && TRANSCRIPT_ERROR_STATES.has(ts)) {
-              markStepError(0);
-              stopElapsedTimer();
-              // Surface real transcription error from backend if available
+              stopCountdown();
               const transcriptionError = (status as Record<string, unknown>).transcriptionError as string | undefined;
               if (transcriptionError) {
                 setErrorMsg(transcriptionError);
@@ -420,67 +468,45 @@ export function GenerateStrip({
         if (attempt < 90) {
           pollTranscript(attempt + 1);
         } else {
-          stopElapsedTimer();
+          stopCountdown();
           setPhase("error");
           setErrorMsg("Still working — refresh the page in a moment.");
         }
       }, 4000);
     },
-    [videoId, applyProgress, markStepDone, markStepError, stopElapsedTimer, startAiPhase],
+    [videoId, applyPipelineProgress, stopCountdown, startAiPhase],
   );
 
-  // Shared pipeline kick-off used by both Generate and Retry buttons
+  // Kick off the pipeline
   const kickOffPipeline = useCallback(async (skipTranscript: boolean) => {
     setErrorMsg(null);
     refreshedRef.current = false;
     setPhase("running");
-    setStepStates(["active", "idle", "idle", "idle", "idle"]);
-    setSubtitle("Audio matnga aylantirilmoqda…");
-    pipelinePhaseRef.current = "transcript";
-    aiStepIndexRef.current = 0;
-    // Reset progress state
-    maxPctRef.current = 0;
-    etaBufferRef.current = [];
-    setProgressPct(0);
-    setElapsedSec(0);
-    setEtaDisplay("Hisoblanmoqda…");
-    stopElapsedTimer();
+    resetRunState();
 
     if (skipTranscript) {
-      // Transcription already done — jump straight to AI phase
-      setStepStates(["done", "active", "idle", "idle", "idle"]);
-      setSubtitle("Transkript tayyor, AI tahlil boshlanmoqda…");
       await startAiPhase();
       return;
     }
 
     try {
-      const res = await fetch(
-        `/api/videos/${videoId}/retry-transcription`,
-        { method: "POST" },
-      );
+      const res = await fetch(`/api/videos/${videoId}/retry-transcription`, { method: "POST" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        setStepStates(["error", "idle", "idle", "idle", "idle"]);
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
         setErrorMsg(body?.error ?? "Could not start transcription.");
         setPhase("error");
         return;
       }
       pollTranscript(0);
     } catch {
-      setStepStates(["error", "idle", "idle", "idle", "idle"]);
       setErrorMsg("Could not start generation.");
       setPhase("error");
     }
-  }, [videoId, pollTranscript, startAiPhase, stopElapsedTimer]);
+  }, [videoId, pollTranscript, startAiPhase, resetRunState]);
 
   const onGenerate = useCallback(async () => {
     if (phase === "running") return;
-    const transcriptAlreadyDone =
-      initialTranscriptionStatus === TRANSCRIPT_COMPLETE;
-    await kickOffPipeline(transcriptAlreadyDone);
+    await kickOffPipeline(initialTranscriptionStatus === TRANSCRIPT_COMPLETE);
   }, [phase, initialTranscriptionStatus, kickOffPipeline]);
 
   const onRetry = useCallback(async () => {
@@ -488,24 +514,37 @@ export function GenerateStrip({
   }, [kickOffPipeline]);
 
   const onRegenerate = useCallback(async () => {
-    setPhase("running");
-    setStepStates(["active", "idle", "idle", "idle", "idle"]);
-    setSubtitle("Audio matnga aylantirilmoqda…");
-    setErrorMsg(null);
-    refreshedRef.current = false;
-    pipelinePhaseRef.current = "transcript";
-    aiStepIndexRef.current = 0;
     await kickOffPipeline(false);
   }, [kickOffPipeline]);
 
-  // Quiet regen link — shown when content already exists
+  // --- Phase chip detail line ---
+  const renderPhaseDetail = (p: PipelinePhase): string | null => {
+    if (p.status !== "active") return null;
+    if (p.key === "transcribe" || p.key === "index") {
+      if (p.total > 0) {
+        // Compute per-phase ETA from unitTimesMs
+        const unitMs = p.unitTimesMs ?? [];
+        const medianMs = medianOf(unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000]);
+        const remaining = Math.max(0, p.total - p.done);
+        const phaseSec = (remaining * medianMs) / 1000;
+        const etaStr = formatPhaseEta(phaseSec);
+        return `${p.label} — ${p.done}/${p.total} qism · ${etaStr}`;
+      }
+    }
+    if (p.key === "audio") {
+      if (p.total === 100) return `${p.label} — ${p.done}%`;
+      return null; // spinner shown via CSS, no %
+    }
+    if (p.key === "analyze") {
+      return null; // shimmer shown via CSS
+    }
+    return null;
+  };
+
+  // --- Quiet regen link ---
   if (phase === "regen-link") {
     return (
-      <button
-        type="button"
-        className="cap-regen-link"
-        onClick={onRegenerate}
-      >
+      <button type="button" className="cap-regen-link" onClick={onRegenerate}>
         Qayta generatsiya
       </button>
     );
@@ -514,7 +553,6 @@ export function GenerateStrip({
   const isRunning = phase === "running";
   const isDone = phase === "done";
   const isError = phase === "error" || phase === "error-empty";
-  const showSteps = isRunning || isDone;
   const pctInt = Math.round(progressPct * 100);
 
   return (
@@ -529,35 +567,19 @@ export function GenerateStrip({
         {/* Spark orb icon */}
         <div className={["gen-orb", isError ? "error" : ""].filter(Boolean).join(" ")} aria-hidden="true">
           {isError ? (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           ) : (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
             </svg>
           )}
         </div>
 
-        {/* Title + live subtitle */}
+        {/* Title + live action label */}
         <div className="gen-text">
           <div className="gen-title">
             {isError ? "Xato yuz berdi" : "AI insights tayyorlash"}
@@ -565,27 +587,14 @@ export function GenerateStrip({
           <div className="gen-sub">
             {isError
               ? (errorMsg ?? "Qayta urinib ko'ring.")
-              : subtitle}
+              : activeLabel}
           </div>
         </div>
 
         {/* Primary / Retry button */}
         {isError ? (
-          <button
-            type="button"
-            className="gen-btn gen-btn--retry"
-            onClick={onRetry}
-            aria-label="Retry generation"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
+          <button type="button" className="gen-btn gen-btn--retry" onClick={onRetry} aria-label="Retry generation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -601,27 +610,11 @@ export function GenerateStrip({
             aria-label={isDone ? "Generation complete" : isRunning ? "Generation in progress" : "Generate content"}
           >
             {isRunning ? (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                className="animate-spin"
-                aria-hidden="true"
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="animate-spin" aria-hidden="true">
                 <path d="M21 12a9 9 0 1 1-6.219-8.56" />
               </svg>
             ) : (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
               </svg>
             )}
@@ -639,85 +632,54 @@ export function GenerateStrip({
       {isRunning && (
         <div className="gen-progress-wrap" aria-label={`Jarayon: ${pctInt}%`}>
           <div className="gen-progress-bar">
-            <div
-              className="gen-progress-fill"
-              style={{ width: `${pctInt}%` }}
-            />
+            <div className="gen-progress-fill" style={{ width: `${pctInt}%` }} />
           </div>
           <div className="gen-progress-meta">
             <span className="gen-progress-pct">{pctInt}%</span>
-            <span className="gen-progress-eta">{etaDisplay}</span>
-            {elapsedSec > 0 && (
-              <span className="gen-progress-elapsed">{formatDuration(elapsedSec)} o'tdi</span>
-            )}
+            {etaDisplay && <span className="gen-progress-eta">{etaDisplay}</span>}
           </div>
         </div>
       )}
 
-      {/* 5-step pipeline row */}
-      <div className={["gen-steps", showSteps ? "visible" : ""].filter(Boolean).join(" ")}>
-        {STEPS.map((step, i) => (
-          <div
-            key={step.key}
-            className={["gen-step", stepStates[i]].filter(Boolean).join(" ")}
-          >
-            <span className="gs-ic" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+      {/* Phase chips — rendered from pipelineProgress.phases in array order */}
+      {(isRunning || isDone) && pipelinePhases.length > 0 && (
+        <div className="gen-chips">
+          {pipelinePhases.map((p) => {
+            const detail = renderPhaseDetail(p);
+            const isAnalyzeActive = p.key === "analyze" && p.status === "active";
+            const isAudioSpinner = p.key === "audio" && p.status === "active" && p.total === 0;
+            return (
+              <div
+                key={p.key}
+                className={[
+                  "gen-chip",
+                  p.status,
+                  p.status === "active" ? "expanded" : "",
+                ].filter(Boolean).join(" ")}
               >
-                {i === 0 && (
-                  // Mic icon for Transkripsiya
-                  <>
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
-                  </>
+                <div className="gen-chip-header">
+                  <span className="gen-chip-state" aria-hidden="true" />
+                  <span className="gen-chip-label">{p.label}</span>
+                  {isAudioSpinner && <span className="gen-chip-spinner" aria-hidden="true" />}
+                </div>
+                {p.status === "active" && (
+                  <div className="gen-chip-detail">
+                    {isAnalyzeActive ? (
+                      <span className="gen-chip-shimmer-text">taxminan ~{ANALYZE_SEC}s</span>
+                    ) : detail ? (
+                      detail
+                    ) : isAudioSpinner ? (
+                      <span className="gen-chip-spinner-inline" aria-hidden="true" />
+                    ) : null}
+                  </div>
                 )}
-                {i === 1 && (
-                  // Edit icon for Tahrirlash
-                  <>
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </>
-                )}
-                {i === 2 && (
-                  // List icon for Xulosa
-                  <>
-                    <line x1="8" y1="6" x2="21" y2="6" />
-                    <line x1="8" y1="12" x2="21" y2="12" />
-                    <line x1="8" y1="18" x2="21" y2="18" />
-                    <line x1="3" y1="6" x2="3.01" y2="6" />
-                    <line x1="3" y1="12" x2="3.01" y2="12" />
-                    <line x1="3" y1="18" x2="3.01" y2="18" />
-                  </>
-                )}
-                {i === 3 && (
-                  // Check-square icon for Vazifalar
-                  <>
-                    <polyline points="9 11 12 14 22 4" />
-                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                  </>
-                )}
-                {i === 4 && (
-                  // Spark/AI icon for AI indekslash
-                  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-                )}
-              </svg>
-            </span>
-            <span className="gs-lbl">{step.label}</span>
-            <span className="gs-state" aria-hidden="true" />
-          </div>
-        ))}
-      </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Per-step error message — only shown during running, not in error state (subtitle handles it) */}
+      {/* Error message (only if running state has a transient error) */}
       {errorMsg && phase === "running" && <p className="gen-error">{errorMsg}</p>}
     </div>
   );

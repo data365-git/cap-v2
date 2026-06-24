@@ -53,8 +53,38 @@ export interface AudioExtractionResult {
 	cleanup: () => Promise<void>;
 }
 
+export interface ExtractAudioOptions {
+	/**
+	 * Total source duration in seconds — required to compute a real conversion %.
+	 * When omitted (or non-finite), no percentage is reported (onProgress is never
+	 * called) so the caller can render a spinner instead of a fake bar.
+	 */
+	totalDurationSec?: number | null;
+	/**
+	 * Called with an integer 0..100 as ffmpeg makes progress. Throttled to ~once
+	 * per second. Only invoked when totalDurationSec is a finite positive number.
+	 */
+	onProgress?: (pct: number) => void;
+}
+
+/**
+ * Parse ffmpeg's `time=HH:MM:SS.ss` progress markers (printed to stderr) into
+ * elapsed seconds. ffmpeg emits these repeatedly as it encodes.
+ */
+function parseFfmpegTimeSeconds(text: string): number | null {
+	// Use the LAST occurrence — stderr accumulates and we want the newest.
+	const matches = text.match(/time=(\d+):(\d+):(\d+)\.(\d+)/g);
+	if (!matches || matches.length === 0) return null;
+	const last = matches[matches.length - 1];
+	const m = last?.match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
+	if (!m) return null;
+	const [, h, min, s, cs] = m;
+	return Number(h) * 3600 + Number(min) * 60 + Number(s) + Number(cs) / 100;
+}
+
 export async function extractAudioFromUrl(
 	videoUrl: string,
+	options: ExtractAudioOptions = {},
 ): Promise<AudioExtractionResult> {
 	const ffmpeg = getFfmpegPath();
 	const outputPath = join(tmpdir(), `audio-${randomUUID()}.mp3`);
@@ -73,13 +103,37 @@ export async function extractAudioFromUrl(
 		outputPath,
 	];
 
+	const totalDuration = options.totalDurationSec;
+	const canReportPct =
+		typeof totalDuration === "number" &&
+		Number.isFinite(totalDuration) &&
+		totalDuration > 0 &&
+		typeof options.onProgress === "function";
+
 	return new Promise((resolve, reject) => {
 		const proc = spawn(ffmpeg, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
 
 		let stderr = "";
+		let lastEmit = 0; // throttle: wall-clock ms of last onProgress call
+		let lastPct = -1; // monotonic: never report a lower %
 
 		proc.stderr?.on("data", (data: Buffer) => {
 			stderr += data.toString();
+
+			if (!canReportPct) return;
+			const now = Date.now();
+			if (now - lastEmit < 1000) return; // throttle to ~once/second
+
+			const elapsedSec = parseFfmpegTimeSeconds(stderr);
+			if (elapsedSec == null) return;
+			const pct = Math.max(
+				0,
+				Math.min(100, Math.round((elapsedSec / (totalDuration as number)) * 100)),
+			);
+			if (pct <= lastPct) return; // keep monotonic
+			lastPct = pct;
+			lastEmit = now;
+			options.onProgress?.(pct);
 		});
 
 		proc.on("error", (err: Error) => {

@@ -9,7 +9,12 @@ import {
 	videos,
 	videoUploads,
 } from "@cap/database/schema";
-import type { VideoMetadata } from "@cap/database/types";
+import type {
+	PipelinePhase,
+	PipelinePhaseKey,
+	PipelineProgress,
+	VideoMetadata,
+} from "@cap/database/types";
 import { serverEnv } from "@cap/env";
 import { userIsPro } from "@cap/utils";
 import { Storage } from "@cap/web-backend";
@@ -66,6 +71,8 @@ export async function transcribeVideoWorkflow(
 		return { success: true, message: "Transcription disabled - skipped" };
 	}
 
+	await initPipelineProgress(videoId);
+
 	try {
 		const audio = await extractAudio(videoId, userId, videoData.video);
 
@@ -112,6 +119,7 @@ export async function transcribeVideoWorkflow(
 		}
 	} catch (error) {
 		await markError(videoId, describeTranscriptionError(error));
+		await markActivePhaseError(videoId);
 		await cleanupTempAudio(videoId, userId, videoData.video);
 		throw error;
 	}
@@ -224,6 +232,109 @@ async function patchVideoMetadata(
 		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
+const PHASE_LABELS: Record<PipelinePhaseKey, string> = {
+	audio: "Audio tayyorlash",
+	transcribe: "Transkripsiya",
+	analyze: "AI tahlil",
+	index: "AI indekslash",
+};
+
+// Real execution order: audio extract → STT chunks → embeddings (index) →
+// AI analyze (queued as a separate workflow). The phases array mirrors that.
+const PHASE_ORDER: PipelinePhaseKey[] = [
+	"audio",
+	"transcribe",
+	"index",
+	"analyze",
+];
+
+function initialPhases(): PipelinePhase[] {
+	return PHASE_ORDER.map((key) => ({
+		key,
+		label: PHASE_LABELS[key],
+		status: "queued" as const,
+		done: 0,
+		total: key === "analyze" ? 1 : 0,
+	}));
+}
+
+/**
+ * Initialize the full 4-phase pipelineProgress at transcription start. All four
+ * phases are seeded as "queued" so the strip shows the unified picture even
+ * before the analyze workflow runs. Read-modify-write — never clobbers siblings.
+ */
+async function initPipelineProgress(videoId: string): Promise<void> {
+	const now = new Date().toISOString();
+	const progress: PipelineProgress = {
+		currentPhase: "audio",
+		phases: initialPhases(),
+		startedAt: now,
+		updatedAt: now,
+	};
+	await patchVideoMetadata(videoId, { pipelineProgress: progress });
+}
+
+/**
+ * Read-modify-write a single phase entry inside metadata.pipelineProgress.
+ * Updates the matching phase, sets currentPhase + updatedAt. If pipelineProgress
+ * is missing (e.g. retry on an old row), it is initialized first so the patch
+ * always lands. Shared by both workflows via the metadata JSON — no DB column.
+ */
+async function patchPipelinePhase(
+	videoId: string,
+	phaseKey: PipelinePhaseKey,
+	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
+): Promise<void> {
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+
+	const currentMetadata = (row?.metadata as VideoMetadata) || {};
+	const now = new Date().toISOString();
+
+	const existing = currentMetadata.pipelineProgress;
+	const base: PipelineProgress = existing ?? {
+		currentPhase: phaseKey,
+		phases: initialPhases(),
+		startedAt: now,
+		updatedAt: now,
+	};
+
+	const phases = base.phases.map((p) =>
+		p.key === phaseKey ? { ...p, ...patch } : p,
+	);
+
+	const next: PipelineProgress = {
+		...base,
+		phases,
+		currentPhase: phaseKey,
+		updatedAt: now,
+	};
+
+	await db()
+		.update(videos)
+		.set({ metadata: { ...currentMetadata, pipelineProgress: next } })
+		.where(eq(videos.id, videoId as Video.VideoId));
+}
+
+/**
+ * Flip whichever phase is currently active to "error" so the strip stops the
+ * spinner on the right phase. Read-modify-write; no-op if no active phase.
+ */
+async function markActivePhaseError(videoId: string): Promise<void> {
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+	const currentMetadata = (row?.metadata as VideoMetadata) || {};
+	const progress = currentMetadata.pipelineProgress;
+	if (!progress) return;
+	const active = progress.phases.find((p) => p.status === "active");
+	if (!active) return;
+	await patchPipelinePhase(videoId, active.key, { status: "error" });
+}
+
 async function markError(videoId: string, reason?: string): Promise<void> {
 	"use step";
 
@@ -293,7 +404,35 @@ async function extractAudio(
 		return null;
 	}
 
-	const result = await extractAudioFromUrl(videoUrl);
+	// audio phase: real % when duration is known (total:100), else spinner
+	// (total:0). ffmpeg progress is parsed in extractAudioFromUrl and pushed here.
+	const knownDuration =
+		probe.durationSec != null && Number.isFinite(probe.durationSec)
+			? probe.durationSec
+			: null;
+	await patchPipelinePhase(videoId, "audio", {
+		status: "active",
+		done: 0,
+		total: knownDuration != null ? 100 : 0,
+		startedAt: new Date().toISOString(),
+	});
+
+	let lastAudioPct = 0;
+	const result = await extractAudioFromUrl(videoUrl, {
+		totalDurationSec: knownDuration,
+		onProgress: (pct) => {
+			if (pct <= lastAudioPct) return;
+			lastAudioPct = pct;
+			// fire-and-forget; throttled to ~once/second inside extractAudioFromUrl
+			void patchPipelinePhase(videoId, "audio", { done: pct });
+		},
+	});
+
+	await patchPipelinePhase(videoId, "audio", {
+		status: "done",
+		done: knownDuration != null ? 100 : 0,
+		completedAt: new Date().toISOString(),
+	});
 
 	try {
 		audioBuffer = await fs.readFile(result.filePath);
@@ -407,14 +546,12 @@ async function transcribeAudio(
 
 	if (!shouldChunk) {
 		const startedAt = new Date().toISOString();
-		await patchVideoMetadata(context.videoId, {
-			pipelineProgress: {
-				phase: "transcribe",
-				done: 0,
-				total: 1,
-				startedAt,
-				updatedAt: startedAt,
-			},
+		const chunkStart = Date.now();
+		await patchPipelinePhase(context.videoId, "transcribe", {
+			status: "active",
+			done: 0,
+			total: 1,
+			startedAt,
 		});
 
 		const result = await withCostGuard({
@@ -442,14 +579,12 @@ async function transcribeAudio(
 			},
 		});
 
-		await patchVideoMetadata(context.videoId, {
-			pipelineProgress: {
-				phase: "transcribe",
-				done: 1,
-				total: 1,
-				startedAt,
-				updatedAt: new Date().toISOString(),
-			},
+		await patchPipelinePhase(context.videoId, "transcribe", {
+			status: "done",
+			done: 1,
+			total: 1,
+			completedAt: new Date().toISOString(),
+			unitTimesMs: [Date.now() - chunkStart],
 		});
 
 		console.info(
@@ -492,20 +627,20 @@ async function transcribeAudio(
 		);
 
 		const chunkStartedAt = new Date().toISOString();
-		await patchVideoMetadata(context.videoId, {
-			pipelineProgress: {
-				phase: "transcribe",
-				done: 0,
-				total: slices.length,
-				startedAt: chunkStartedAt,
-				updatedAt: chunkStartedAt,
-			},
+		const unitTimesMs: number[] = [];
+		await patchPipelinePhase(context.videoId, "transcribe", {
+			status: "active",
+			done: 0,
+			total: slices.length,
+			startedAt: chunkStartedAt,
+			unitTimesMs: [],
 		});
 
 		for (let i = 0; i < slices.length; i++) {
 			const slice = slices[i];
 			if (!slice) continue;
 			const chunkLabel = `${i + 1}/${slices.length}`;
+			const chunkStart = Date.now();
 
 			const result = await withCostGuard({
 				orgId: context.orgId,
@@ -540,14 +675,15 @@ async function transcribeAudio(
 			totalCueCount += result.cues.length;
 			if (!result.isComplete) allComplete = false;
 
-			await patchVideoMetadata(context.videoId, {
-				pipelineProgress: {
-					phase: "transcribe",
-					done: i + 1,
-					total: slices.length,
-					startedAt: chunkStartedAt,
-					updatedAt: new Date().toISOString(),
-				},
+			// per-chunk wall-clock duration → drives the counting-down ETA
+			unitTimesMs.push(Date.now() - chunkStart);
+			const isLast = i === slices.length - 1;
+			await patchPipelinePhase(context.videoId, "transcribe", {
+				status: isLast ? "done" : "active",
+				done: i + 1,
+				total: slices.length,
+				unitTimesMs: [...unitTimesMs],
+				...(isLast ? { completedAt: new Date().toISOString() } : {}),
 			});
 		}
 	} finally {
@@ -637,10 +773,28 @@ async function chunkEmbedAndStore(
 		const chunks = chunkTranscript(vttContent);
 		if (chunks.length === 0) {
 			console.log(`[transcribe] No chunks produced for video ${videoId}`);
+			// nothing to index — flip the phase done so the strip doesn't hang
+			await patchPipelinePhase(videoId, "index", {
+				status: "done",
+				done: 0,
+				total: 0,
+				completedAt: new Date().toISOString(),
+			});
 			return;
 		}
 
 		const resolvedApiKey = apiKey;
+
+		// index phase: embeddings are produced in one batched call here, so we
+		// record total = chunk count and one wall-clock unit time for the batch.
+		const indexStartedAt = new Date().toISOString();
+		const indexStart = Date.now();
+		await patchPipelinePhase(videoId, "index", {
+			status: "active",
+			done: 0,
+			total: chunks.length,
+			startedAt: indexStartedAt,
+		});
 
 		const { embeddings, totalTokens } = await embedChunksWithUsage(
 			chunks,
@@ -675,10 +829,23 @@ async function chunkEmbedAndStore(
 
 		await db().insert(transcriptChunks).values(rows);
 
+		await patchPipelinePhase(videoId, "index", {
+			status: "done",
+			done: chunks.length,
+			total: chunks.length,
+			completedAt: new Date().toISOString(),
+			unitTimesMs: [Date.now() - indexStart],
+		});
+
 		console.log(
 			`[transcribe] Stored ${rows.length} transcript chunks for video ${videoId}`,
 		);
 	} catch (error) {
+		// RAG indexing is best-effort; transcription stays COMPLETE. Flip the
+		// index phase to error so the strip reflects reality without failing the run.
+		await patchPipelinePhase(videoId, "index", {
+			status: "error",
+		}).catch(() => {});
 		console.error(
 			`[transcribe] RAG indexing failed for video ${videoId}, transcription still COMPLETE:`,
 			error,
