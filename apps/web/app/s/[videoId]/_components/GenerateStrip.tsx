@@ -397,7 +397,7 @@ export function GenerateStrip({
               } else if (/truncat|too long|too large/i.test(aiDetail)) {
                 setErrorMsg("Transkripsiya yarim qoldi. Qayta urinish.");
               } else {
-                setErrorMsg("AI generation failed. Please try again.");
+                setErrorMsg("AI tahlil bajarilmadi. Qayta urining.");
               }
               setPhase("error");
               return;
@@ -407,12 +407,14 @@ export function GenerateStrip({
           // Ignore transient errors
         }
 
-        if (attempt < 90) {
+        // 225 × 4s = 15 min — covers a long video's AI phase end-to-end without
+        // false-failing while the workflow is still progressing server-side.
+        if (attempt < 225) {
           pollAi(attempt + 1);
         } else {
           stopCountdown();
           setPhase("error");
-          setErrorMsg("Still working — refresh the page in a moment.");
+          setErrorMsg("Hali jarayonda — sahifani yangilab ko'ring.");
         }
       }, 4000);
     },
@@ -428,7 +430,7 @@ export function GenerateStrip({
         if (res.status === 429 || /rate.limit|cost.cap/i.test(body?.error ?? "")) {
           setErrorMsg("Lavozimga yetdik. Boshqa generatsiya keyinroq.");
         } else {
-          setErrorMsg(body?.error ?? "AI generation failed.");
+          setErrorMsg(body?.error ?? "AI tahlil bajarilmadi.");
         }
         setPhase("error");
         return;
@@ -436,7 +438,7 @@ export function GenerateStrip({
       pollAi(0);
     } catch {
       stopCountdown();
-      setErrorMsg("Could not start AI generation.");
+      setErrorMsg("AI tahlilni boshlab bo'lmadi.");
       setPhase("error");
     }
   }, [videoId, stopCountdown, pollAi]);
@@ -466,7 +468,7 @@ export function GenerateStrip({
               } else if (ts === "NO_AUDIO") {
                 setErrorMsg("Transkripsiya yarim qoldi. Qayta urinish.");
               } else {
-                setErrorMsg("Transcription failed. Please try again.");
+                setErrorMsg("Transkripsiya bajarilmadi. Qayta urining.");
               }
               setPhase("error");
               return;
@@ -476,12 +478,14 @@ export function GenerateStrip({
           // Ignore transient errors
         }
 
-        if (attempt < 90) {
+        // 225 × 4s = 15 min — covers a chunked long video's transcription end-to-
+        // end without false-failing while chunks are still being processed.
+        if (attempt < 225) {
           pollTranscript(attempt + 1);
         } else {
           stopCountdown();
           setPhase("error");
-          setErrorMsg("Still working — refresh the page in a moment.");
+          setErrorMsg("Hali jarayonda — sahifani yangilab ko'ring.");
         }
       }, 4000);
     },
