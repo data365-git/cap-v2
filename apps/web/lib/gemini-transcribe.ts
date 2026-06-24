@@ -1,3 +1,31 @@
+/**
+ * fetch with a hard timeout via AbortController. Without this, a Gemini API
+ * call can hang indefinitely (observed: chunk 3 of a 5-chunk transcription
+ * hung silently for hours, leaving the video stuck in PROCESSING). Any
+ * non-response within the timeout throws, which lets the existing markError
+ * path surface a real failure so the user can retry.
+ */
+async function fetchWithTimeout(
+	url: string,
+	init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+	const { timeoutMs = 30_000, ...rest } = init;
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+	try {
+		return await fetch(url, { ...rest, signal: ctrl.signal });
+	} catch (err) {
+		if ((err as { name?: string })?.name === "AbortError") {
+			throw new Error(
+				`Gemini request timed out after ${Math.round(timeoutMs / 1000)}s: ${url.split("?")[0]}`,
+			);
+		}
+		throw err;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 export interface VttCue {
 	index: number;
 	startSec: number;
@@ -171,8 +199,9 @@ async function pollUntilActive(
 ): Promise<void> {
 	const maxAttempts = 30;
 	for (let i = 0; i < maxAttempts; i++) {
-		const res = await fetch(
+		const res = await fetchWithTimeout(
 			`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`,
+			{ timeoutMs: 15_000 },
 		);
 		if (!res.ok) {
 			throw new Error(`Gemini file poll failed: ${res.status}`);
@@ -239,7 +268,7 @@ export async function transcribeWithGemini(
 	const { bytes: audioBytes, mimeType } = await readAudio(audioUrl, options);
 	const displayName = `cap-audio-${Date.now()}`;
 
-	const initRes = await fetch(
+	const initRes = await fetchWithTimeout(
 		`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
 		{
 			method: "POST",
@@ -251,6 +280,7 @@ export async function transcribeWithGemini(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ file: { display_name: displayName } }),
+			timeoutMs: 30_000,
 		},
 	);
 
@@ -263,7 +293,7 @@ export async function transcribeWithGemini(
 		throw new Error("No upload URL from Gemini Files API");
 	}
 
-	const uploadRes = await fetch(uploadUrl, {
+	const uploadRes = await fetchWithTimeout(uploadUrl, {
 		method: "PUT",
 		headers: {
 			"X-Goog-Upload-Offset": "0",
@@ -271,6 +301,8 @@ export async function transcribeWithGemini(
 			"Content-Length": String(audioBytes.byteLength),
 		},
 		body: audioBytes,
+		// ~5MB per chunk over the wire; 2 min is plenty
+		timeoutMs: 120_000,
 	});
 
 	if (!uploadRes.ok) {
@@ -290,9 +322,12 @@ export async function transcribeWithGemini(
 		await pollUntilActive(fileName, apiKey);
 	}
 
-	const genRes = await fetch(
+	const genRes = await fetchWithTimeout(
 		`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
 		{
+			// The long pole. A 5-min audio chunk to Gemini is normally 30-120s; 5 min
+			// is a generous hard ceiling that prevents an indefinite hang.
+			timeoutMs: 5 * 60_000,
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
