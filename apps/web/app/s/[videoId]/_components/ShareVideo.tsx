@@ -118,16 +118,20 @@ export const ShareVideo = forwardRef<
 		>(null);
 		const [aiChatOpen, setAiChatOpen] = useState(false);
 		const [currentTime, setCurrentTime] = useState(0);
+		// videoSize-v2: bumped from "videoSize" so stale "md" preferences from
+		// the pre-LG-default era are ignored. Everyone now opens at LG (matches
+		// the single-frame + pin-by-default UX); a deliberate SM/MD choice still
+		// persists under the new key.
 		const [videoSize, setVideoSizeState] = useState<"sm" | "md" | "lg">(() => {
-			if (typeof window === "undefined") return "md";
-			const stored = localStorage.getItem("videoSize");
+			if (typeof window === "undefined") return "lg";
+			const stored = localStorage.getItem("videoSize-v2");
 			return stored === "sm" || stored === "md" ? stored : "lg";
 		});
 
 		const setVideoSize = useCallback((size: "sm" | "md" | "lg") => {
 			setVideoSizeState(size);
 			if (typeof window !== "undefined") {
-				localStorage.setItem("videoSize", size);
+				localStorage.setItem("videoSize-v2", size);
 			}
 		}, []);
 
