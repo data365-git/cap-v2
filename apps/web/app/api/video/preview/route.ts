@@ -16,9 +16,29 @@ function getScreenshotKey(ownerId: string, videoId: string) {
 	return `${ownerId}/${videoId}/screenshot/screen-capture.jpg`;
 }
 
+// 1x1 transparent PNG — returned (200) when a video has no thumbnail, so the
+// dashboard <img> loads cleanly (the gray gradient behind it shows) instead of
+// logging a 404 for every thumbnail-less recording.
+const TRANSPARENT_PNG = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+	"base64",
+);
+
+function placeholderResponse() {
+	return new NextResponse(TRANSPARENT_PNG, {
+		status: 200,
+		headers: {
+			"Content-Type": "image/png",
+			"Cache-Control": "public, max-age=60",
+		},
+	});
+}
+
 function getFallbackResponse(request: NextRequest, videoId: string) {
+	// Social crawlers ask for the OG image; everyone else (the dashboard) gets a
+	// 200 transparent placeholder so there's no console 404 noise.
 	if (request.nextUrl.searchParams.get("fallback") !== "og") {
-		return new NextResponse(null, { status: 404 });
+		return placeholderResponse();
 	}
 
 	const fallbackUrl = new URL("/api/video/og", request.url);
@@ -67,7 +87,7 @@ export async function GET(request: NextRequest) {
 		}).pipe(provideOptionalAuth, runPromise);
 	} catch (error) {
 		console.warn("[video/preview] Failed to resolve preview GIF:", error);
-		return new NextResponse(null, { status: 404 });
+		return placeholderResponse();
 	}
 
 	if (!previewUrl) {
