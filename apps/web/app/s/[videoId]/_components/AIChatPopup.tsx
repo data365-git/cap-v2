@@ -306,6 +306,10 @@ export function AIChatPopup({
 	isOpen = false,
 }: AIChatPopupProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
+	// Always-current snapshot of messages so callbacks can read the latest array
+	// synchronously (regenerate updates state + ref together to avoid a stale-
+	// closure race when it immediately re-calls sendMessage).
+	const messagesRef = useRef<Message[]>([]);
 	const [input, setInput] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
 	const [lastUserPrompt, setLastUserPrompt] = useState<string>("");
@@ -384,7 +388,10 @@ export function AIChatPopup({
 				role: "user",
 				content: trimmed,
 			};
-			const nextMessages = [...messages, userMsg];
+			// Read from the ref, not the closure — regenerate may have just popped
+			// the failed assistant entry and we need the freshest array.
+			const nextMessages = [...messagesRef.current, userMsg];
+			messagesRef.current = nextMessages;
 			setMessages(nextMessages);
 			setInput("");
 			if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -415,10 +422,14 @@ export function AIChatPopup({
 					throw new Error(`Request failed: ${response.status}`);
 				}
 
-				setMessages((prev) => [
-					...prev,
-					{ id: assistantId, role: "assistant", content: "" },
-				]);
+				setMessages((prev) => {
+					const next = [
+						...prev,
+						{ id: assistantId, role: "assistant" as const, content: "" },
+					];
+					messagesRef.current = next;
+					return next;
+				});
 
 				const reader = response.body.getReader();
 				const decoder = new TextDecoder();
@@ -449,6 +460,7 @@ export function AIChatPopup({
 											content: assistantContent,
 										};
 									}
+									messagesRef.current = updated;
 									return updated;
 								});
 							}
@@ -472,9 +484,10 @@ export function AIChatPopup({
 							content: last.content || "Something went wrong. Please try again.",
 							error: true,
 						};
+						messagesRef.current = updated;
 						return updated;
 					}
-					return [
+					const next: Message[] = [
 						...prev,
 						{
 							id: nextMsgId(),
@@ -483,6 +496,8 @@ export function AIChatPopup({
 							error: true,
 						},
 					];
+					messagesRef.current = next;
+					return next;
 				});
 			} finally {
 				setIsStreaming(false);
@@ -494,16 +509,18 @@ export function AIChatPopup({
 
 	const regenerate = useCallback(() => {
 		if (!lastUserPrompt || isStreaming) return;
-		// Remove the last assistant error message, then re-send
-		setMessages((prev) => {
-			const updated = [...prev];
-			if (updated[updated.length - 1]?.role === "assistant") {
-				updated.pop();
-			}
-			return updated;
-		});
-		// Use a microtask so state update settles before sendMessage reads messages
-		setTimeout(() => sendMessage(lastUserPrompt), 0);
+		// Pop the last assistant entry and sync the ref synchronously, so the
+		// immediately-following sendMessage reads the trimmed array (not the
+		// stale closure that still contains the popped message).
+		const current = messagesRef.current;
+		const trimmed =
+			current[current.length - 1]?.role === "assistant"
+				? current.slice(0, -1)
+				: current;
+		messagesRef.current = trimmed;
+		setMessages(trimmed);
+		// Safe to call now — sendMessage reads messagesRef.current, not closure.
+		sendMessage(lastUserPrompt);
 	}, [lastUserPrompt, isStreaming, sendMessage]);
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

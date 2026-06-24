@@ -629,6 +629,33 @@ interface AiApiResult {
 	outputTokens: number;
 }
 
+/**
+ * fetch with a hard timeout via AbortController. Without this, a Gemini API
+ * call can hang indefinitely (mirrors the transcription-side fix in
+ * gemini-transcribe.ts). Any non-response within the timeout throws, which
+ * lets the existing markAiError path surface a real failure.
+ */
+async function aiFetchWithTimeout(
+	url: string,
+	init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+	const { timeoutMs = 5 * 60_000, ...rest } = init;
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+	try {
+		return await fetch(url, { ...rest, signal: ctrl.signal });
+	} catch (err) {
+		if ((err as { name?: string })?.name === "AbortError") {
+			throw new Error(
+				`Gemini AI request timed out after ${Math.round(timeoutMs / 1000)}s`,
+			);
+		}
+		throw err;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function callAiApi(prompt: string): Promise<AiApiResult> {
 	const apiKey = serverEnv().GEMINI_API_KEY;
 	if (!apiKey) {
@@ -636,7 +663,7 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 		return { content: "{}", model: "unknown", inputTokens: 0, outputTokens: 0 };
 	}
 
-	const res = await fetch(
+	const res = await aiFetchWithTimeout(
 		`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SUMMARY_MODEL}:generateContent?key=${apiKey}`,
 		{
 			method: "POST",
@@ -648,6 +675,7 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 					maxOutputTokens: 8192,
 				},
 			}),
+			timeoutMs: 5 * 60_000,
 		},
 	);
 

@@ -508,13 +508,13 @@ export function GenerateStrip({
       const res = await fetch(`/api/videos/${videoId}/retry-transcription`, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setErrorMsg(body?.error ?? "Could not start transcription.");
+        setErrorMsg(body?.error ?? "Transkripsiyani boshlab bo'lmadi.");
         setPhase("error");
         return;
       }
       pollTranscript(0);
     } catch {
-      setErrorMsg("Could not start generation.");
+      setErrorMsg("Generatsiyani boshlab bo'lmadi.");
       setPhase("error");
     }
   }, [videoId, pollTranscript, startAiPhase, resetRunState]);
