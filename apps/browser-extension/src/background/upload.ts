@@ -1,8 +1,7 @@
 import { createCapApi } from "./api";
-import type { CompletedPart, ExtensionSettings } from "./state";
+import type { ExtensionSettings } from "./state";
 import { getSettings, getState, setState } from "./state";
 
-const MIN_PART_SIZE = 5 * 1024 * 1024;
 const RETRY_QUEUE_KEY = "capExtRetryQueue";
 const DEAD_LETTER_KEY = "capExtDeadLetterQueue";
 const MAX_ATTEMPTS = 6;
@@ -10,7 +9,7 @@ const MAX_ATTEMPTS = 6;
 const BACKOFF_SECONDS = [1, 4, 16, 64, 256];
 
 interface RetryItem {
-	kind: "part" | "complete" | "recording-complete";
+	kind: "part" | "complete" | "recording-complete" | "signed-put";
 	payload: Record<string, unknown>;
 	attempts: number;
 	nextRetryAt: number;
@@ -194,47 +193,14 @@ async function requireSettings(): Promise<ExtensionSettings> {
 	return settings;
 }
 
-async function uploadPart(
-	partData: Uint8Array,
-	partNumber: number,
-	videoId: string,
-	uploadId: string,
-	settings: ExtensionSettings,
-): Promise<CompletedPart> {
-	const api = createCapApi(settings.apiBaseUrl, settings.apiKey);
-
-	const { presignedUrl } = await api.presignPart({
-		uploadId,
-		partNumber,
-		videoId,
-		subpath: RESULT_SUBPATH,
-	});
-
-	const putRes = await fetch(presignedUrl, {
-		method: "PUT",
-		headers: { "Content-Type": "application/octet-stream" },
-		body: partData,
-	});
-
-	if (!putRes.ok) {
-		const text = await putRes.text().catch(() => "");
-		throw new Error(
-			`[upload] PUT part ${partNumber} failed ${putRes.status}: ${text}`,
-		);
-	}
-
-	const etag = putRes.headers.get("ETag");
-
-	return {
-		ETag: etag ? etag.replace(/"/g, "") : "RESOLVE_SERVER_SIDE",
-		PartNumber: partNumber,
-	};
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
 }
 
 export async function initializeUpload(
 	mode: "instruction" | "meeting",
 	meetingId?: string,
-	contentType = "video/webm",
+	_contentType = "video/webm",
 ): Promise<{ videoId: string; uploadId: string }> {
 	const settings = await requireSettings();
 	const api = createCapApi(settings.apiBaseUrl, settings.apiKey);
@@ -257,19 +223,14 @@ export async function initializeUpload(
 		meetingId,
 	});
 
-	// Use the actual recorder MIME so S3/R2 serves the correct Content-Type.
-	// Strip codec params (e.g. "video/mp4;codecs=h264" → "video/mp4") since
-	// S3 Content-Type must not contain codec parameters.
-	const baseContentType = contentType.split(";")[0].trim() || "video/webm";
-	const { uploadId } = await api.initiateMultipart({
-		contentType: baseContentType,
-		videoId,
-		subpath: RESULT_SUBPATH,
-	});
-
+	// Single-PUT upload: we do NOT create a multipart upload at recording start.
+	// MV3 service workers can be killed between start and stop, which invalidated
+	// the multipart upload (NoSuchUpload on the part PUT → ~half of uploads lost
+	// zero bytes). Instead we buffer the whole recording and do one presigned PUT
+	// at stop (see finalizeUpload). uploadId is unused; kept for state shape.
 	inMemoryBuffer = new Uint8Array(0);
 
-	return { videoId, uploadId };
+	return { videoId, uploadId: "" };
 }
 
 export async function handleChunk(
@@ -280,53 +241,45 @@ export async function handleChunk(
 	const state = await getState();
 	if (state.kind !== "recording") return;
 
+	// Single-PUT model: accumulate the whole recording in memory; the full object
+	// is uploaded once at stop. (No per-chunk part uploads.)
 	const data = new Uint8Array(chunk);
 	appendToBuffer(data);
+	await setState({ ...state, totalBytes: state.totalBytes + data.length });
+}
 
-	const newTotalBytes = state.totalBytes + data.length;
-
-	if (inMemoryBuffer.length >= MIN_PART_SIZE) {
-		const partData = drainBuffer();
-		const settings = await requireSettings();
-
+// Upload the whole recording with one presigned PUT to ${ownerId}/${videoId}/
+// result.mp4 (the exact key the playlist route reads). Retries transiently while
+// the bytes are still in memory. Returns true on success.
+async function putRecording(
+	api: ReturnType<typeof createCapApi>,
+	videoId: string,
+	bytes: Uint8Array,
+	durationInSecs: number | undefined,
+): Promise<boolean> {
+	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
-			const completedPart = await uploadPart(
-				partData,
-				state.nextPartNumber,
-				state.videoId,
-				state.uploadId,
-				settings,
-			);
-
-			const freshState = await getState();
-			if (freshState.kind !== "recording") return;
-
-			await setState({
-				...freshState,
-				parts: [...freshState.parts, completedPart],
-				nextPartNumber: freshState.nextPartNumber + 1,
-				totalBytes: newTotalBytes,
-				uploadedBytes: freshState.uploadedBytes + partData.length,
+			const { url, headers } = await api.signedPut({
+				videoId,
+				subpath: RESULT_SUBPATH,
+				durationInSecs,
 			});
+			// The presigned URL is signed for a specific Content-Type; `headers`
+			// (from the server) carries it and must win over our default.
+			const res = await fetch(url, {
+				method: "PUT",
+				body: bytes,
+				headers: { "Content-Type": "video/webm", ...headers },
+			});
+			if (res.ok) return true;
+			const text = await res.text().catch(() => "");
+			console.error(`[upload] signed PUT failed ${res.status}: ${text}`);
 		} catch (err) {
-			console.error("[upload] Part upload failed:", err);
-			await addToRetryQueue({
-				kind: "part",
-				payload: {
-					partNumber: state.nextPartNumber,
-					videoId: state.videoId,
-					uploadId: state.uploadId,
-				},
-			});
-
-			const freshState = await getState();
-			if (freshState.kind === "recording") {
-				await setState({ ...freshState, totalBytes: newTotalBytes });
-			}
+			console.error("[upload] signed PUT attempt failed:", err);
 		}
-	} else {
-		await setState({ ...state, totalBytes: newTotalBytes });
+		if (attempt < 2) await sleep((BACKOFF_SECONDS[attempt] ?? 4) * 1000);
 	}
+	return false;
 }
 
 export async function finalizeUpload(durationMs = 0): Promise<void> {
@@ -336,66 +289,51 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 	const settings = await requireSettings();
 	const api = createCapApi(settings.apiBaseUrl, settings.apiKey);
 
-	let parts = [...state.parts];
-	let nextPartNumber =
-		state.kind === "recording" ? state.nextPartNumber : state.parts.length + 1;
 	const totalBytes = state.totalBytes;
 	const uploadedBytes =
 		"uploadedBytes" in state ? (state.uploadedBytes as number) : 0;
-	const { videoId, uploadId } = state;
+	const { videoId } = state;
 
 	// Real measured recording length → stored server-side as videos.duration so the
-	// player shows the true duration even if the WebM header is unreliable.
+	// player shows the true duration even if the container header is unreliable.
 	const durationInSecs = durationMs > 0 ? durationMs / 1000 : undefined;
 
 	if (state.kind === "recording") {
 		await setState({
 			kind: "uploading",
 			videoId,
-			uploadId,
-			parts,
+			uploadId: "",
+			parts: [],
 			totalBytes,
 			uploadedBytes,
 		});
 	}
 
+	// Single presigned PUT of the whole recording (multipart was dropped — see
+	// initializeUpload). patchDuration repairs the in-memory duration header first.
 	const remaining = drainBuffer();
 	if (durationMs > 0 && remaining.length >= 8) patchDuration(remaining, durationMs);
-	if (remaining.length > 0) {
-		try {
-			const completedPart = await uploadPart(
-				remaining,
-				nextPartNumber,
-				videoId,
-				uploadId,
-				settings,
-			);
-			parts = [...parts, completedPart];
-			nextPartNumber += 1;
-		} catch (err) {
-			console.error("[upload] Final part upload failed:", err);
-			await addToRetryQueue({
-				kind: "part",
-				payload: {
-					partNumber: nextPartNumber,
-					videoId,
-					uploadId,
-				},
-			});
-		}
-	}
 
-	if (parts.length === 0) {
-		const bufferLen = remaining.length;
-		console.error(
-			`[upload] No parts uploaded — cannot complete multipart. totalBytes=${totalBytes}, remainingBuffer=${bufferLen}`,
-		);
+	if (remaining.length === 0) {
+		console.error(`[upload] No recording data captured. totalBytes=${totalBytes}`);
 		await setState({
 			kind: "error",
 			reason:
-				totalBytes === 0
-					? "No recording data was captured. Check screen-capture permissions and try again."
-					: `Upload failed — ${totalBytes} bytes captured but no parts uploaded. Check network or try again.`,
+				"No recording data was captured. Check screen-capture permissions and try again.",
+			recoverable: true,
+			previousVideoId: videoId,
+		});
+		return;
+	}
+
+	const uploaded = await putRecording(api, videoId, remaining, durationInSecs);
+	if (!uploaded) {
+		// Bytes only live in memory, so a queued retry can't re-upload them — record
+		// it for visibility and surface the failure so the user can re-record.
+		await addToRetryQueue({ kind: "signed-put", payload: { videoId } });
+		await setState({
+			kind: "error",
+			reason: `Upload failed — ${remaining.length} bytes captured but the upload did not complete. Check network and try again.`,
 			recoverable: true,
 			previousVideoId: videoId,
 		});
@@ -405,50 +343,10 @@ export async function finalizeUpload(durationMs = 0): Promise<void> {
 	await setState({ kind: "finishing", videoId });
 
 	try {
-		const apiParts = parts.map((p) => ({
-			partNumber: p.PartNumber,
-			etag: p.ETag,
-			size: 0,
-		}));
-		await api.completeMultipart({
-			uploadId,
-			parts: apiParts,
-			videoId,
-			subpath: RESULT_SUBPATH,
-			durationInSecs,
-		});
-	} catch (err) {
-		console.error("[upload] completeMultipart failed:", err);
-		await addToRetryQueue({
-			kind: "complete",
-			payload: {
-				uploadId,
-				videoId,
-				durationInSecs,
-				parts: parts.map((p) => ({
-					partNumber: p.PartNumber,
-					etag: p.ETag,
-					size: 0,
-				})),
-			},
-		});
-		await setState({
-			kind: "error",
-			reason: `Upload finalization failed: ${err instanceof Error ? err.message : String(err)}`,
-			recoverable: true,
-			previousVideoId: videoId,
-		});
-		return;
-	}
-
-	try {
 		await api.recordingComplete({ videoId });
 	} catch (err) {
 		console.error("[upload] recordingComplete failed:", err);
-		await addToRetryQueue({
-			kind: "recording-complete",
-			payload: { videoId },
-		});
+		await addToRetryQueue({ kind: "recording-complete", payload: { videoId } });
 	}
 
 	const shareUrl = `${settings.apiBaseUrl}/s/${videoId}`;
@@ -474,27 +372,14 @@ export async function retryPendingUploads(): Promise<void> {
 		}
 
 		try {
-			if (item.kind === "part") {
-				await moveToDeadLetter(item);
-			} else if (item.kind === "complete") {
-				const { uploadId, videoId, parts, subpath, durationInSecs } =
-					item.payload as {
-						uploadId: string;
-						videoId: string;
-						subpath?: string;
-						durationInSecs?: number;
-						parts: Array<{ partNumber: number; etag: string; size: number }>;
-					};
-				await api.completeMultipart({
-					uploadId,
-					parts,
-					videoId,
-					subpath: subpath ?? "result.mp4",
-					durationInSecs,
-				});
-			} else if (item.kind === "recording-complete") {
+			if (item.kind === "recording-complete") {
 				const { videoId } = item.payload as { videoId: string };
 				await api.recordingComplete({ videoId });
+			} else {
+				// "signed-put" (and legacy "part"/"complete"): the recording bytes are
+				// no longer in memory, so the object upload can't be retried here.
+				// Surface it as a failed upload rather than silently looping.
+				await moveToDeadLetter(item);
 			}
 		} catch (err) {
 			console.error(`[upload] Retry failed for ${item.kind}:`, err);

@@ -49,6 +49,11 @@ export interface CapApi {
 		subpath?: string;
 		durationInSecs?: number;
 	}): Promise<CompleteMultipartResponse>;
+	signedPut(params: {
+		videoId: string;
+		subpath: string;
+		durationInSecs?: number;
+	}): Promise<{ url: string; headers: Record<string, string> }>;
 	recordingComplete(params: { videoId: string }): Promise<void>;
 }
 
@@ -123,6 +128,31 @@ export function createCapApi(baseUrl: string, apiKey: string): CapApi {
 				res,
 				"completeMultipart",
 			);
+		},
+
+		async signedPut({ videoId, subpath, durationInSecs }) {
+			const body: Record<string, unknown> = {
+				method: "put",
+				videoId,
+				subpath,
+			};
+			if (typeof durationInSecs === "number") body.durationInSecs = durationInSecs;
+
+			const res = await fetch(`${baseUrl}/api/upload/signed`, {
+				method: "POST",
+				headers: { ...authHeader, "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+			const data = await handleResponse<{
+				presignedPutData?: { url: string; headers?: Record<string, string> };
+			}>(res, "signedPut");
+			if (!data.presignedPutData?.url) {
+				throw new Error("[api] signedPut: no presignedPutData.url returned");
+			}
+			return {
+				url: data.presignedPutData.url,
+				headers: data.presignedPutData.headers ?? {},
+			};
 		},
 
 		async recordingComplete({ videoId }) {
