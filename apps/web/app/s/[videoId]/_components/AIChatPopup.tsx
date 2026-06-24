@@ -413,6 +413,7 @@ export function AIChatPopup({
 
 			let assistantContent = "";
 			const assistantId = nextMsgId();
+			let responseStatus = 0;
 
 			try {
 				const response = await fetch("/api/video/ai/chat", {
@@ -428,6 +429,7 @@ export function AIChatPopup({
 					signal: controller.signal,
 				});
 
+				responseStatus = response.status;
 				if (!response.ok || !response.body) {
 					throw new Error(`Request failed: ${response.status}`);
 				}
@@ -484,6 +486,17 @@ export function AIChatPopup({
 					// Handled by stopStreaming — leave partial message in place
 					return;
 				}
+				// Pick a specific Uzbek error message based on error type / HTTP status
+				let errorContent: string;
+				if (err instanceof TypeError) {
+					errorContent = "Aloqa uzildi — qayta urinib ko'ring.";
+				} else if (responseStatus === 429) {
+					errorContent = "Lavozimga yetdik. Bir oz kuting va qayta urining.";
+				} else if (responseStatus >= 500 && responseStatus < 600) {
+					errorContent = "Server xatosi. Qayta urinib ko'ring.";
+				} else {
+					errorContent = "Xato yuz berdi. Qayta urinib ko'ring.";
+				}
 				// Real error: mark the assistant message (or add one) with error flag
 				setMessages((prev) => {
 					const updated = [...prev];
@@ -491,7 +504,7 @@ export function AIChatPopup({
 					if (last?.role === "assistant" && last.id === assistantId) {
 						updated[updated.length - 1] = {
 							...last,
-							content: last.content || "Something went wrong. Please try again.",
+							content: last.content || errorContent,
 							error: true,
 						};
 						messagesRef.current = updated;
@@ -502,7 +515,7 @@ export function AIChatPopup({
 						{
 							id: nextMsgId(),
 							role: "assistant",
-							content: "Something went wrong. Please try again.",
+							content: errorContent,
 							error: true,
 						},
 					];

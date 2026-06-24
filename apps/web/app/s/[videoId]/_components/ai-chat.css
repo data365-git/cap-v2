@@ -931,6 +931,16 @@
 	text-align: left;
 }
 
+/* Resize handle discoverability — diagonal stripe on popup hover */
+.ai-resize {
+	background-image: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.18) 40%, rgba(255,255,255,0.18) 50%, transparent 50%);
+	opacity: 0;
+	transition: opacity 180ms ease;
+}
+.ai-popup:hover .ai-resize {
+	opacity: 0.6;
+}
+
 /* Mobile near-fullscreen (appended — do not modify existing rules above) */
 @media (max-width: 480px) {
   .ai-popup {

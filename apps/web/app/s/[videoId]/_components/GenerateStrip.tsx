@@ -144,10 +144,10 @@ export function GenerateStrip({
   // Phase chips from pipelineProgress
   const [pipelinePhases, setPipelinePhases] = useState<PipelinePhase[]>([]);
   const [currentPhaseKey, setCurrentPhaseKey] = useState<string>("");
-  const [activeLabel, setActiveLabel] = useState("AI insights tayyorlash");
+  const [activeLabel, setActiveLabel] = useState("Xulosa, vazifalar va tahrirlangan transkript yarating");
 
   // Subtitle text keyed to the active pipeline phase
-  const [phaseSubtitle, setPhaseSubtitle] = useState("AI insights tayyorlash");
+  const [phaseSubtitle, setPhaseSubtitle] = useState("Xulosa, vazifalar va tahrirlangan transkript yarating");
 
   // Overall progress bar
   const [progressPct, setProgressPct] = useState(0);
@@ -355,8 +355,8 @@ export function GenerateStrip({
     setEtaDisplay("Hisoblanmoqda…");
     setPipelinePhases([]);
     setCurrentPhaseKey("");
-    setActiveLabel("AI insights tayyorlash");
-    setPhaseSubtitle("AI insights tayyorlash");
+    setActiveLabel("Xulosa, vazifalar va tahrirlangan transkript yarating");
+    setPhaseSubtitle("Xulosa, vazifalar va tahrirlangan transkript yarating");
     stopCountdown();
   }, [stopCountdown]);
 

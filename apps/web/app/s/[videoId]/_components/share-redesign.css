@@ -94,14 +94,15 @@
 
 .share-rd .bv-panel {
 	padding: 24px 24px 28px;
-	/* Never fade opacity 0 → stays visible for print/PDF. */
-	animation: shareRdPanelIn var(--dur) var(--ease);
+	animation: shareRdPanelIn 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 @keyframes shareRdPanelIn {
 	from {
-		transform: translateY(8px);
+		opacity: 0;
+		transform: translateY(4px);
 	}
 	to {
+		opacity: 1;
 		transform: none;
 	}
 }

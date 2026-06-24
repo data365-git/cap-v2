@@ -85,7 +85,8 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 									{op.failedCount > 0 && (
 										<span
 											className="cost-outcome-badge"
-											title={`${op.successCount} muvaffaqiyatli, ${op.failedCount} muvaffaqiyatsiz`}
+											title={`${op.successCount} muvaffaqiyatli, ${op.failedCount} muvaffaqiyatsiz urinish`}
+											aria-label={`${op.successCount} muvaffaqiyatli, ${op.failedCount} muvaffaqiyatsiz urinish`}
 										>
 											{" "}
 											<span style={{ color: "#16a34a" }}>✓{op.successCount}</span>{" "}
