@@ -86,6 +86,9 @@ const AdminNavItems = ({ toggleMobileNav }: Props) => {
 		buildEnv.NEXT_PUBLIC_IS_CAP &&
 		DEVELOPER_DASHBOARD_ALLOWED_EMAILS.includes(user.email);
 
+	const isInMeetingsSection = pathname === '/dashboard/meetings' || pathname.startsWith('/dashboard/meetings/');
+	const importHref = isInMeetingsSection ? `/dashboard/import?context=meeting` : `/dashboard/import?context=instruction`;
+
 	const manageNavigation = [
 		{
 			name: "Instructional recordings",
@@ -117,7 +120,7 @@ const AdminNavItems = ({ toggleMobileNav }: Props) => {
 		},
 		{
 			name: "Import Video",
-			href: `/dashboard/import`,
+			href: importHref,
 			matchChildren: true,
 			icon: <ImportIcon />,
 			subNav: [],

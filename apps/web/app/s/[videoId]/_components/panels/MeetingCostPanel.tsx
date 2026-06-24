@@ -13,7 +13,9 @@ interface MeetingCostPanelProps {
 const RATE = 12950;
 
 function formatUsd(cents: number): string {
-	return `$${(cents / 100).toFixed(4)}`;
+	const dollars = cents / 100;
+	if (dollars > 0 && dollars < 0.01) return "<$0.01";
+	return `$${dollars.toFixed(2)}`;
 }
 function formatUzs(cents: number): string {
 	const uzs = Math.round((cents / 100) * RATE);

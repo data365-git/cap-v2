@@ -79,6 +79,13 @@ function deriveInitialPhase(
   ) {
     return "error";
   }
+  const IN_PROGRESS = new Set(["PROCESSING", "QUEUED"]);
+  if (
+    (transcriptionStatus && IN_PROGRESS.has(transcriptionStatus)) ||
+    (aiGenerationStatus && IN_PROGRESS.has(aiGenerationStatus))
+  ) {
+    return "running";
+  }
   return "idle";
 }
 
@@ -125,6 +132,13 @@ export function GenerateStrip({
 }: GenerateStripProps) {
   const router = useRouter();
   const refreshedRef = useRef(false);
+  const didResumeRef = useRef(false);
+  // When the strip is resuming an in-flight generation (page refresh /
+  // navigation), transcript completion during polling must NOT POST /retry-ai
+  // — that would fire a second paid Gemini generation on top of the one
+  // already running server-side. This flag tells pollTranscript's COMPLETE
+  // branch to call pollAi(0) directly instead of startAiPhase().
+  const resumeAiWithoutKickoffRef = useRef(false);
 
   const [phase, setPhase] = useState<StripPhase>(() =>
     deriveInitialPhase(
@@ -456,6 +470,15 @@ export function GenerateStrip({
             if (pp) applyPipelineProgress(pp);
 
             if (ts === TRANSCRIPT_COMPLETE) {
+              // Resume path: a generation was already in flight when the page
+              // loaded. Don't POST /retry-ai (would duplicate the paid call) —
+              // just attach to AI polling. Disarm the flag so the next user-
+              // initiated run takes the normal startAiPhase POST path again.
+              if (resumeAiWithoutKickoffRef.current) {
+                resumeAiWithoutKickoffRef.current = false;
+                pollAi(0);
+                return;
+              }
               await startAiPhase();
               return;
             }
@@ -491,6 +514,26 @@ export function GenerateStrip({
     },
     [videoId, applyPipelineProgress, stopCountdown, startAiPhase],
   );
+
+  // Mount-resume: if a generation was already in flight on the server when this
+  // page loaded, attach to it via polling only. We must NOT POST to retry-* here,
+  // because that would fire a duplicate paid Gemini generation.
+  // pipelineProgress is persisted server-side and rehydrates on the next poll tick.
+  useEffect(() => {
+    if (didResumeRef.current) return;
+    if (phase !== "running") return;
+    didResumeRef.current = true;
+    startCountdown();
+    if (initialTranscriptionStatus !== TRANSCRIPT_COMPLETE) {
+      // Arm the no-POST handoff: when transcribe finishes mid-poll, we must
+      // pick up AI status by polling — NOT POST /retry-ai (a generation is
+      // already in flight server-side).
+      resumeAiWithoutKickoffRef.current = true;
+      pollTranscript(0);
+    } else {
+      pollAi(0);
+    }
+  }, [phase, initialTranscriptionStatus, pollTranscript, pollAi, startCountdown]);
 
   // Kick off the pipeline
   const kickOffPipeline = useCallback(async (skipTranscript: boolean) => {

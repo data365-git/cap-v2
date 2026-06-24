@@ -1218,3 +1218,50 @@
 .refined-section-active {
   scroll-margin-top: calc(var(--pinned-player-height, 0px) + 16px);
 }
+
+/* FIX 1 — smooth highlight transition + one-shot pulse on active state */
+.transcript-entry,
+.refined-section-wrap {
+  transition: background 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+
+.transcript-active,
+.refined-section-active {
+  animation: cap-active-pulse 420ms ease-out 1;
+}
+
+@keyframes cap-active-pulse {
+  0% {
+    background: rgba(37, 99, 235, 0);
+    transform: scale(0.995);
+  }
+  50% {
+    background: rgba(37, 99, 235, 0.12);
+    transform: scale(1);
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18);
+  }
+  100% {
+    background: rgba(37, 99, 235, 0.05);
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-active,
+  .refined-section-active {
+    animation: none;
+  }
+}
+
+/* FIX 2 — sliding active-tab pill */
+.bv-tab-bar { position: relative; }
+.bv-tab-indicator {
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent, #2563eb);
+  border-radius: 1px;
+  transition: left 200ms cubic-bezier(.22,.61,.36,1), width 200ms cubic-bezier(.22,.61,.36,1);
+  pointer-events: none;
+}
