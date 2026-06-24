@@ -46,8 +46,7 @@
 	);
 	box-shadow:
 		0 10px 30px rgba(var(--accent-glow), 0.42),
-		0 2px 8px rgba(15, 23, 42, 0.25),
-		inset 0 1px 1px rgba(255, 255, 255, 0.35);
+		0 2px 8px rgba(15, 23, 42, 0.25);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -71,14 +70,6 @@
 	position: relative;
 	z-index: 2;
 	color: #fff;
-}
-/* Optical centering: the FAB has an inset white highlight at the top
-   (box-shadow inset 0 1px ...) which makes the visible disc appear shifted
-   down, so a geometrically-centered icon reads as too high. Nudge the closed-
-   state sparkle down 1.5px so its optical center matches the disc's. Open
-   state (chevron) stays at true geometric center. */
-.ai-fab:not(.is-open) .orb {
-	transform: translateY(1.5px);
 }
 .ai-fab::before,
 .ai-fab::after {
