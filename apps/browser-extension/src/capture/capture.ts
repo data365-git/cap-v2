@@ -60,12 +60,16 @@ function formatElapsed(ms: number): string {
 }
 
 function pickMime(): string {
+	// Prefer WebM. Chrome's MediaRecorder MP4 output muxes Opus audio into an MP4
+	// container (and uses fragmented-MP4 with a 0 timescale), which the HTML5
+	// <video> element CANNOT play ("Could not load a playable video source").
+	// WebM (VP9/VP8 + Opus) plays natively in the browser, so we record WebM and
+	// only fall back to MP4 if WebM is somehow unsupported.
 	const prefs = [
-		"video/mp4;codecs=h264",
-		"video/mp4",
 		"video/webm;codecs=vp9,opus",
 		"video/webm;codecs=vp8,opus",
 		"video/webm",
+		"video/mp4",
 	];
 	for (const m of prefs) if (MediaRecorder.isTypeSupported(m)) return m;
 	return "video/webm";
