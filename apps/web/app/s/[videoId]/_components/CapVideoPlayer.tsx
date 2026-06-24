@@ -8,7 +8,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangleIcon, InfoIcon } from "lucide-react";
+import { AlertTriangleIcon, InfoIcon, Pin, PinOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { retryVideoProcessing } from "@/actions/video/retry-processing";
@@ -118,6 +118,8 @@ interface Props {
 	videoSize?: "sm" | "md" | "lg";
 	onVideoSizeChange?: (size: "sm" | "md" | "lg") => void;
 	onAspectRatioChange?: (ratio: number) => void;
+	isPinned?: boolean;
+	onTogglePin?: () => void;
 }
 
 export function CapVideoPlayer({
@@ -155,6 +157,8 @@ export function CapVideoPlayer({
 	videoSize,
 	onVideoSizeChange,
 	onAspectRatioChange,
+	isPinned,
+	onTogglePin,
 }: Props) {
 	const [currentCue, setCurrentCue] = useState<string>("");
 	const [controlsVisible, setControlsVisible] = useState(false);
@@ -1032,6 +1036,29 @@ export function CapVideoPlayer({
 						<MediaPlayerTime fallbackDuration={playerDuration} />
 					</div>
 					<div className="flex gap-2 items-center">
+						{onTogglePin !== undefined && (
+							<button
+								type="button"
+								onClick={onTogglePin}
+								aria-label={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
+								title={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
+								className="inline-flex items-center justify-center rounded-full transition-colors"
+								style={{
+									width: 28,
+									height: 28,
+									background: isPinned ? "rgba(255,255,255,0.18)" : "none",
+									color: isPinned ? "#fff" : "rgba(255,255,255,.65)",
+									border: "none",
+									cursor: "pointer",
+								}}
+							>
+								{isPinned ? (
+									<Pin className="size-3.5" fill="currentColor" />
+								) : (
+									<PinOff className="size-3.5" />
+								)}
+							</button>
+						)}
 						{onVideoSizeChange && videoSize && (
 							<div
 								role="tablist"

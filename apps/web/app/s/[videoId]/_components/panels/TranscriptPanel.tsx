@@ -6,6 +6,8 @@ import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
 import { Skeleton, SkeletonGroup } from "../Skeleton";
 
+const MANUAL_SCROLL_GRACE_MS = 3000;
+
 interface TranscriptPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
@@ -144,19 +146,42 @@ export function TranscriptPanel({
 }: TranscriptPanelProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const activeRef = useRef<HTMLDivElement>(null);
+	const lastUserScrollAt = useRef<number>(0);
+	const programmaticScroll = useRef<boolean>(false);
 
 	const cues = transcriptContent ? parseVTTCues(transcriptContent) : [];
 
 	const activeCueId = cues.find((c) => isActive(c, currentTime))?.id ?? null;
 
+	// Attach scroll listener on the container to track manual scrolls.
+	// Ignores programmatic scrollIntoView calls via the programmaticScroll flag.
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		const onScroll = () => {
+			if (programmaticScroll.current) return;
+			lastUserScrollAt.current = Date.now();
+		};
+		container.addEventListener("scroll", onScroll, { passive: true });
+		return () => container.removeEventListener("scroll", onScroll);
+	}, []);
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: activeCueId drives which DOM node activeRef points to; re-running when it changes is intentional
 	useEffect(() => {
-		if (activeRef.current) {
-			activeRef.current.scrollIntoView({
-				behavior: "smooth",
-				block: "nearest",
-			});
-		}
+		if (!activeRef.current) return;
+		if (Date.now() - lastUserScrollAt.current < MANUAL_SCROLL_GRACE_MS) return;
+
+		programmaticScroll.current = true;
+		activeRef.current.scrollIntoView({
+			behavior: "smooth",
+			block: "center",
+		});
+		// Clear the flag after the scroll event fires (microtask + small timer)
+		Promise.resolve().then(() => {
+			setTimeout(() => {
+				programmaticScroll.current = false;
+			}, 50);
+		});
 	}, [activeCueId]);
 
 	if (!transcriptContent || cues.length === 0) {
@@ -218,7 +243,7 @@ export function TranscriptPanel({
 					<div
 						key={cue.id}
 						ref={active ? activeRef : undefined}
-						className={`transcript-entry${s2 ? " s2" : ""}${active ? " active" : ""}`}
+						className={`transcript-entry${s2 ? " s2" : ""}${active ? " active transcript-active" : ""}`}
 					>
 						<div className="transcript-avatar" title={cue.speaker}>
 							{speakerInitials(cue.speaker)}

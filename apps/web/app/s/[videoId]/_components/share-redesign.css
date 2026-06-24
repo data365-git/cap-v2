@@ -1208,3 +1208,12 @@
 	100% { background-position: -200% 0; }
 }
 .cap-skel-group { display: flex; flex-direction: column; gap: 12px; }
+
+/* T1 — active transcript / refined entry centers under the pinned video */
+:root {
+  --pinned-player-height: 0px;
+}
+.transcript-active,
+.refined-section-active {
+  scroll-margin-top: calc(var(--pinned-player-height, 0px) + 16px);
+}

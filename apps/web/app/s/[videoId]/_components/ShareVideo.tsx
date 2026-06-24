@@ -130,6 +130,41 @@ export const ShareVideo = forwardRef<
 				localStorage.setItem("videoSize", size);
 			}
 		}, []);
+
+		const [isPinned, setIsPinnedState] = useState<boolean>(() => {
+			if (typeof window === "undefined") return true;
+			const stored = localStorage.getItem("videoPinned");
+			return stored === null ? true : stored === "true";
+		});
+
+		const setIsPinned = useCallback((pinned: boolean) => {
+			setIsPinnedState(pinned);
+			if (typeof window !== "undefined") {
+				localStorage.setItem("videoPinned", String(pinned));
+			}
+		}, []);
+
+		const wrapperRef = useRef<HTMLDivElement>(null);
+
+		// Write --pinned-player-height CSS var via ResizeObserver when pinned
+		useEffect(() => {
+			if (!isPinned) {
+				document.documentElement.style.setProperty("--pinned-player-height", "0px");
+				return;
+			}
+			const el = wrapperRef.current;
+			if (!el) return;
+			const ro = new ResizeObserver(([entry]) => {
+				if (!entry) return;
+				const h = Math.round(entry.contentRect.height);
+				document.documentElement.style.setProperty("--pinned-player-height", `${h}px`);
+			});
+			ro.observe(el);
+			return () => {
+				ro.disconnect();
+				document.documentElement.style.setProperty("--pinned-player-height", "0px");
+			};
+		}, [isPinned]);
 		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
 		const autoFinalizeAttemptedRef = useRef(false);
 		const segmentUploadProgress = useUploadProgress(
@@ -375,6 +410,19 @@ export const ShareVideo = forwardRef<
 		return (
 			<>
 				<div
+					ref={wrapperRef}
+					style={
+						isPinned
+							? {
+									position: "sticky",
+									top: 12,
+									zIndex: 20,
+									maxHeight: "48vh",
+								}
+							: { position: "static" }
+					}
+				>
+				<div
 					className="mx-auto relative"
 					style={{
 						viewTransitionName: "cap-edit-video",
@@ -383,6 +431,7 @@ export const ShareVideo = forwardRef<
 						background: "#000",
 						borderRadius: 12,
 						overflow: "hidden",
+						...(isPinned ? { maxHeight: "48vh" } : {}),
 						...(videoAspectRatio != null
 							? { aspectRatio: String(videoAspectRatio) }
 							: {}),
@@ -482,6 +531,8 @@ export const ShareVideo = forwardRef<
 							videoSize={videoSize}
 							onVideoSizeChange={setVideoSize}
 							onAspectRatioChange={setVideoAspectRatio}
+							isPinned={isPinned}
+							onTogglePin={() => setIsPinned(!isPinned)}
 						/>
 					)}
 					{showFinalizeRecordingControl && (
@@ -526,6 +577,7 @@ export const ShareVideo = forwardRef<
 						</div>
 					)}
 				</div>
+				</div>{/* end sticky wrapper */}
 
 				{!data.owner.isPro && (
 					<div className="absolute top-4 left-4 z-30">
@@ -623,6 +675,7 @@ export const ShareVideo = forwardRef<
 								videoId={data.id}
 								transcriptionStatus={data.transcriptionStatus}
 								aiGenerationStatus={aiGenerationStatus}
+								currentTime={currentTime}
 								refinedTranscript={
 									data.metadata?.aiSummary?.refinedTranscript ?? undefined
 								}
