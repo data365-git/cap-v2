@@ -210,8 +210,16 @@ export const ShareVideo = forwardRef<
 			const video = videoRef.current;
 			if (!video) return;
 			const onTimeUpdate = () => setCurrentTime(video.currentTime);
+			const onSeeking = () => setCurrentTime(video.currentTime);
+			const onSeeked = () => setCurrentTime(video.currentTime);
 			video.addEventListener("timeupdate", onTimeUpdate);
-			return () => video.removeEventListener("timeupdate", onTimeUpdate);
+			video.addEventListener("seeking", onSeeking);
+			video.addEventListener("seeked", onSeeked);
+			return () => {
+				video.removeEventListener("timeupdate", onTimeUpdate);
+				video.removeEventListener("seeking", onSeeking);
+				video.removeEventListener("seeked", onSeeked);
+			};
 		}, []);
 
 		useEffect(() => {
@@ -616,7 +624,7 @@ export const ShareVideo = forwardRef<
 					<GenerateStrip
 						videoId={data.id}
 						transcriptionStatus={data.transcriptionStatus ?? undefined}
-						aiGenerationStatus={undefined}
+						aiGenerationStatus={aiGenerationStatus ?? undefined}
 						hasAiContent={
 							!!(
 								data.metadata?.aiSummary?.overview ||

@@ -335,6 +335,15 @@ export function AIChatPopup({
 		}
 	}, [isOpen, isStreaming]);
 
+	// Focus textarea when popup opens
+	useEffect(() => {
+		if (isOpen) {
+			// Small delay so the CSS transition has started and the element is interactive
+			const t = setTimeout(() => textareaRef.current?.focus(), 50);
+			return () => clearTimeout(t);
+		}
+	}, [isOpen]);
+
 	useEffect(() => {
 		const handleKey = (e: KeyboardEvent) => {
 			if (e.key === "Escape") onClose();
@@ -572,6 +581,9 @@ export function AIChatPopup({
 			role="dialog"
 			aria-label="AI assistant"
 			aria-hidden={!isOpen}
+			aria-modal={isOpen || undefined}
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: inert removes focus from closed popup
+			{...(!isOpen ? { inert: "" } : {})}
 		>
 			<div ref={glassHostRef} className="ai-glass-host" />
 			<LiquidGlassContainer ref={glassRef} hostRef={glassHostRef} />
@@ -611,7 +623,7 @@ export function AIChatPopup({
 				</button>
 			</div>
 
-			<div ref={bodyRef} className="ai-body">
+			<div ref={bodyRef} className="ai-body" aria-live="polite" aria-atomic="false" aria-relevant="additions">
 				{!hasMessages && (
 					<>
 						<div className="ai-welcome">
@@ -653,10 +665,18 @@ export function AIChatPopup({
 						<div className="bubble-wrap">
 							<div className="bubble">
 								{msg.role === "assistant" ? (
-									<MarkdownContent
-										text={msg.content}
-										onVideoJump={onVideoJump}
-									/>
+									msg.content === "" && isStreaming && msg.id === messages[messages.length - 1]?.id ? (
+										<div className="ai-typing">
+											<span />
+											<span />
+											<span />
+										</div>
+									) : (
+										<MarkdownContent
+											text={msg.content}
+											onVideoJump={onVideoJump}
+										/>
+									)
 								) : (
 									msg.content
 								)}
