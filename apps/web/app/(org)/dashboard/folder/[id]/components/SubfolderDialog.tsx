@@ -26,6 +26,7 @@ interface Props {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	parentFolderId: Folder.FolderId;
+	context?: "meeting" | "instruction";
 }
 
 const FolderOptions = [
@@ -39,6 +40,7 @@ export const SubfolderDialog: React.FC<Props> = ({
 	open,
 	onOpenChange,
 	parentFolderId,
+	context = "instruction",
 }) => {
 	const [selectedColor, setSelectedColor] = useState<
 		(typeof FolderOptions)[number]["value"] | null
@@ -71,6 +73,7 @@ export const SubfolderDialog: React.FC<Props> = ({
 				public: data.public,
 				spaceId: Option.fromNullable(activeSpace?.id),
 				parentId: Option.some(parentFolderId),
+				context,
 			}),
 		onSuccess: () => {
 			setFolderName("");

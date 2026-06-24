@@ -21,7 +21,13 @@ import { PreUploadTrimmer } from "@/components/PreUploadTrimmer";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import { uploadWithTarget } from "@/utils/upload-target";
 
-export const ImportFilePage = ({ folderId }: { folderId?: string }) => {
+export const ImportFilePage = ({
+	folderId,
+	context = "instruction",
+}: {
+	folderId?: string;
+	context?: "meeting" | "instruction";
+}) => {
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -47,13 +53,14 @@ export const ImportFilePage = ({ folderId }: { folderId?: string }) => {
 				folderId ? Folder.FolderId.make(folderId) : undefined,
 				activeOrganization.organization.id,
 				setUploadStatus,
+				context,
 			);
 			if (ok)
 				router.push(
 					folderId ? `/dashboard/folder/${folderId}` : "/dashboard/caps",
 				);
 		},
-		[user, activeOrganization, setUploadStatus, router, folderId],
+		[user, activeOrganization, setUploadStatus, router, folderId, context],
 	);
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -225,6 +232,7 @@ async function uploadVideoForServerProcessing(
 	folderId: Folder.FolderId | undefined,
 	orgId: Organisation.OrganisationId,
 	setUploadStatus: (state: UploadStatus | undefined) => void,
+	context: "meeting" | "instruction" = "instruction",
 ) {
 	try {
 		setUploadStatus({ status: "parsing" });
@@ -261,6 +269,7 @@ async function uploadVideoForServerProcessing(
 			resolution,
 			folderId,
 			orgId,
+			context,
 		});
 
 		const uploadId = videoData.id;

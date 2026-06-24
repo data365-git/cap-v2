@@ -83,6 +83,7 @@ export const ShareVideo = forwardRef<
 			areCommentStampsDisabled,
 			areReactionStampsDisabled,
 			isOwner = false,
+			aiGenerationStatus,
 			canRetryProcessing,
 			canFinalizeDesktopSegments = false,
 			showPlaybackStatusBadge = false,
@@ -569,6 +570,7 @@ export const ShareVideo = forwardRef<
 							<SummaryPanel
 								videoId={data.id}
 								transcriptionStatus={data.transcriptionStatus}
+								aiGenerationStatus={aiGenerationStatus}
 								data={{
 									duration: data.duration ?? undefined,
 									aiSummary: data.metadata?.aiSummary ?? undefined,
@@ -582,6 +584,7 @@ export const ShareVideo = forwardRef<
 							<TasksPanel
 								videoId={data.id}
 								transcriptionStatus={data.transcriptionStatus}
+								aiGenerationStatus={aiGenerationStatus}
 								tasks={data.metadata?.aiSummary?.tasks ?? []}
 								isOwner={isOwner}
 							/>
@@ -600,6 +603,7 @@ export const ShareVideo = forwardRef<
 							<RefinedTranscriptPanel
 								videoId={data.id}
 								transcriptionStatus={data.transcriptionStatus}
+								aiGenerationStatus={aiGenerationStatus}
 								refinedTranscript={
 									data.metadata?.aiSummary?.refinedTranscript ?? undefined
 								}

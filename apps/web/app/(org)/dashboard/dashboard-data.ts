@@ -133,6 +133,7 @@ export async function getDashboardData(user: typeof userSelectProps) {
 		let spacesData: Spaces[] = [];
 		let organizationSettings: OrganizationSettings | null = null;
 		let userCapsCount = 0;
+		let userMeetingsCount = 0;
 		let currentOrganizationRole: OrganizationRole | null = null;
 
 		let activeOrganizationId = organizationIds.find(
@@ -285,11 +286,26 @@ export async function getDashboardData(user: typeof userSelectProps) {
 						and(
 							eq(videos.orgId, activeOrgInfo.id),
 							eq(videos.ownerId, user.id),
-							sql`NOT (JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.type')) = 'extensionWeb' AND JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.context')) = 'meeting')`,
+							eq(videos.context, "instruction"),
 						),
 					);
 
 				userCapsCount = userCapsCountResult[0]?.value || 0;
+
+				const userMeetingsCountResult = await db()
+					.select({
+						value: sql<number>`COUNT(DISTINCT ${videos.id})`,
+					})
+					.from(videos)
+					.where(
+						and(
+							eq(videos.orgId, activeOrgInfo.id),
+							eq(videos.ownerId, user.id),
+							eq(videos.context, "meeting"),
+						),
+					);
+
+				userMeetingsCount = userMeetingsCountResult[0]?.value || 0;
 
 				const allSpacesEntry = await Effect.gen(function* () {
 					const imageUploads = yield* ImageUploads;
@@ -477,6 +493,7 @@ export async function getDashboardData(user: typeof userSelectProps) {
 			anyNewNotifications,
 			userPreferences,
 			userCapsCount,
+			userMeetingsCount,
 		};
 	} catch (error) {
 		console.error("Failed to fetch dashboard data", error);
@@ -484,6 +501,7 @@ export async function getDashboardData(user: typeof userSelectProps) {
 			organizationSelect: [],
 			spacesData: [],
 			userCapsCount: null,
+			userMeetingsCount: null,
 			anyNewNotifications: false,
 			userPreferences: null,
 			organizationSettings: null,

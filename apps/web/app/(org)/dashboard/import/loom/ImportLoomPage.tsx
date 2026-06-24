@@ -226,7 +226,11 @@ const LoomMark = ({ size = 18 }: { size?: number }) => (
 	</svg>
 );
 
-export const ImportLoomPage = () => {
+export const ImportLoomPage = ({
+	context = "instruction",
+}: {
+	context?: "meeting" | "instruction";
+}) => {
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
 
@@ -335,6 +339,7 @@ export const ImportLoomPage = () => {
 			const importResult = await importFromLoom({
 				loomUrl: loomUrl.trim(),
 				orgId: activeOrganization.organization.id,
+				context,
 			});
 
 			if (!importResult.success) {

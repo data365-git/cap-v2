@@ -13,8 +13,10 @@ import { registerDropTarget } from "./ClientCapCard";
 
 export function ClientMyCapsLink({
 	spaceId,
+	context = "instruction",
 }: {
 	spaceId?: Space.SpaceIdOrOrganisationId;
+	context?: "meeting" | "instruction";
 }) {
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [isMovingVideo, setIsMovingVideo] = useState(false);
@@ -110,10 +112,22 @@ export function ClientMyCapsLink({
 		};
 	}, [handleDrop]);
 
+	const rootHref = spaceId
+		? `/dashboard/spaces/${spaceId}`
+		: context === "meeting"
+			? "/dashboard/meetings"
+			: "/dashboard/caps";
+
+	const rootLabel = activeSpace
+		? activeSpace.name
+		: context === "meeting"
+			? "Meeting Recordings"
+			: "Instructional recordings";
+
 	return (
 		<Link
 			ref={linkRef}
-			href={spaceId ? `/dashboard/spaces/${spaceId}` : "/dashboard/caps"}
+			href={rootHref}
 			className={clsx(
 				"text-xl whitespace-nowrap flex items-center gap-1.5 transition-colors duration-200 hover:text-gray-12",
 				isDragOver ? "text-blue-10" : "text-gray-9",
@@ -132,7 +146,7 @@ export function ClientMyCapsLink({
 					className="relative flex-shrink-0 size-5"
 				/>
 			)}
-			{activeSpace ? activeSpace.name : "Instructional recordings"}
+			{rootLabel}
 		</Link>
 	);
 }

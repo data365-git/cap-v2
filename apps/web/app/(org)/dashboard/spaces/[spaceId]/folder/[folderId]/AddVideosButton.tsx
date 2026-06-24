@@ -16,10 +16,12 @@ export default function AddVideosButton({
 	folderId,
 	folderName,
 	spaceId,
+	context,
 }: {
 	folderId: Folder.FolderId;
 	folderName: string;
 	spaceId: Space.SpaceIdOrOrganisationId;
+	context?: "meeting" | "instruction";
 }) {
 	const [open, setOpen] = useState(false);
 	const router = useRouter();
@@ -44,7 +46,7 @@ export default function AddVideosButton({
 				removeVideos={(folderIdArg, videoIds) =>
 					removeVideosFromFolder(folderIdArg, videoIds, spaceId)
 				}
-				getVideos={() => getUserVideos(spaceId)}
+				getVideos={() => getUserVideos(spaceId, { context })}
 				getEntityVideoIds={() => getFolderVideoIds(folderId, spaceId)}
 			/>
 		</>

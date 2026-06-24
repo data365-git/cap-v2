@@ -8,8 +8,10 @@ export const metadata: Metadata = {
 export default async function Page({
 	searchParams,
 }: {
-	searchParams: Promise<{ folderId?: string }>;
+	searchParams: Promise<{ folderId?: string; context?: string }>;
 }) {
-	const { folderId } = await searchParams;
-	return <ImportFilePage folderId={folderId} />;
+	const { folderId, context: rawContext } = await searchParams;
+	const context: "meeting" | "instruction" =
+		rawContext === "meeting" ? "meeting" : "instruction";
+	return <ImportFilePage folderId={folderId} context={context} />;
 }

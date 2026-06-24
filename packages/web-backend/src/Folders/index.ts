@@ -105,6 +105,7 @@ export class Folders extends Effect.Service<Folders>()("Folders", {
 				public?: boolean;
 				spaceId: Option.Option<Space.SpaceIdOrOrganisationId>;
 				parentId: Option.Option<Folder.FolderId>;
+				context?: Folder.FolderContext;
 			}) {
 				const user = yield* CurrentUser;
 
@@ -147,6 +148,7 @@ export class Folders extends Effect.Service<Folders>()("Folders", {
 					public: data.public ?? false,
 					spaceId: data.spaceId,
 					parentId: data.parentId,
+					context: data.context ?? "instruction",
 				});
 			}),
 

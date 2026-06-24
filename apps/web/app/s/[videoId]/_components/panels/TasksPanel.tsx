@@ -4,6 +4,7 @@ import { Clock, LayoutGrid, List } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
+import { Skeleton, SkeletonGroup } from "../Skeleton";
 
 interface Task {
 	title: string;
@@ -16,6 +17,7 @@ interface Task {
 interface TasksPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
+	aiGenerationStatus?: string | null;
 	tasks?: Task[];
 	isOwner?: boolean;
 }
@@ -55,6 +57,7 @@ function avatarColor(name: string): string {
 export function TasksPanel({
 	videoId,
 	transcriptionStatus,
+	aiGenerationStatus,
 	tasks: initialTasks = [],
 	isOwner = false,
 }: TasksPanelProps) {
@@ -96,6 +99,26 @@ export function TasksPanel({
 	}
 
 	if (total === 0) {
+		const isInFlight =
+			aiGenerationStatus === "PROCESSING" ||
+			aiGenerationStatus === "QUEUED" ||
+			transcriptionStatus === "PROCESSING" ||
+			transcriptionStatus === "QUEUED";
+
+		if (isInFlight) {
+			return (
+				<SkeletonGroup>
+					{[0, 1, 2, 3].map((i) => (
+						<div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+							<Skeleton style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0 }} />
+							<Skeleton style={{ flex: 1, height: 20 }} />
+							<Skeleton style={{ width: 36, height: 20, flexShrink: 0 }} />
+						</div>
+					))}
+				</SkeletonGroup>
+			);
+		}
+
 		return (
 			<div className="rd-empty">
 				{isOwner ? (
@@ -140,22 +163,28 @@ export function TasksPanel({
 				<div className="tasks-switch" role="tablist" aria-label="Tasks view">
 					<button
 						type="button"
+						role="tab"
+						aria-selected={mode === "board"}
+						aria-controls="tasks-panel-board"
 						className={`tasks-switch-btn${mode === "board" ? " active" : ""}`}
 						onClick={() => setView("board")}
 					>
-						<LayoutGrid /> Board
+						<LayoutGrid aria-hidden="true" /> Board
 					</button>
 					<button
 						type="button"
+						role="tab"
+						aria-selected={mode === "checklist"}
+						aria-controls="tasks-panel-checklist"
 						className={`tasks-switch-btn${mode === "checklist" ? " active" : ""}`}
 						onClick={() => setView("checklist")}
 					>
-						<List /> Checklist
+						<List aria-hidden="true" /> Checklist
 					</button>
 				</div>
 			</div>
 
-			<div className="tasks-wrap" data-tasks={mode}>
+			<div className="tasks-wrap" data-tasks={mode} id={mode === "board" ? "tasks-panel-board" : "tasks-panel-checklist"} role="tabpanel">
 				{groups.map((g) => (
 					<div className="task-group" key={g.key}>
 						<div className="task-group-header">
@@ -198,7 +227,7 @@ export function TasksPanel({
 													)}
 													{t.deadline && (
 														<span className="task-tag deadline">
-															<Clock /> {t.deadline}
+															<Clock aria-hidden="true" /> {t.deadline}
 														</span>
 													)}
 												</div>

@@ -156,7 +156,15 @@ export function GenerateStrip({
             if (aiStatus && AI_ERROR_STATES.has(aiStatus)) {
               const activeAiStep = Math.min(1 + aiStepIndexRef.current, 4);
               markStepError(activeAiStep);
-              setErrorMsg("AI generation failed. Please try again.");
+              // Detect specific failure modes and surface targeted messages
+              const aiDetail = ((status as Record<string, unknown>).aiGenerationError as string | undefined) ?? "";
+              if (/429|rate.limit|cost.cap/i.test(aiDetail)) {
+                setErrorMsg("Lavozimga yetdik. Boshqa generatsiya keyinroq.");
+              } else if (/truncat|too long|too large/i.test(aiDetail)) {
+                setErrorMsg("Transkripsiya yarim qoldi. Qayta urinish.");
+              } else {
+                setErrorMsg("AI generation failed. Please try again.");
+              }
               setPhase("error");
               return;
             }
@@ -215,7 +223,11 @@ export function GenerateStrip({
           error?: string;
         };
         markStepError(1);
-        setErrorMsg(body?.error ?? "AI generation failed.");
+        if (res.status === 429 || /rate.limit|cost.cap/i.test(body?.error ?? "")) {
+          setErrorMsg("Lavozimga yetdik. Boshqa generatsiya keyinroq.");
+        } else {
+          setErrorMsg(body?.error ?? "AI generation failed.");
+        }
         setPhase("error");
         return;
       }
@@ -244,7 +256,12 @@ export function GenerateStrip({
 
             if (ts && TRANSCRIPT_ERROR_STATES.has(ts)) {
               markStepError(0);
-              setErrorMsg("Transcription failed. Please try again.");
+              // "NO_AUDIO" is a specific known truncation-like case
+              if (ts === "NO_AUDIO") {
+                setErrorMsg("Transkripsiya yarim qoldi. Qayta urinish.");
+              } else {
+                setErrorMsg("Transcription failed. Please try again.");
+              }
               setPhase("error");
               return;
             }
@@ -363,6 +380,7 @@ export function GenerateStrip({
               strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
@@ -376,6 +394,7 @@ export function GenerateStrip({
               strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
             </svg>
@@ -400,7 +419,7 @@ export function GenerateStrip({
             type="button"
             className="gen-btn gen-btn--retry"
             onClick={onRetry}
-            aria-label="Qayta urinish"
+            aria-label="Retry generation"
           >
             <svg
               viewBox="0 0 24 24"
@@ -423,7 +442,7 @@ export function GenerateStrip({
             className="gen-btn"
             onClick={onGenerate}
             disabled={isRunning || isDone}
-            aria-label="Generatsiya qilish"
+            aria-label={isDone ? "Generation complete" : isRunning ? "Generation in progress" : "Generate content"}
           >
             {isRunning ? (
               <svg
@@ -475,6 +494,7 @@ export function GenerateStrip({
                 strokeWidth="1.8"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                aria-hidden="true"
               >
                 {i === 0 && (
                   // Mic icon for Transkripsiya

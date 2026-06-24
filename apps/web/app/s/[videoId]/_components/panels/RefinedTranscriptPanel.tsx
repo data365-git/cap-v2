@@ -3,11 +3,13 @@
 import { Play } from "lucide-react";
 import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
+import { Skeleton, SkeletonGroup } from "../Skeleton";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 interface RefinedTranscriptPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
+	aiGenerationStatus?: string | null;
 	refinedTranscript?: {
 		intro?: {
 			participants: string[];
@@ -27,11 +29,36 @@ interface RefinedTranscriptPanelProps {
 export function RefinedTranscriptPanel({
 	videoId,
 	transcriptionStatus,
+	aiGenerationStatus,
 	refinedTranscript,
 	onVideoJump,
 	isOwner = false,
 }: RefinedTranscriptPanelProps) {
 	if (!refinedTranscript || refinedTranscript.chapters.length === 0) {
+		const isInFlight =
+			aiGenerationStatus === "PROCESSING" ||
+			aiGenerationStatus === "QUEUED" ||
+			transcriptionStatus === "PROCESSING" ||
+			transcriptionStatus === "QUEUED";
+
+		if (isInFlight) {
+			return (
+				<SkeletonGroup>
+					{/* Intro card */}
+					<Skeleton style={{ height: 60 }} />
+					{/* Chapter sections */}
+					{[0, 1, 2].map((i) => (
+						<div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+							<Skeleton style={{ height: 20, width: "60%" }} />
+							<Skeleton style={{ height: 14 }} />
+							<Skeleton style={{ height: 14 }} />
+							<Skeleton style={{ height: 14, width: "80%" }} />
+						</div>
+					))}
+				</SkeletonGroup>
+			);
+		}
+
 		return (
 			<div className="rd-empty">
 				{isOwner ? (
@@ -90,9 +117,9 @@ export function RefinedTranscriptPanel({
 							type="button"
 							className="refined-play"
 							onClick={() => onVideoJump?.(chapter.startSec)}
-							aria-label={`Play from ${chapter.title}`}
+							aria-label={`Jump to ${chapter.title}`}
 						>
-							<Play fill="currentColor" />
+							<Play fill="currentColor" aria-hidden="true" />
 						</button>
 						<div className="refined-head-text">
 							<div className="refined-section-title">{chapter.title}</div>

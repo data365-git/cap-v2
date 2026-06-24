@@ -253,6 +253,7 @@ app.get(
 												meetingId: meetingId ?? undefined,
 											}
 										: undefined,
+					context: recordingMode === "extensionWeb" ? (extensionContext ?? "instruction") : undefined,
 					isScreenshot,
 					bucket: Option.getOrNull(writable.bucketId),
 					storageIntegrationId: Option.getOrNull(writable.storageIntegrationId),

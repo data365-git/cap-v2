@@ -68,8 +68,10 @@ export function BelowVideoTabs({
 						<button
 							key={tab.id}
 							type="button"
+							id={`tab-${tab.id}`}
 							role="tab"
 							aria-selected={activeTab === tab.id}
+							aria-controls={`panel-${tab.id}`}
 							className={`bv-tab${activeTab === tab.id ? " active" : ""}`}
 							onClick={() => handleTabClick(tab.id)}
 						>
@@ -80,7 +82,7 @@ export function BelowVideoTabs({
 
 				{/* One panel at a time. `panelIn` only translates (never opacity 0) so
 				    the content stays visible for print/PDF. key forces the animation. */}
-				<div className="bv-panel" key={activeTab} role="tabpanel">
+				<div className="bv-panel" key={activeTab} id={`panel-${activeTab}`} role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
 					{content[activeTab]}
 				</div>
 			</section>

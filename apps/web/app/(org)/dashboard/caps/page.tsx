@@ -145,7 +145,7 @@ export default async function CapsPage(props: PageProps<"/dashboard/caps">) {
 				eq(videos.ownerId, userId),
 				eq(organizations.id, user.activeOrganizationId),
 				isNull(organizations.tombstoneAt),
-				sql`NOT (JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.type')) = 'extensionWeb' AND JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.context')) = 'meeting')`,
+				eq(videos.context, "instruction"),
 			),
 		);
 
@@ -201,7 +201,7 @@ export default async function CapsPage(props: PageProps<"/dashboard/caps">) {
 				eq(videos.orgId, user.activeOrganizationId),
 				isNull(videos.folderId),
 				isNull(organizations.tombstoneAt),
-				sql`NOT (JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.type')) = 'extensionWeb' AND JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.context')) = 'meeting')`,
+				eq(videos.context, "instruction"),
 			),
 		)
 		.groupBy(
@@ -247,6 +247,7 @@ export default async function CapsPage(props: PageProps<"/dashboard/caps">) {
 				eq(folders.createdById, user.id),
 				isNull(folders.parentId),
 				isNull(folders.spaceId),
+				eq(folders.context, "instruction"),
 			),
 		);
 

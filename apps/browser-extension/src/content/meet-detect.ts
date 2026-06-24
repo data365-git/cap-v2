@@ -62,6 +62,10 @@ let countdownRemaining = 0;
 let recordingStartTime = 0;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
+// Upload progress throttle + stuck-progress tracking
+let lastRenderedUploadPct = -1;
+let uploadStuckTimer: ReturnType<typeof setTimeout> | null = null;
+
 let shadowHost: HTMLElement | null = null;
 let shadowRoot: ShadowRoot | null = null;
 
@@ -521,6 +525,49 @@ const NUDGE_CSS = `
 	color: #e53e3e;
 	margin: 4px 0 10px 0;
 }
+
+/* === UX polish: press/active + standard easing + icon fade === */
+.cap-nudge-btn,
+.cap-nudge-btn-primary,
+.cap-nudge-btn-secondary,
+.cap-nudge-btn-cancel,
+.cap-nudge-btn-pause,
+.cap-nudge-btn-stop,
+.cap-nudge-btn-copy,
+.cap-nudge-btn-open {
+	transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1), border-color 200ms cubic-bezier(.22,.61,.36,1);
+}
+.cap-nudge-btn:active,
+.cap-nudge-btn-primary:active,
+.cap-nudge-btn-secondary:active,
+.cap-nudge-btn-cancel:active,
+.cap-nudge-btn-pause:active,
+.cap-nudge-btn-stop:active,
+.cap-nudge-btn-copy:active,
+.cap-nudge-btn-open:active {
+	transform: scale(0.97);
+	filter: brightness(0.95);
+}
+.cap-nudge-btn:focus-visible,
+.cap-nudge-btn-primary:focus-visible,
+.cap-nudge-btn-secondary:focus-visible,
+.cap-nudge-btn-cancel:focus-visible,
+.cap-nudge-btn-pause:focus-visible,
+.cap-nudge-btn-stop:focus-visible,
+.cap-nudge-btn-copy:focus-visible,
+.cap-nudge-btn-open:focus-visible {
+	outline: 2px solid currentColor;
+	outline-offset: 2px;
+}
+
+/* Icon container fade transition (pause/play swap happens via innerHTML swap,
+   but the container itself should fade transitions smoothly for any opacity changes) */
+.cap-nudge-icon-container {
+	transition: opacity 120ms ease;
+}
+
+.cap-upload-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.12); border-radius: 999px; overflow: hidden; }
+.cap-upload-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #1d4ed8); border-radius: 999px; transition: width 350ms cubic-bezier(.22,.61,.36,1); width: 0%; }
 `;
 
 function ensureShadowRoot(): ShadowRoot {
@@ -831,6 +878,8 @@ function renderUploadingPill(pct: number): void {
 
 	container.textContent = "";
 	pillEl = null;
+	lastRenderedUploadPct = -1;
+	if (uploadStuckTimer !== null) { clearTimeout(uploadStuckTimer); uploadStuckTimer = null; }
 	if (elapsedTimer !== null) {
 		clearInterval(elapsedTimer);
 		elapsedTimer = null;
@@ -840,25 +889,56 @@ function renderUploadingPill(pct: number): void {
 	const dot = makeEl("span", "cap-nudge-dot");
 	dot.style.background = "#3182ce";
 	dot.style.animation = "none";
-	const label = makeEl(
-		"span",
-		"cap-nudge-elapsed",
-		pct > 0 ? `Uploading… ${pct}%` : "Uploading…",
-	);
-	label.id = "cap-upload-label";
-	pill.append(dot, label);
+
+	const labelEl = makeEl("span", "cap-nudge-elapsed", pct > 0 ? `Yuklanmoqda… ${pct}%` : "Yuklanmoqda…");
+	labelEl.id = "cap-upload-label";
+
+	const barWrap = makeEl("div", "cap-upload-bar");
+	const barFill = makeEl("div", "cap-upload-bar-fill");
+	barWrap.appendChild(barFill);
+	// Defer setting width so the CSS transition fires after DOM insertion
+	setTimeout(() => { barFill.style.width = `${pct}%`; }, 0);
+
+	// Pill layout: dot | label | bar (bar on separate row via flex-direction column wrapper)
+	const inner = makeEl("div");
+	inner.style.cssText = "display:flex;flex-direction:column;gap:6px;min-width:120px;";
+	const row = makeEl("div");
+	row.style.cssText = "display:flex;align-items:center;gap:8px;";
+	row.append(dot, labelEl);
+	inner.append(row, barWrap);
+	pill.appendChild(inner);
+
 	container.appendChild(pill);
 	pillEl = pill;
 	nudgeState = "uploading";
+	lastRenderedUploadPct = pct;
+
+	// Arm stuck-progress timer
+	uploadStuckTimer = setTimeout(() => {
+		const lbl = pill.querySelector<HTMLElement>("#cap-upload-label");
+		if (lbl && nudgeState === "uploading") lbl.textContent = "Qayta ishlanmoqda…";
+	}, 5000);
 }
 
-// Update the uploading pill's percent text WITHOUT rebuilding DOM (same
-// flicker-fix discipline as the recording pill — progress ticks should not
-// reset animations or re-trigger entrance transitions).
+// Update the uploading pill's bar + label WITHOUT rebuilding DOM (same
+// flicker-fix discipline as the recording pill). Throttled: skips update
+// if pct hasn't changed by ≥1.
 function updateUploadingPillInPlace(pct: number): void {
 	if (!pillEl) return;
+	if (Math.abs(pct - lastRenderedUploadPct) < 1) return;
+	lastRenderedUploadPct = pct;
+
+	// Reset stuck-progress timer on genuine progress
+	if (uploadStuckTimer !== null) { clearTimeout(uploadStuckTimer); uploadStuckTimer = null; }
+	uploadStuckTimer = setTimeout(() => {
+		const lbl = pillEl?.querySelector<HTMLElement>("#cap-upload-label");
+		if (lbl && nudgeState === "uploading") lbl.textContent = "Qayta ishlanmoqda…";
+	}, 5000);
+
 	const label = pillEl.querySelector<HTMLElement>("#cap-upload-label");
-	if (label) label.textContent = pct > 0 ? `Uploading… ${pct}%` : "Uploading…";
+	if (label) label.textContent = pct > 0 ? `Yuklanmoqda… ${pct}%` : "Yuklanmoqda…";
+	const fill = pillEl.querySelector<HTMLElement>(".cap-upload-bar-fill");
+	if (fill) fill.style.width = `${pct}%`;
 }
 
 function renderFinishingPill(): void {
@@ -877,7 +957,7 @@ function renderFinishingPill(): void {
 	const dot = makeEl("span", "cap-nudge-dot");
 	dot.style.background = "#3182ce";
 	dot.style.animation = "none";
-	const label = makeEl("span", "cap-nudge-elapsed", "Finishing up...");
+	const label = makeEl("span", "cap-nudge-elapsed", "Yakunlanmoqda…");
 	pill.append(dot, label);
 	container.appendChild(pill);
 	nudgeState = "finishing";
@@ -939,32 +1019,56 @@ function renderErrorCard(reason: string, recoverable: boolean): void {
 	}
 	recordingStartTime = 0;
 
+	// [CAP-ERROR] — cached blob is still held by the SW; Close only hides this UI.
+	console.info("[CAP-ERROR] upload error displayed; cached blob preserved for retry");
+
 	const card = makeEl("div", "cap-nudge-error-card");
 	const title = makeEl("div", "cap-nudge-title", "Upload failed");
 	const msg = makeEl("div", "cap-nudge-error-msg", reason);
 
 	const buttons = makeEl("div", "cap-nudge-buttons");
 
-	if (recoverable) {
-		const retryBtn = makeBtn("cap-nudge-btn-primary", "Retry");
-		retryBtn.addEventListener("click", () => {
-			sendToBackground({ type: "RETRY" } as OutboundMessage);
-		});
-		buttons.appendChild(retryBtn);
-	}
+	// Primary: Retry — always shown
+	const retryBtn = makeBtn("cap-nudge-btn-primary", "Retry");
+	retryBtn.addEventListener("click", () => {
+		sendToBackground({ type: "RETRY" } as OutboundMessage);
+	});
+	buttons.appendChild(retryBtn);
 
-	// Fix 1: "Dismiss" renamed to a close action; keep it as secondary in error
+	// Secondary: Close — only closes the UI; does NOT discard the cached blob.
+	// (Sending CANCEL to the SW would call discardUpload — we intentionally skip that.)
 	const closeBtn = makeBtn("cap-nudge-btn-secondary", "Close");
 	closeBtn.addEventListener("click", () => {
-		sendToBackground({ type: "CANCEL" } as OutboundMessage);
 		clearNudge();
 		nudgeState = "hidden";
 	});
-
 	buttons.appendChild(closeBtn);
-	card.append(title, msg, buttons);
+
+	// Subtitle clarifying that the recording is preserved for later retry.
+	const preservedNote = makeEl(
+		"div",
+		undefined,
+		"Yozuv saqlanib qoladi — keyinroq qayta urinishingiz mumkin",
+	);
+	preservedNote.style.cssText =
+		"font-size:11px;color:#6b7280;margin-top:8px;text-align:center;";
+
+	card.append(title, msg, buttons, preservedNote);
 	container.appendChild(card);
 	nudgeState = "error";
+}
+
+/**
+ * Map raw upload error strings/codes to user-facing Uzbek messages.
+ * Same mapping as capture.ts — inline, no external library.
+ */
+function mapUploadError(raw: string): string {
+	if (!raw) return "Yuklanmadi. Qayta uringan.";
+	if (/timeout|timed out/i.test(raw)) return "Yuklanish vaqti tugadi. Internet aloqasini tekshiring.";
+	if (/\b413\b/.test(raw)) return "Fayl juda katta. Qisqaroq yozuv qiling.";
+	if (/\b40[13]\b/.test(raw)) return "Sessiya tugagan. Qayta kiring.";
+	if (/\b5\d\d\b/.test(raw)) return "Server xatosi. Bir necha daqiqadan keyin qayta urining.";
+	return raw || "Yuklanmadi. Qayta uringan.";
 }
 
 // ── Message protocol ──────────────────────────────────────────────────────────
@@ -1111,7 +1215,7 @@ function handleStateChange(state: StateChangedMessage["state"]): void {
 		case "error":
 			clearNudge(() =>
 				renderErrorCard(
-					state.reason ?? "Unknown error",
+					mapUploadError(state.reason ?? ""),
 					state.recoverable ?? false,
 				),
 			);

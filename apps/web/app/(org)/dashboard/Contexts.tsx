@@ -31,6 +31,7 @@ type SharedContext = {
 	activeSpace: Spaces | null;
 	user: CurrentUser;
 	userCapsCount: number | null;
+	userMeetingsCount: number | null;
 	toggleSidebarCollapsed: () => void;
 	anyNewNotifications: boolean;
 	userPreferences: UserPreferences;
@@ -71,6 +72,7 @@ export function DashboardContexts({
 	activeOrganization,
 	spacesData,
 	userCapsCount,
+	userMeetingsCount,
 	organizationSettings,
 	userPreferences,
 	anyNewNotifications,
@@ -83,6 +85,7 @@ export function DashboardContexts({
 	activeOrganization: SharedContext["activeOrganization"];
 	spacesData: SharedContext["spacesData"];
 	userCapsCount: SharedContext["userCapsCount"];
+	userMeetingsCount: SharedContext["userMeetingsCount"];
 	organizationSettings: SharedContext["organizationSettings"];
 	userPreferences: SharedContext["userPreferences"];
 	anyNewNotifications: boolean;
@@ -188,6 +191,7 @@ export function DashboardContexts({
 					activeOrganization,
 					spacesData,
 					userCapsCount,
+					userMeetingsCount,
 					anyNewNotifications,
 					userPreferences,
 					organizationSettings,

@@ -311,6 +311,12 @@ export const folders = mysqlTable(
 		createdById: nanoId("createdById").notNull().$type<User.UserId>(),
 		parentId: nanoIdNullable("parentId").$type<Folder.FolderId>(),
 		spaceId: nanoIdNullable("spaceId").$type<Space.SpaceIdOrOrganisationId>(),
+		context: varchar("context", {
+			length: 16,
+			enum: ["meeting", "instruction"],
+		})
+			.notNull()
+			.default("instruction"),
 		createdAt: timestamp("createdAt").notNull().defaultNow(),
 		updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
 	},
@@ -377,6 +383,12 @@ export const videos = mysqlTable(
 			>()
 			.notNull()
 			.default({ type: "MediaConvert" }),
+		context: varchar("context", {
+			length: 16,
+			enum: ["meeting", "instruction"],
+		})
+			.notNull()
+			.default("instruction"),
 		folderId: nanoIdNullable("folderId").$type<Folder.FolderId>(),
 		createdAt: timestamp("createdAt").notNull().defaultNow(),
 		effectiveCreatedAt: datetime("effectiveCreatedAt").generatedAlwaysAs(
@@ -415,6 +427,7 @@ export const videos = mysqlTable(
 			table.orgId,
 			table.effectiveCreatedAt,
 		),
+		index("video_context_idx").on(table.context),
 	],
 );
 

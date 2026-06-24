@@ -2,6 +2,8 @@
 
 import { Button } from "@cap/ui";
 import type { Video } from "@cap/web-domain";
+import { faFolderPlus } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Effect, Exit } from "effect";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -10,9 +12,16 @@ import { useEffectMutation, useRpcClient } from "@/lib/EffectRuntime";
 import { useVideosAnalyticsQuery } from "@/lib/Queries/Analytics";
 import { useDashboardContext } from "../Contexts";
 import type { VideoData } from "../caps/Caps";
-import { SelectedCapsBar } from "../caps/components";
+import {
+	ImportLoomButton,
+	NewFolderDialog,
+	SelectedCapsBar,
+	UploadCapButton,
+} from "../caps/components";
 import { CapCard } from "../caps/components/CapCard/CapCard";
 import { CapPagination } from "../caps/components/CapPagination";
+import type { FolderDataType } from "../caps/components/Folder";
+import Folder from "../caps/components/Folder";
 
 export type MeetingVideoData = Omit<VideoData[number], "foldersData">;
 
@@ -20,10 +29,12 @@ export const Meetings = ({
 	data,
 	count,
 	analyticsEnabled,
+	rootFolders = [],
 }: {
 	data: MeetingVideoData[];
 	count: number;
 	analyticsEnabled: boolean;
+	rootFolders?: FolderDataType[];
 }) => {
 	const router = useRouter();
 	const params = useSearchParams();
@@ -33,6 +44,7 @@ export const Meetings = ({
 	const totalPages = Math.ceil(count / limit);
 	const bulkDeleteToastRef = useRef<string | number | undefined>(undefined);
 	const [selectedCaps, setSelectedCaps] = useState<Video.VideoId[]>([]);
+	const [openNewFolderDialog, setOpenNewFolderDialog] = useState(false);
 
 	const anyCapSelected = selectedCaps.length > 0;
 
@@ -163,14 +175,27 @@ export const Meetings = ({
 		};
 	}, [selectedCaps, data, deleteCaps]);
 
-	const isEmpty = count === 0;
+	const isEmpty = count === 0 && rootFolders.length === 0;
 
 	return (
 		<div className="flex relative flex-col w-full h-full">
+			<NewFolderDialog
+				open={openNewFolderDialog}
+				onOpenChange={setOpenNewFolderDialog}
+				context="meeting"
+			/>
 			<div className="flex flex-wrap gap-3 items-center mb-10 w-full">
-				<h1 className="text-2xl font-medium text-gray-12">
-					Meeting Recordings
-				</h1>
+				<Button
+					onClick={() => setOpenNewFolderDialog(true)}
+					size="sm"
+					variant="dark"
+					className="flex gap-2 items-center w-fit"
+				>
+					<FontAwesomeIcon className="size-3.5" icon={faFolderPlus} />
+					New Folder
+				</Button>
+				<UploadCapButton size="sm" context="meeting" />
+				<ImportLoomButton size="sm" context="meeting" />
 			</div>
 			{isEmpty && (
 				<div className="flex flex-col flex-1 justify-center items-center w-full h-full">
@@ -196,31 +221,50 @@ export const Meetings = ({
 					</div>
 				</div>
 			)}
+			{rootFolders.length > 0 && (
+				<>
+					<div className="flex gap-3 items-center mb-6 w-full">
+						<h1 className="text-2xl font-medium text-gray-12">Folders</h1>
+					</div>
+					<div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4 mb-10">
+						{rootFolders.map((folder) => (
+							<Folder key={folder.id} {...folder} />
+						))}
+					</div>
+				</>
+			)}
 			{data.length > 0 && (
-				<div className="grid grid-cols-1 gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-					{data.map((video) => {
-						const videoAnalytics = analytics[video.id];
-						return (
-							<CapCard
-								key={video.id}
-								cap={video}
-								analytics={videoAnalytics ?? 0}
-								onDelete={() => {
-									if (selectedCaps.length > 0) {
-										deleteCaps(selectedCaps);
-									} else {
-										deleteCap(video.id);
-									}
-								}}
-								userId={user?.id}
-								isLoadingAnalytics={isLoadingAnalytics}
-								isSelected={selectedCaps.includes(video.id)}
-								anyCapSelected={anyCapSelected}
-								onSelectToggle={() => handleCapSelection(video.id)}
-							/>
-						);
-					})}
-				</div>
+				<>
+					<div className="flex justify-between items-center mb-6 w-full">
+						<h1 className="text-2xl font-medium text-gray-12">
+							Meeting Recordings
+						</h1>
+					</div>
+					<div className="grid grid-cols-1 gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+						{data.map((video) => {
+							const videoAnalytics = analytics[video.id];
+							return (
+								<CapCard
+									key={video.id}
+									cap={video}
+									analytics={videoAnalytics ?? 0}
+									onDelete={() => {
+										if (selectedCaps.length > 0) {
+											deleteCaps(selectedCaps);
+										} else {
+											deleteCap(video.id);
+										}
+									}}
+									userId={user?.id}
+									isLoadingAnalytics={isLoadingAnalytics}
+									isSelected={selectedCaps.includes(video.id)}
+									anyCapSelected={anyCapSelected}
+									onSelectToggle={() => handleCapSelection(video.id)}
+								/>
+							);
+						})}
+					</div>
+				</>
 			)}
 			{(data.length > limit || data.length === limit || page !== 1) && (
 				<div className="mt-7">

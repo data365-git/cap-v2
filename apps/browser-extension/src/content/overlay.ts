@@ -142,6 +142,45 @@ if (!document.getElementById(HOST_ID)) {
   pointer-events: all;
 }
 
+/* ── Undo toast (Delete / Restart confirmation)
+   Pattern: Gmail "Undo send" — action fires only after a 4-second window.
+   Toast appears bottom-center, non-blocking. Undo cancels the deferred action.
+   ─────────────────────────────────────────────────────────────────────────── */
+.cap-ov-undo-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: rgba(14,18,27,0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #f9fafb;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  animation: ov-in .22s cubic-bezier(.2,.8,.4,1) both;
+  white-space: nowrap;
+}
+.cap-ov-undo-btn {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+.cap-ov-undo-btn:hover { color: #93c5fd; }
+
 /* stop button */
 .cap-ov-btn-stop {
   background: #ef4444; color: #fff;
@@ -194,6 +233,40 @@ if (!document.getElementById(HOST_ID)) {
   cursor: pointer; font-family: inherit; transition: background .15s;
 }
 .cap-ov-btn-secondary:hover { background: #e5e7eb; }
+
+/* === UX polish: press/active + standard easing + icon fade === */
+.cap-ov-btn,
+.cap-ov-icon-btn,
+.cap-ov-btn-stop,
+.cap-ov-btn-primary,
+.cap-ov-btn-secondary {
+  transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1), border-color 200ms cubic-bezier(.22,.61,.36,1);
+}
+.cap-ov-btn:active,
+.cap-ov-icon-btn:active,
+.cap-ov-btn-stop:active,
+.cap-ov-btn-primary:active,
+.cap-ov-btn-secondary:active {
+  transform: scale(0.97);
+  filter: brightness(0.95);
+}
+.cap-ov-btn:focus-visible,
+.cap-ov-icon-btn:focus-visible,
+.cap-ov-btn-stop:focus-visible,
+.cap-ov-btn-primary:focus-visible,
+.cap-ov-btn-secondary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Icon container fade transition (pause/play swap happens via innerHTML swap,
+   but the container itself should fade transitions smoothly for any opacity changes) */
+.cap-ov-icon-container {
+  transition: opacity 120ms ease;
+}
+
+.cap-upload-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.12); border-radius: 999px; overflow: hidden; }
+.cap-upload-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #1d4ed8); border-radius: 999px; transition: width 350ms cubic-bezier(.22,.61,.36,1); width: 0%; }
 `;
 	shadow.appendChild(style);
 
@@ -224,6 +297,55 @@ if (!document.getElementById(HOST_ID)) {
 	});
 	document.addEventListener("mouseup", () => { dragging = false; });
 
+	// ── Undo-toast state ────────────────────────────────────────────────────────
+	// Timer ID for the pending deferred action (Delete or Restart).
+	// If Undo is clicked before the timer fires, the action is cancelled.
+	const UNDO_DELAY_MS = 4000;
+	let undoTimer: ReturnType<typeof setTimeout> | null = null;
+	let undoToastEl: HTMLElement | null = null;
+
+	function clearUndoToast() {
+		if (undoTimer !== null) { clearTimeout(undoTimer); undoTimer = null; }
+		if (undoToastEl) { undoToastEl.remove(); undoToastEl = null; }
+	}
+
+	/**
+	 * Show a bottom-center undo toast for a destructive action.
+	 * The action fires after UNDO_DELAY_MS unless Undo is clicked.
+	 * @param label  Text shown in the toast (e.g. "Yozuv o'chirildi")
+	 * @param onCommit  Callback fired after the delay (sends the message to SW).
+	 * @param onUndo  Optional callback fired on Undo (for logging/restore).
+	 */
+	function showUndoToast(
+		label: string,
+		onCommit: () => void,
+		onUndo?: () => void,
+	) {
+		clearUndoToast();
+		const toast = document.createElement("div");
+		toast.className = "cap-ov-undo-toast";
+		toast.textContent = label + " · ";
+
+		const undoBtn = document.createElement("button");
+		undoBtn.className = "cap-ov-undo-btn";
+		undoBtn.textContent = "Bekor qilish";
+		undoBtn.addEventListener("click", () => {
+			console.info("[CAP-UNDO] delete cancelled");
+			onUndo?.();
+			clearUndoToast();
+		});
+		toast.appendChild(undoBtn);
+		shadow.appendChild(toast);
+		undoToastEl = toast;
+
+		undoTimer = setTimeout(() => {
+			undoToastEl?.remove();
+			undoToastEl = null;
+			undoTimer = null;
+			onCommit();
+		}, UNDO_DELAY_MS);
+	}
+
 	// ── Timer state (module-level so interval closure always reads current values) ──
 	let elapsedIv: ReturnType<typeof setInterval> | null = null;
 	let recStart = 0;
@@ -234,6 +356,11 @@ if (!document.getElementById(HOST_ID)) {
 	let currentPaused = false;
 	let pausedAt = 0;       // wall-clock ms when the current pause began
 	let totalPausedMs = 0;  // cumulative paused duration to subtract from elapsed
+
+	// Upload progress throttle + stuck-progress tracking
+	let lastOvUploadPct = -1;
+	let ovUploadStuckTimer: ReturnType<typeof setTimeout> | null = null;
+	let ovUploadPillEl: HTMLElement | null = null;
 
 	function clearElapsed() {
 		if (elapsedIv !== null) { clearInterval(elapsedIv); elapsedIv = null; }
@@ -289,7 +416,7 @@ if (!document.getElementById(HOST_ID)) {
 		reAnimate();
 		const pill = mk("div", "cap-ov-pill");
 		const left = mk("div", "cap-ov-left");
-		left.append(mk("span", "cap-ov-spinner"), mk("span", "cap-ov-elapsed", "Starting…"));
+		left.append(mk("span", "cap-ov-spinner"), mk("span", "cap-ov-elapsed", "Tayyorlanmoqda…"));
 		pill.appendChild(left);
 		container.appendChild(pill);
 	}
@@ -354,27 +481,49 @@ if (!document.getElementById(HOST_ID)) {
 		const hoverWrap = document.createElement("div");
 		hoverWrap.className = "cap-ov-hover-wrap";
 
-		// Restart — discard current take, start fresh
+		// Restart — discard current take, start fresh (with 4s undo window)
 		const restartBtn = document.createElement("button");
 		restartBtn.className = "cap-ov-icon-btn";
 		restartBtn.innerHTML = IC.restart;
 		restartBtn.title = "Restart recording (discard and start over)";
 		restartBtn.addEventListener("click", () => {
+			showUndoToast(
+				"Yozuv qayta boshlanadi",
+				() => {
+					chrome.runtime.sendMessage({ type: "RESTART" }).catch(() => {});
+				},
+				() => {
+					// Undo: re-enable buttons
+					restartBtn.disabled = false;
+					pauseBtn.disabled = false;
+				},
+			);
 			restartBtn.disabled = true;
 			pauseBtn.disabled = true;
-			chrome.runtime.sendMessage({ type: "RESTART" }).catch(() => {});
 		});
 
-		// Delete — discard recording and cancel entirely (no upload, no restart)
+		// Delete — discard recording and cancel entirely (no upload, no restart).
+		// Uses 4-second undo toast so the action is reversible during the window.
 		const deleteBtn = document.createElement("button");
 		deleteBtn.className = "cap-ov-icon-btn cap-ov-icon-btn--danger";
 		deleteBtn.innerHTML = IC.trash;
 		deleteBtn.title = "Delete recording (discard, no upload)";
 		deleteBtn.addEventListener("click", () => {
+			showUndoToast(
+				"Yozuv o'chirildi",
+				() => {
+					chrome.runtime.sendMessage({ type: "DELETE_RECORDING" }).catch(() => {});
+				},
+				() => {
+					// Undo: re-enable buttons
+					deleteBtn.disabled = false;
+					restartBtn.disabled = false;
+					pauseBtn.disabled = false;
+				},
+			);
 			deleteBtn.disabled = true;
 			restartBtn.disabled = true;
 			pauseBtn.disabled = true;
-			chrome.runtime.sendMessage({ type: "DELETE_RECORDING" }).catch(() => {});
 		});
 
 		hoverWrap.append(restartBtn, deleteBtn);
@@ -406,15 +555,72 @@ if (!document.getElementById(HOST_ID)) {
 		}, 500);
 	}
 
-	function showFinishing() {
+	function showUploading(pct: number) {
 		clearElapsed();
+		clearUndoToast();
 		lastStartedAt = 0;
 		pauseBtnEl = null;
 		currentPaused = false;
+		lastOvUploadPct = -1;
+		if (ovUploadStuckTimer !== null) { clearTimeout(ovUploadStuckTimer); ovUploadStuckTimer = null; }
+		container.innerHTML = "";
+
+		const pill = mk("div", "cap-ov-pill");
+		const dot = mk("span", "cap-ov-dot cap-ov-dot--blue");
+		const labelEl = mk("span", "cap-ov-elapsed", pct > 0 ? `Yuklanmoqda… ${pct}%` : "Yuklanmoqda…");
+		labelEl.id = "cap-ov-upload-label";
+
+		const barWrap = document.createElement("div");
+		barWrap.className = "cap-upload-bar";
+		const barFill = document.createElement("div");
+		barFill.className = "cap-upload-bar-fill";
+		barWrap.appendChild(barFill);
+		setTimeout(() => { barFill.style.width = `${pct}%`; }, 0);
+
+		const inner = document.createElement("div");
+		inner.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+		const row = document.createElement("div");
+		row.style.cssText = "display:flex;align-items:center;gap:8px;";
+		row.append(dot, labelEl);
+		inner.append(row, barWrap);
+		pill.appendChild(inner);
+		container.appendChild(pill);
+		ovUploadPillEl = pill;
+		lastOvUploadPct = pct;
+
+		ovUploadStuckTimer = setTimeout(() => {
+			const lbl = pill.querySelector<HTMLElement>("#cap-ov-upload-label");
+			if (lbl) lbl.textContent = "Qayta ishlanmoqda…";
+		}, 5000);
+	}
+
+	function updateUploadingInPlace(pct: number) {
+		if (!ovUploadPillEl) return;
+		if (Math.abs(pct - lastOvUploadPct) < 1) return;
+		lastOvUploadPct = pct;
+		if (ovUploadStuckTimer !== null) { clearTimeout(ovUploadStuckTimer); ovUploadStuckTimer = null; }
+		ovUploadStuckTimer = setTimeout(() => {
+			const lbl = ovUploadPillEl?.querySelector<HTMLElement>("#cap-ov-upload-label");
+			if (lbl) lbl.textContent = "Qayta ishlanmoqda…";
+		}, 5000);
+		const lbl = ovUploadPillEl.querySelector<HTMLElement>("#cap-ov-upload-label");
+		if (lbl) lbl.textContent = pct > 0 ? `Yuklanmoqda… ${pct}%` : "Yuklanmoqda…";
+		const fill = ovUploadPillEl.querySelector<HTMLElement>(".cap-upload-bar-fill");
+		if (fill) fill.style.width = `${pct}%`;
+	}
+
+	function showFinishing() {
+		clearElapsed();
+		clearUndoToast();
+		lastStartedAt = 0;
+		pauseBtnEl = null;
+		currentPaused = false;
+		ovUploadPillEl = null;
+		if (ovUploadStuckTimer !== null) { clearTimeout(ovUploadStuckTimer); ovUploadStuckTimer = null; }
 		container.innerHTML = "";
 		const pill = mk("div", "cap-ov-pill");
 		const left = mk("div", "cap-ov-left");
-		left.append(mk("span", "cap-ov-dot cap-ov-dot--blue"), mk("span", "cap-ov-elapsed", "Saving…"));
+		left.append(mk("span", "cap-ov-dot cap-ov-dot--blue"), mk("span", "cap-ov-elapsed", "Yakunlanmoqda…"));
 		pill.appendChild(left);
 		container.appendChild(pill);
 	}
@@ -473,17 +679,27 @@ if (!document.getElementById(HOST_ID)) {
 		container.appendChild(card);
 	}
 
-	type St = { kind: string; shareUrl?: string; reason?: string; startedAt?: number; paused?: boolean };
+	type St = { kind: string; shareUrl?: string; reason?: string; startedAt?: number; paused?: boolean; uploadedBytes?: number; totalBytes?: number };
 	function handleState(state: St) {
 		switch (state.kind) {
 			case "arming":
-				// Visible during picker + 3-2-1 countdown — shows "Starting…" spinner pill.
+				// Visible during picker + 3-2-1 countdown.
 				showArming();
 				break;
 			case "recording":
 				showRecording(state.startedAt ?? Date.now(), state.paused === true);
 				break;
-			case "uploading":
+			case "uploading": {
+				const up = state.uploadedBytes ?? 0;
+				const tot = state.totalBytes ?? 0;
+				const pct = tot > 0 ? Math.round((up / tot) * 100) : 0;
+				if (ovUploadPillEl) {
+					updateUploadingInPlace(pct);
+				} else {
+					showUploading(pct);
+				}
+				break;
+			}
 			case "finishing":
 				showFinishing();
 				break;

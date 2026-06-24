@@ -4,6 +4,7 @@ import { Clock, LayoutGrid, List, ListChecks, Sparkles, Users } from "lucide-rea
 import { useState } from "react";
 import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
+import { Skeleton, SkeletonGroup } from "../Skeleton";
 import { formatTimeMinutes } from "../utils/transcript-utils";
 
 type SummaryView = "cards" | "timeline" | "document";
@@ -11,6 +12,7 @@ type SummaryView = "cards" | "timeline" | "document";
 interface SummaryPanelProps {
 	videoId: string;
 	transcriptionStatus?: string | null;
+	aiGenerationStatus?: string | null;
 	isOwner?: boolean;
 	data: {
 		duration?: number;
@@ -35,6 +37,7 @@ function fmtSec(sec: number): string {
 export function SummaryPanel({
 	videoId,
 	transcriptionStatus,
+	aiGenerationStatus,
 	isOwner = false,
 	data,
 	onVideoJump,
@@ -46,6 +49,31 @@ export function SummaryPanel({
 	const chapters = aiSummary?.chapters ?? [];
 
 	if (!aiSummary) {
+		const isInFlight =
+			aiGenerationStatus === "PROCESSING" ||
+			aiGenerationStatus === "QUEUED" ||
+			transcriptionStatus === "PROCESSING" ||
+			transcriptionStatus === "QUEUED";
+
+		if (isInFlight) {
+			return (
+				<SkeletonGroup>
+					{/* Stat strip */}
+					<div style={{ display: "flex", gap: 8 }}>
+						{[0, 1, 2, 3].map((i) => (
+							<Skeleton key={i} style={{ height: 56, flex: 1 }} />
+						))}
+					</div>
+					{/* Lead card */}
+					<Skeleton style={{ height: 80 }} />
+					{/* Topic cards */}
+					<Skeleton style={{ height: 52 }} />
+					<Skeleton style={{ height: 52 }} />
+					<Skeleton style={{ height: 52 }} />
+				</SkeletonGroup>
+			);
+		}
+
 		return (
 			<div className="rd-empty">
 				{isOwner ? (
@@ -104,25 +132,34 @@ export function SummaryPanel({
 					<button
 						className={`tasks-switch-btn${view === "cards" ? " active" : ""}`}
 						type="button"
+						role="tab"
+						aria-selected={view === "cards"}
+						aria-controls="summary-panel-cards"
 						onClick={() => setView("cards")}
 					>
-						<LayoutGrid size={15} />
+						<LayoutGrid size={15} aria-hidden="true" />
 						Cards
 					</button>
 					<button
 						className={`tasks-switch-btn${view === "timeline" ? " active" : ""}`}
 						type="button"
+						role="tab"
+						aria-selected={view === "timeline"}
+						aria-controls="summary-panel-timeline"
 						onClick={() => setView("timeline")}
 					>
-						<Clock size={15} />
+						<Clock size={15} aria-hidden="true" />
 						Timeline
 					</button>
 					<button
 						className={`tasks-switch-btn${view === "document" ? " active" : ""}`}
 						type="button"
+						role="tab"
+						aria-selected={view === "document"}
+						aria-controls="summary-panel-document"
 						onClick={() => setView("document")}
 					>
-						<List size={15} />
+						<List size={15} aria-hidden="true" />
 						Document
 					</button>
 				</div>
@@ -130,21 +167,21 @@ export function SummaryPanel({
 
 			{/* ===== CARDS view ===== */}
 			{view === "cards" && (
-				<div>
+				<div id="summary-panel-cards" role="tabpanel">
 					{/* Topic cards */}
 					{topics.length > 0 && (
 						<>
 							<div className="sec-eyebrow">
-								<span className="ic">
-									<LayoutGrid size={14} />
+								<span className="ic" aria-hidden="true">
+									<LayoutGrid size={14} aria-hidden="true" />
 								</span>
 								Topics
 							</div>
 							<div className="topic-grid">
 								{topics.map((topic) => (
 									<div className="topic-card" key={topic.title}>
-										<div className="topic-dot">
-											<Sparkles />
+										<div className="topic-dot" aria-hidden="true">
+											<Sparkles aria-hidden="true" />
 										</div>
 										<div className="topic-text">
 											<b>{topic.title}</b>
@@ -160,8 +197,8 @@ export function SummaryPanel({
 					{nextSteps.length > 0 && (
 						<>
 							<div className="sec-eyebrow">
-								<span className="ic">
-									<ListChecks size={14} />
+								<span className="ic" aria-hidden="true">
+									<ListChecks size={14} aria-hidden="true" />
 								</span>
 								Next steps
 							</div>
@@ -184,12 +221,12 @@ export function SummaryPanel({
 
 			{/* ===== TIMELINE view ===== */}
 			{view === "timeline" && (
-				<div>
+				<div id="summary-panel-timeline" role="tabpanel" aria-labelledby="summary-timeline-tab">
 					{chapters.length > 0 ? (
 						<>
 							<div className="sec-eyebrow">
-								<span className="ic">
-									<Clock size={14} />
+								<span className="ic" aria-hidden="true">
+									<Clock size={14} aria-hidden="true" />
 								</span>
 								Chapters
 							</div>
@@ -220,7 +257,7 @@ export function SummaryPanel({
 
 			{/* ===== DOCUMENT view ===== */}
 			{view === "document" && (
-				<div className="doc-view">
+				<div className="doc-view" id="summary-panel-document" role="tabpanel" aria-labelledby="summary-document-tab">
 					{topics.length > 0 && (
 						<>
 							<div className="sec-eyebrow">Topics</div>

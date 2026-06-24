@@ -4,7 +4,20 @@ import { faUpload } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import Link from "next/link";
 
-export const ImportPage = ({ folderId }: { folderId?: string }) => {
+export const ImportPage = ({
+	folderId,
+	context = "instruction",
+}: {
+	folderId?: string;
+	context?: "meeting" | "instruction";
+}) => {
+	const buildHref = (base: string) => {
+		const params = new URLSearchParams();
+		if (folderId) params.set("folderId", folderId);
+		params.set("context", context);
+		return `${base}?${params.toString()}`;
+	};
+
 	return (
 		<div className="flex flex-col w-full h-full">
 			<div className="mb-8">
@@ -16,11 +29,7 @@ export const ImportPage = ({ folderId }: { folderId?: string }) => {
 
 			<div className="grid grid-cols-1 gap-5 max-w-4xl sm:grid-cols-2 lg:grid-cols-3">
 				<Link
-					href={
-						folderId
-							? `/dashboard/import/file?folderId=${encodeURIComponent(folderId)}`
-							: "/dashboard/import/file"
-					}
+					href={buildHref("/dashboard/import/file")}
 					className="flex overflow-hidden relative flex-col w-full rounded-xl border transition-all duration-200 group border-gray-3 bg-gray-1 hover:border-blue-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8"
 				>
 					<div className="flex justify-center items-center w-full h-32 transition-colors duration-200 bg-gray-3 group-hover:bg-gray-4">
@@ -39,11 +48,7 @@ export const ImportPage = ({ folderId }: { folderId?: string }) => {
 				</Link>
 
 				<Link
-					href={
-						folderId
-							? `/dashboard/import/loom?folderId=${encodeURIComponent(folderId)}`
-							: "/dashboard/import/loom"
-					}
+					href={buildHref("/dashboard/import/loom")}
 					className="flex overflow-hidden relative flex-col w-full rounded-xl border transition-all duration-200 group border-gray-3 bg-gray-1 hover:border-blue-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-8"
 				>
 					<div className="flex justify-center items-center w-full h-32 transition-colors duration-200 bg-gray-3 group-hover:bg-gray-4">

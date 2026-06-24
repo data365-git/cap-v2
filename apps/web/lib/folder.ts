@@ -359,6 +359,7 @@ export const getChildFolders = Effect.fn(function* (
 		| { variant: "user" }
 		| { variant: "space"; spaceId: Space.SpaceIdOrOrganisationId }
 		| { variant: "org"; organizationId: Organisation.OrganisationId },
+	options?: { context?: "meeting" | "instruction" },
 ) {
 	const db = yield* Database;
 
@@ -390,6 +391,9 @@ export const getChildFolders = Effect.fn(function* (
 					eq(folders.parentId, folderId),
 					root.variant === "space"
 						? eq(folders.spaceId, root.spaceId)
+						: undefined,
+					options?.context
+						? eq(folders.context, options.context)
 						: undefined,
 				),
 			),

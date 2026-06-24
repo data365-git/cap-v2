@@ -3,6 +3,7 @@
 import { buildEnv, NODE_ENV } from "@cap/env";
 import { Button, LogoBadge } from "@cap/ui";
 import { formatPlatformDateRelative } from "@cap/utils";
+import { formatDistanceToNow } from "date-fns";
 import type { ViewerSettingKey } from "@cap/web-backend";
 import {
 	faChartSimple,
@@ -577,8 +578,8 @@ export const ShareHeader = ({
 									<p className="text-sm font-medium text-gray-12">
 										{data.owner.name}
 									</p>
-									<p className="text-xs text-gray-10">
-										{formatPlatformDateRelative(data.createdAt)}
+									<p className="text-xs text-gray-10" title={new Date(data.createdAt).toLocaleString()}>
+										{formatDistanceToNow(new Date(data.createdAt), { addSuffix: true })}
 									</p>
 								</div>
 							</div>

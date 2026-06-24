@@ -96,15 +96,15 @@ const SidebarAnalytics = ({
 		<div className="flex flex-wrap gap-4 items-center justify-between px-4 py-3 border-b border-gray-5">
 			<div className="flex gap-4 items-center">
 				<div className="flex gap-2 items-center">
-					<FontAwesomeIcon className="text-gray-8 size-4" icon={faEye} />
+					<FontAwesomeIcon className="text-gray-8 size-4" icon={faEye} aria-hidden="true" />
 					<span className="text-sm text-gray-12">{viewCount}</span>
 				</div>
 				<div className="flex gap-2 items-center">
-					<FontAwesomeIcon className="text-gray-8 size-4" icon={faComment} />
+					<FontAwesomeIcon className="text-gray-8 size-4" icon={faComment} aria-hidden="true" />
 					<span className="text-sm text-gray-12">{totalComments}</span>
 				</div>
 				<div className="flex gap-2 items-center">
-					<FontAwesomeIcon className="text-gray-8 size-4" icon={faSmile} />
+					<FontAwesomeIcon className="text-gray-8 size-4" icon={faSmile} aria-hidden="true" />
 					<span className="text-sm text-gray-12">{totalReactions}</span>
 				</div>
 			</div>
@@ -138,14 +138,14 @@ const ReactionsBlock = ({
 							<button
 								key={emoji}
 								type="button"
-								aria-label={label}
+								aria-label={`React with ${label}`}
 								onClick={() => onReact(emoji)}
 								className={`emoji-btn font-emoji${count > 0 ? " reacted" : ""}`}
 							>
-								<span role="img" aria-label={label}>
+								<span aria-hidden="true">
 									{emoji}
 								</span>
-								{count > 0 && <span className="emoji-count">{count}</span>}
+								{count > 0 && <span className="emoji-count" aria-label={`${count} ${label} reactions`}>{count}</span>}
 							</button>
 						);
 					})}

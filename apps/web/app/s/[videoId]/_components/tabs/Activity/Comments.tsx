@@ -14,6 +14,15 @@ import {
 	useRef,
 	useState,
 } from "react";
+
+// ── Undo-delete snackbar types ─────────────────────────────────────────────
+interface PendingDelete {
+	commentId: Comment.CommentId;
+	parentId: Comment.CommentId | null;
+	/** Original comment list snapshot used to restore on Undo */
+	snapshot: CommentType[];
+	timerId: ReturnType<typeof setTimeout>;
+}
 import { deleteComment } from "@/actions/videos/delete-comment";
 import { newComment } from "@/actions/videos/new-comment";
 import { useCurrentUser } from "@/app/Layout/AuthContext";
@@ -53,6 +62,11 @@ export const Comments = Object.assign(
 		const [replyingTo, setReplyingTo] = useState<Comment.CommentId | null>(
 			null,
 		);
+
+		// ── Comment-delete undo snackbar ─────────────────────────────────────
+		const COMMENT_UNDO_MS = 4000;
+		const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+		const pendingDeleteRef = useRef<PendingDelete | null>(null);
 
 		const commentsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -176,21 +190,58 @@ export const Comments = Object.assign(
 			setReplyingTo(null);
 		};
 
-		const handleDeleteComment = async (
-			commentId: Comment.CommentId,
-			parentId: Comment.CommentId | null,
-		) => {
-			try {
-				await deleteComment({
-					commentId,
-					parentId,
-					videoId: props.videoId,
-				});
+		const commitDelete = useCallback(
+			async (commentId: Comment.CommentId, parentId: Comment.CommentId | null) => {
+				try {
+					await deleteComment({ commentId, parentId, videoId: props.videoId });
+				} catch (error) {
+					console.error("Failed to delete comment:", error);
+				}
+			},
+			[props.videoId],
+		);
+
+		const handleDeleteComment = useCallback(
+			(commentId: Comment.CommentId, parentId: Comment.CommentId | null) => {
+				// Cancel any in-flight pending delete (commit it immediately)
+				if (pendingDeleteRef.current) {
+					clearTimeout(pendingDeleteRef.current.timerId);
+					void commitDelete(
+						pendingDeleteRef.current.commentId,
+						pendingDeleteRef.current.parentId,
+					);
+					pendingDeleteRef.current = null;
+					setPendingDelete(null);
+				}
+
+				// Snapshot before optimistic removal
+				const snapshot = optimisticComments.slice();
+
+				// Optimistically hide the comment from the list
 				setComments((prev) => prev.filter((c) => c.id !== commentId));
-			} catch (error) {
-				console.error("Failed to delete comment:", error);
-			}
-		};
+
+				// Arm the 4-second timer; commit only if not undone before it fires.
+				const timerId = setTimeout(() => {
+					setPendingDelete(null);
+					pendingDeleteRef.current = null;
+					void commitDelete(commentId, parentId);
+				}, COMMENT_UNDO_MS);
+
+				const pending: PendingDelete = { commentId, parentId, snapshot, timerId };
+				pendingDeleteRef.current = pending;
+				setPendingDelete(pending);
+			},
+			[commitDelete, optimisticComments],
+		);
+
+		const handleUndoDelete = useCallback(() => {
+			if (!pendingDeleteRef.current) return;
+			clearTimeout(pendingDeleteRef.current.timerId);
+			// Restore original comment list
+			setComments(pendingDeleteRef.current.snapshot);
+			pendingDeleteRef.current = null;
+			setPendingDelete(null);
+		}, [setComments]);
 
 		const handleEditComment = (
 			commentId: Comment.CommentId,
@@ -261,6 +312,49 @@ export const Comments = Object.assign(
 						))}
 					</div>
 				)}
+			{/* 4-second undo snackbar for comment delete */}
+			{pendingDelete && (
+				<div
+					style={{
+						position: "fixed",
+						bottom: 24,
+						left: "50%",
+						transform: "translateX(-50%)",
+						zIndex: 9999,
+						background: "rgba(17,24,39,0.96)",
+						backdropFilter: "blur(12px)",
+						color: "#f9fafb",
+						borderRadius: 999,
+						padding: "10px 20px",
+						fontSize: 13,
+						fontWeight: 500,
+						display: "flex",
+						alignItems: "center",
+						gap: 12,
+						boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+						whiteSpace: "nowrap",
+					}}
+				>
+					Izoh o&apos;chirildi
+					<button
+						type="button"
+						onClick={handleUndoDelete}
+						style={{
+							background: "none",
+							border: "none",
+							color: "#60a5fa",
+							fontWeight: 700,
+							fontSize: 13,
+							cursor: "pointer",
+							padding: 0,
+							textDecoration: "underline",
+							fontFamily: "inherit",
+						}}
+					>
+						Bekor qilish
+					</button>
+				</div>
+			)}
 			</Comments.Shell>
 		);
 	}),

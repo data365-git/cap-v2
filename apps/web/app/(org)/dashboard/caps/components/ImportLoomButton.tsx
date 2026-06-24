@@ -21,8 +21,10 @@ import { UpgradeModal } from "@/components/UpgradeModal";
 
 export const ImportLoomButton = ({
 	size = "md",
+	context = "instruction",
 }: {
 	size?: "sm" | "lg" | "md";
+	context?: "meeting" | "instruction";
 }) => {
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
@@ -51,6 +53,7 @@ export const ImportLoomButton = ({
 			const result = await importFromLoom({
 				loomUrl: loomUrl.trim(),
 				orgId: activeOrganization.organization.id,
+				context,
 			});
 
 			if (!result.success) {

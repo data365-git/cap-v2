@@ -203,6 +203,12 @@ export function SegmentedProgressBar({
 			onPointerLeave={onPointerLeave}
 			onPointerDown={onPointerDown}
 			onPointerUp={onPointerUp}
+			role="slider"
+			aria-label="Video progress"
+			aria-valuemin={0}
+			aria-valuemax={Math.round(effectiveDuration)}
+			aria-valuenow={Math.round((videoRef.current?.currentTime ?? 0))}
+			aria-describedby={tooltip.visible ? "chapter-tooltip" : undefined}
 		>
 			<div className="flex w-full gap-[3px]" style={{ height: "4px" }}>
 				{segments.map((seg, i) => (
@@ -233,6 +239,8 @@ export function SegmentedProgressBar({
 
 			{tooltip.visible && (
 				<div
+					id="chapter-tooltip"
+					role="tooltip"
 					className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded px-2 py-0.5 text-xs text-white z-50"
 					style={{ left: tooltip.x, backgroundColor: "#15171c" }}
 				>

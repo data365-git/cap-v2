@@ -1154,3 +1154,57 @@
 		transition: none !important;
 	}
 }
+
+/* === UX polish: press/active + standard easing === */
+.share-rd button, .share-rd [role="button"], .share-rd .bv-tab, .share-rd .stat-card, .share-rd .topic-card, .share-rd .step-item, .share-rd .tasks-switch-btn, .share-rd .task-check, .share-rd .task-card, .share-rd .transcript-play, .share-rd .refined-play, .share-rd .chapter-time, .share-rd .emoji-btn, .share-rd .cost-item {
+	transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1), border-color 200ms cubic-bezier(.22,.61,.36,1);
+}
+.share-rd button:active:not(:disabled), .share-rd [role="button"]:active:not([aria-disabled="true"]), .share-rd .bv-tab:active, .share-rd .stat-card:active, .share-rd .topic-card:active, .share-rd .step-item:active, .share-rd .tasks-switch-btn:active, .share-rd .task-check:active, .share-rd .task-card:active, .share-rd .transcript-play:active, .share-rd .refined-play:active, .share-rd .chapter-time:active, .share-rd .emoji-btn:active, .share-rd .cost-item:active {
+	transform: scale(0.97);
+	filter: brightness(0.95);
+}
+.share-rd button:focus-visible, .share-rd [role="button"]:focus-visible, .share-rd .bv-tab:focus-visible, .share-rd .stat-card:focus-visible, .share-rd .topic-card:focus-visible, .share-rd .step-item:focus-visible, .share-rd .tasks-switch-btn:focus-visible, .share-rd .task-check:focus-visible, .share-rd .task-card:focus-visible, .share-rd .transcript-play:focus-visible, .share-rd .refined-play:focus-visible, .share-rd .chapter-time:focus-visible, .share-rd .emoji-btn:focus-visible, .share-rd .cost-item:focus-visible {
+	outline: 2px solid currentColor;
+	outline-offset: 2px;
+}
+
+/* === UX polish: mobile safe-area === */
+@supports (padding: env(safe-area-inset-bottom)) {
+	.ai-fab {
+		padding-bottom: max(env(safe-area-inset-bottom), 12px);
+		padding-left: max(env(safe-area-inset-left), 12px);
+		padding-right: max(env(safe-area-inset-right), 12px);
+	}
+	body {
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+}
+@media (max-width: 640px) {
+	.share-rd .below-video-tabs,
+	.share-rd .bv-panel,
+	.share-rd .sum-stats {
+		overflow-x: auto;
+	}
+}
+
+/* === UX polish: depth === */
+.share-rd .below-video-tabs,
+.share-rd .refined-section {
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.share-rd .reactions-block {
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* === Skeleton shimmer === */
+.cap-skel {
+	background: linear-gradient(90deg, var(--surface-1, rgba(255,255,255,0.04)) 0%, var(--surface-2, rgba(255,255,255,0.08)) 50%, var(--surface-1, rgba(255,255,255,0.04)) 100%);
+	background-size: 200% 100%;
+	animation: cap-skel-shimmer 1.4s linear infinite;
+	border-radius: 8px;
+}
+@keyframes cap-skel-shimmer {
+	0% { background-position: 200% 0; }
+	100% { background-position: -200% 0; }
+}
+.cap-skel-group { display: flex; flex-direction: column; gap: 12px; }

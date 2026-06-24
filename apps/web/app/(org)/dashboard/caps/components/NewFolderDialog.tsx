@@ -26,6 +26,7 @@ interface Props {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	spaceId?: Space.SpaceIdOrOrganisationId;
+	context?: "meeting" | "instruction";
 }
 
 const FolderOptions = [
@@ -39,6 +40,7 @@ export const NewFolderDialog: React.FC<Props> = ({
 	open,
 	onOpenChange,
 	spaceId,
+	context = "instruction",
 }) => {
 	const [selectedColor, setSelectedColor] = useState<
 		(typeof FolderOptions)[number]["value"] | null
@@ -70,6 +72,7 @@ export const NewFolderDialog: React.FC<Props> = ({
 				public: data.public,
 				spaceId: Option.fromNullable(spaceId),
 				parentId: Option.none(),
+				context,
 			}),
 		onSuccess: () => {
 			setFolderName("");

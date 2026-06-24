@@ -2,6 +2,7 @@ import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import {
 	comments,
+	folders,
 	organizations,
 	sharedVideos,
 	spaces,
@@ -140,8 +141,7 @@ export default async function MeetingsPage(props: {
 				eq(videos.ownerId, userId),
 				eq(organizations.id, user.activeOrganizationId),
 				isNull(organizations.tombstoneAt),
-				sql`JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.type')) = 'extensionWeb'`,
-				sql`JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.context')) = 'meeting'`,
+				eq(videos.context, "meeting"),
 			),
 		);
 
@@ -197,8 +197,7 @@ export default async function MeetingsPage(props: {
 				eq(videos.orgId, user.activeOrganizationId),
 				isNull(videos.folderId),
 				isNull(organizations.tombstoneAt),
-				sql`JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.type')) = 'extensionWeb'`,
-				sql`JSON_UNQUOTE(JSON_EXTRACT(${videos.source}, '$.context')) = 'meeting'`,
+				eq(videos.context, "meeting"),
 			),
 		)
 		.groupBy(
@@ -219,6 +218,34 @@ export default async function MeetingsPage(props: {
 		.orderBy(desc(videos.effectiveCreatedAt))
 		.limit(limit)
 		.offset(offset);
+
+	const rootFoldersData = await db()
+		.select({
+			id: folders.id,
+			name: folders.name,
+			color: folders.color,
+			public: folders.public,
+			parentId: folders.parentId,
+			videoCount: sql<number>`(
+        WITH RECURSIVE folder_tree AS (
+          SELECT id FROM folders f0 WHERE f0.id = folders.id
+          UNION ALL
+          SELECT f.id FROM folders f
+          INNER JOIN folder_tree t ON f.parentId = t.id
+        )
+        SELECT COUNT(*) FROM videos WHERE videos.folderId IN (SELECT id FROM folder_tree)
+      )`,
+		})
+		.from(folders)
+		.where(
+			and(
+				eq(folders.organizationId, user.activeOrganizationId),
+				eq(folders.createdById, user.id),
+				isNull(folders.parentId),
+				isNull(folders.spaceId),
+				eq(folders.context, "meeting"),
+			),
+		);
 
 	const videoIds = videoData.map((video) => video.id);
 	const sharedSpacesMap =
@@ -295,6 +322,7 @@ export default async function MeetingsPage(props: {
 		<Meetings
 			data={processedVideoData}
 			count={totalCount}
+			rootFolders={rootFoldersData}
 			analyticsEnabled={Boolean(
 				serverEnv().TINYBIRD_TOKEN && serverEnv().TINYBIRD_HOST,
 			)}

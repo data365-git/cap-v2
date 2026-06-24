@@ -287,10 +287,12 @@ async function importLoomVideoForOwner({
 	loomUrl,
 	orgId,
 	ownerId,
+	context = "instruction",
 }: {
 	loomUrl: string;
 	orgId: Organisation.OrganisationId;
 	ownerId: User.UserId;
+	context?: "meeting" | "instruction";
 }): Promise<LoomImportResult> {
 	const loomVideoId = extractLoomVideoId(loomUrl.trim());
 	if (!loomVideoId) {
@@ -374,6 +376,7 @@ async function importLoomVideoForOwner({
 			bucket: Option.getOrNull(writable.bucketId),
 			storageIntegrationId: Option.getOrNull(writable.storageIntegrationId),
 			public: serverEnv().CAP_VIDEOS_DEFAULT_PUBLIC,
+			context,
 			...(oembedMeta?.duration ? { duration: oembedMeta.duration } : {}),
 			...(oembedMeta?.width ? { width: oembedMeta.width } : {}),
 			...(oembedMeta?.height ? { height: oembedMeta.height } : {}),
@@ -424,9 +427,11 @@ async function importLoomVideoForOwner({
 export async function importFromLoom({
 	loomUrl,
 	orgId,
+	context = "instruction",
 }: {
 	loomUrl: string;
 	orgId: Organisation.OrganisationId;
+	context?: "meeting" | "instruction";
 }): Promise<LoomImportResult> {
 	const user = await getCurrentUser();
 	if (!user) return { success: false, error: "Unauthorized" };
@@ -452,6 +457,7 @@ export async function importFromLoom({
 		loomUrl,
 		orgId,
 		ownerId: user.id,
+		context,
 	});
 }
 

@@ -9,10 +9,12 @@ import { SubfolderDialog } from "./SubfolderDialog";
 
 interface NewSubfolderButtonProps {
 	parentFolderId: Folder.FolderId;
+	context?: "meeting" | "instruction";
 }
 
 export const NewSubfolderButton = ({
 	parentFolderId,
+	context,
 }: NewSubfolderButtonProps) => {
 	const [openDialog, setOpenDialog] = useState(false);
 
@@ -31,6 +33,7 @@ export const NewSubfolderButton = ({
 				open={openDialog}
 				onOpenChange={setOpenDialog}
 				parentFolderId={parentFolderId}
+				context={context}
 			/>
 		</>
 	);

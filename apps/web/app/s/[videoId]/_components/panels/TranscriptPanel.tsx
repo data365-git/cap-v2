@@ -4,6 +4,7 @@ import { Play } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
+import { Skeleton, SkeletonGroup } from "../Skeleton";
 
 interface TranscriptPanelProps {
 	videoId: string;
@@ -161,11 +162,30 @@ export function TranscriptPanel({
 	if (!transcriptContent || cues.length === 0) {
 		// Transcript already done but cues empty (e.g. NO_AUDIO) → plain message.
 		// Otherwise offer on-demand generation.
+		const isDone =
+			transcriptionStatus === "COMPLETE" ||
+			transcriptionStatus === "NO_AUDIO" ||
+			transcriptionStatus === "SKIPPED";
+		const isInFlight =
+			!isDone &&
+			(transcriptionStatus === "PROCESSING" || transcriptionStatus === "QUEUED");
+
+		if (isInFlight) {
+			return (
+				<SkeletonGroup>
+					{[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+						<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+							<Skeleton style={{ width: 36, height: 16, flexShrink: 0, marginTop: 2 }} />
+							<Skeleton style={{ flex: 1, height: 16 }} />
+						</div>
+					))}
+				</SkeletonGroup>
+			);
+		}
+
 		return (
 			<div className="rd-empty">
-				{transcriptionStatus === "COMPLETE" ||
-				transcriptionStatus === "NO_AUDIO" ||
-				transcriptionStatus === "SKIPPED" ? (
+				{isDone ? (
 					"No transcript available."
 				) : isOwner ? (
 					<GenerateSection
@@ -216,7 +236,7 @@ export function TranscriptPanel({
 							onClick={() => onVideoJump?.(cue.startSeconds)}
 							aria-label={`Jump to ${cue.timestamp}`}
 						>
-							<Play fill="currentColor" />
+							<Play fill="currentColor" aria-hidden="true" />
 						</button>
 					</div>
 				);

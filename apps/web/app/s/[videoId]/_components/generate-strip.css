@@ -393,3 +393,16 @@
   color: rgba(255, 255, 255, 0.75);
   text-decoration: underline;
 }
+
+/* === UX polish: press/active + standard easing === */
+.gen-btn, .cap-regen-link {
+  transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1);
+}
+.gen-btn:active:not(:disabled), .cap-regen-link:active {
+  transform: scale(0.97);
+  filter: brightness(0.95);
+}
+.gen-btn:focus-visible, .cap-regen-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

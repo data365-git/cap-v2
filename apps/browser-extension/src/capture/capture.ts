@@ -345,10 +345,26 @@ function showComplete(shareUrl: string): void {
 	root.appendChild(card);
 }
 
+/**
+ * Map raw upload error strings/codes to user-facing Uzbek messages.
+ * Checks are inline (no external library) — just regex + status-code parsing.
+ */
+function mapUploadError(raw: string): string {
+	if (!raw) return "Yuklanmadi. Qayta uringan.";
+	if (/timeout|timed out/i.test(raw)) return "Yuklanish vaqti tugadi. Internet aloqasini tekshiring.";
+	if (/\b413\b/.test(raw)) return "Fayl juda katta. Qisqaroq yozuv qiling.";
+	if (/\b40[13]\b/.test(raw)) return "Sessiya tugagan. Qayta kiring.";
+	if (/\b5\d\d\b/.test(raw)) return "Server xatosi. Bir necha daqiqadan keyin qayta urining.";
+	return raw || "Yuklanmadi. Qayta uringan.";
+}
+
 function showError(reason: string): void {
 	stopTimer();
 	const root = $root(); root.innerHTML = "";
 	const card = mkCard();
+
+	// [CAP-ERROR] log so we can confirm the cached blob is still intact.
+	console.info("[CAP-ERROR] upload error displayed; cached blob preserved for retry");
 
 	const icon = mk("div", "error-icon");
 	icon.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none"
@@ -362,9 +378,27 @@ function showError(reason: string): void {
 	card.appendChild(mk("p", "phase-title", "Recording failed"));
 	card.appendChild(mk("p", "error-msg",   reason));
 
-	const dismissBtn = mk("button", "action-btn action-btn--secondary", "Dismiss");
-	dismissBtn.addEventListener("click", () => closeSelf());
-	card.appendChild(dismissBtn);
+	// Primary: Retry — always present
+	const retryBtn = mk("button", "action-btn action-btn--primary", "Retry");
+	retryBtn.addEventListener("click", () => {
+		// Ask the service worker to retry the upload; stay on this page.
+		chrome.runtime.sendMessage({ type: "RETRY_UPLOAD" }).catch(() => {});
+		showUploading(0);
+	});
+	card.appendChild(retryBtn);
+
+	// Secondary: Close — only closes the UI; does NOT discard the cached blob.
+	const closeBtn = mk("button", "action-btn action-btn--secondary", "Close");
+	const preservedNote = mk("p", "error-preserved-note",
+		"Yozuv saqlanib qoladi — keyinroq qayta urinishingiz mumkin");
+	preservedNote.style.fontSize = "11px";
+	preservedNote.style.color = "#6b7280";
+	preservedNote.style.margin = "4px 0 0";
+	preservedNote.style.textAlign = "center";
+	closeBtn.addEventListener("click", () => closeSelf()); // closes tab only, no discard
+	card.appendChild(closeBtn);
+	card.appendChild(preservedNote);
+
 	root.appendChild(card);
 }
 
@@ -745,8 +779,8 @@ chrome.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
 					break;
 				}
 				case "error": {
-					const reason = typeof state.reason === "string" ? state.reason : "An error occurred.";
-					showError(reason);
+					const rawReason = typeof state.reason === "string" ? state.reason : "";
+					showError(mapUploadError(rawReason));
 					// Auto-close on error too — the in-page nudge / overlay surfaces
 					// the error with a Retry button, so the capture tab is redundant.
 					setTimeout(() => {

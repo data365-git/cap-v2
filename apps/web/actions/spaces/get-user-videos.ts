@@ -16,7 +16,10 @@ import {
 import type { Space } from "@cap/web-domain";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
-export async function getUserVideos(spaceId: Space.SpaceIdOrOrganisationId) {
+export async function getUserVideos(
+	spaceId: Space.SpaceIdOrOrganisationId,
+	options?: { context?: "meeting" | "instruction" },
+) {
 	try {
 		const user = await getCurrentUser();
 
@@ -44,6 +47,10 @@ export async function getUserVideos(spaceId: Space.SpaceIdOrOrganisationId) {
 			),
 		};
 
+		const contextFilter = options?.context
+			? eq(videos.context, options.context)
+			: undefined;
+
 		const videoData = isAllSpacesEntry
 			? await db()
 					.select(selectFields)
@@ -62,7 +69,11 @@ export async function getUserVideos(spaceId: Space.SpaceIdOrOrganisationId) {
 					.leftJoin(spaces, eq(folders.spaceId, spaces.id))
 					.leftJoin(organizations, eq(videos.orgId, organizations.id))
 					.where(
-						and(eq(videos.ownerId, userId), isNull(organizations.tombstoneAt)),
+						and(
+							eq(videos.ownerId, userId),
+							isNull(organizations.tombstoneAt),
+							contextFilter,
+						),
 					)
 					.groupBy(
 						videos.id,
@@ -94,7 +105,11 @@ export async function getUserVideos(spaceId: Space.SpaceIdOrOrganisationId) {
 					.leftJoin(spaces, eq(folders.spaceId, spaces.id))
 					.leftJoin(organizations, eq(videos.orgId, organizations.id))
 					.where(
-						and(eq(videos.ownerId, userId), isNull(organizations.tombstoneAt)),
+						and(
+							eq(videos.ownerId, userId),
+							isNull(organizations.tombstoneAt),
+							contextFilter,
+						),
 					)
 					.groupBy(
 						videos.id,

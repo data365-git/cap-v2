@@ -35,6 +35,9 @@ export class ParentNotFoundError extends Schema.TaggedError<ParentNotFoundError>
 	HttpApiSchema.annotations({ status: 404 }),
 ) {}
 
+export const FolderContext = Schema.Literal("meeting", "instruction");
+export type FolderContext = (typeof FolderContext)["Type"];
+
 export class Folder extends Schema.Class<Folder>("Folder")({
 	id: FolderId,
 	name: Schema.String,
@@ -44,6 +47,7 @@ export class Folder extends Schema.Class<Folder>("Folder")({
 	createdById: UserId,
 	spaceId: Schema.OptionFromNullOr(SpaceIdOrOrganisationId),
 	parentId: Schema.OptionFromNullOr(FolderId),
+	context: FolderContext,
 }) {}
 
 export const FolderUpdate = Schema.Struct({
@@ -69,6 +73,7 @@ export class FolderRpcs extends RpcGroup.make(
 			public: Schema.optional(Schema.Boolean),
 			spaceId: Schema.OptionFromUndefinedOr(SpaceIdOrOrganisationId),
 			parentId: Schema.OptionFromUndefinedOr(FolderId),
+			context: Schema.optional(FolderContext),
 		}),
 		error: Schema.Union(NotFoundError, InternalError, PolicyDeniedError),
 	}).middleware(RpcAuthMiddleware),

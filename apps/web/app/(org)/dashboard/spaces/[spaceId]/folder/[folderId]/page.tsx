@@ -56,11 +56,14 @@ const FolderPage = async (props: {
 				? Effect.succeed(null)
 				: Effect.promise(() => getOrganizationAccess(user.id, orgId));
 
+		// Fetch the folder first so we can pass its context to getChildFolders.
+		const currentFolder = yield* getFolderById(params.folderId);
+		const folderContext = currentFolder.context ?? "instruction";
+
 		const [
 			childFolders,
 			breadcrumb,
 			videosData,
-			currentFolder,
 			ownerIsPro,
 			managementAccess,
 			orgAccess,
@@ -71,6 +74,7 @@ const FolderPage = async (props: {
 					spaceOrOrg.variant === "space"
 						? { variant: "space", spaceId: spaceOrOrg.space.id }
 						: { variant: "org", organizationId: spaceOrOrg.organization.id },
+					{ context: folderContext },
 				),
 				getFolderBreadcrumb(params.folderId),
 				getVideosByFolderId(
@@ -79,7 +83,6 @@ const FolderPage = async (props: {
 						? { variant: "space", spaceId: spaceOrOrg.space.id }
 						: { variant: "org", organizationId: spaceOrOrg.organization.id },
 				),
-				getFolderById(params.folderId),
 				Effect.promise(() => isOrganizationOwnerPro(orgId)),
 				spaceManagementAccess,
 				orgManagementAccess,
@@ -106,11 +109,12 @@ const FolderPage = async (props: {
 		return (
 			<div>
 				<div className="flex gap-2 items-center mb-10">
-					<NewSubfolderButton parentFolderId={params.folderId} />
+					<NewSubfolderButton parentFolderId={params.folderId} context={folderContext} />
 					<AddVideosButton
 						folderId={params.folderId}
 						spaceId={params.spaceId}
 						folderName={breadcrumb[breadcrumb.length - 1]?.name ?? "Folder"}
+						context={folderContext}
 					/>
 					<CollectionShareControl
 						kind="folder"

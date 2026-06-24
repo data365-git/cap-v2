@@ -32,26 +32,30 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 	if (!user || !user.activeOrganizationId) return notFound();
 
 	return Effect.gen(function* () {
-		const [childFolders, breadcrumb, videosData, share] = yield* Effect.all(
+		// Fetch the folder first so we can use its context to filter child content.
+		const share = yield* Effect.gen(function* () {
+			const folder = yield* getFolderById(folderId);
+			// Mirrors FoldersPolicy.canEdit for personal folders: only the
+			// creator may manage sharing; the Pro gate uses the folder's own
+			// organization, which is what the server enforces on writes.
+			const canManage =
+				folder.spaceId === null && folder.createdById === user.id;
+			const ownerIsPro = canManage
+				? yield* Effect.promise(() =>
+						isOrganizationOwnerPro(folder.organizationId),
+					)
+				: false;
+			return { folder, canManage, ownerIsPro };
+		});
+
+		const folderContext = share.folder.context ?? "instruction";
+
+		const [childFolders, breadcrumb, videosData] = yield* Effect.all(
 			[
-				getChildFolders(folderId, { variant: "user" }),
+				getChildFolders(folderId, { variant: "user" }, { context: folderContext }),
 				getFolderBreadcrumb(folderId),
 				getVideosByFolderId(folderId, {
 					variant: "user",
-				}),
-				Effect.gen(function* () {
-					const folder = yield* getFolderById(folderId);
-					// Mirrors FoldersPolicy.canEdit for personal folders: only the
-					// creator may manage sharing; the Pro gate uses the folder's own
-					// organization, which is what the server enforces on writes.
-					const canManage =
-						folder.spaceId === null && folder.createdById === user.id;
-					const ownerIsPro = canManage
-						? yield* Effect.promise(() =>
-								isOrganizationOwnerPro(folder.organizationId),
-							)
-						: false;
-					return { folder, canManage, ownerIsPro };
 				}),
 			],
 			{ concurrency: "unbounded" },
@@ -60,7 +64,7 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 		return (
 			<div>
 				<div className="flex flex-wrap gap-2 items-center mb-10">
-					<NewSubfolderButton parentFolderId={folderId} />
+					<NewSubfolderButton parentFolderId={folderId} context={folderContext} />
 					<UploadCapButton size="sm" />
 					<WebRecorderDialog />
 					<CollectionShareControl
@@ -78,7 +82,7 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 				</div>
 				<div className="flex flex-wrap gap-3 items-center mb-6 w-full">
 					<div className="flex overflow-x-auto items-center font-medium">
-						<ClientMyCapsLink />
+						<ClientMyCapsLink context={folderContext} />
 
 						{breadcrumb.map((folder, index) => (
 							<div key={folder.id} className="flex items-center">

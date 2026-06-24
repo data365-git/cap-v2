@@ -12,10 +12,12 @@ import { UpgradeModal } from "@/components/UpgradeModal";
 export const UploadCapButton = ({
 	size = "md",
 	folderId,
+	context = "instruction",
 }: {
 	size?: "sm" | "lg" | "md";
 	grey?: boolean;
 	folderId?: string;
+	context?: "meeting" | "instruction";
 }) => {
 	const { user } = useDashboardContext();
 	const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
@@ -29,11 +31,10 @@ export const UploadCapButton = ({
 			return;
 		}
 
-		router.push(
-			folderId
-				? `/dashboard/import?folderId=${encodeURIComponent(folderId)}`
-				: "/dashboard/import",
-		);
+		const params = new URLSearchParams();
+		if (folderId) params.set("folderId", folderId);
+		params.set("context", context);
+		router.push(`/dashboard/import?${params.toString()}`);
 	};
 
 	return (

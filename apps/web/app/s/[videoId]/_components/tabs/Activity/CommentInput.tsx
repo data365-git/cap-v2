@@ -50,9 +50,13 @@ const CommentInput: React.FC<CommentInputProps> = ({
 	return (
 		<div className="flex items-start space-x-3">
 			<div className="flex-1">
+				<label htmlFor="comment-input" className="sr-only">
+					Write a comment
+				</label>
 				<div className="p-2 rounded-lg border bg-gray-1 border-gray-5">
 					<textarea
 						ref={inputRef}
+						id="comment-input"
 						data-comment-input
 						value={content}
 						disabled={disabled}
@@ -60,6 +64,7 @@ const CommentInput: React.FC<CommentInputProps> = ({
 						onKeyDown={handleKeyDown}
 						placeholder={placeholder || "Leave a comment..."}
 						className="w-full placeholder:text-gray-8 text-sm leading-[22px] text-gray-12 bg-transparent focus:outline-none"
+						aria-label="Write a comment"
 					/>
 					<div className="flex items-center mt-2 space-x-2">
 						<Button

@@ -35,11 +35,13 @@ export async function createVideoForServerProcessing({
 	resolution,
 	folderId,
 	orgId,
+	context = "instruction",
 }: {
 	duration?: number;
 	resolution?: string;
 	folderId?: Folder.FolderId;
 	orgId: Organisation.OrganisationId;
+	context?: "meeting" | "instruction";
 }): Promise<CreateForProcessingResult> {
 	const user = await getCurrentUser();
 
@@ -86,6 +88,7 @@ export async function createVideoForServerProcessing({
 			bucket: Option.getOrNull(uploadResult.bucketId),
 			storageIntegrationId: Option.getOrNull(uploadResult.storageIntegrationId),
 			public: serverEnv().CAP_VIDEOS_DEFAULT_PUBLIC,
+			context,
 			...(folderId ? { folderId } : {}),
 		});
 

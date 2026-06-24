@@ -64,9 +64,8 @@ const CommentComponent: React.FC<{
 			: [];
 
 	const handleDelete = () => {
-		if (window.confirm("Are you sure you want to delete this comment?")) {
-			onDelete(comment.id, comment.parentCommentId);
-		}
+		// No confirm dialog — parent shows a 4-second undo snackbar instead.
+		onDelete(comment.id, comment.parentCommentId);
 	};
 
 	const canReply = true;

@@ -78,7 +78,7 @@ interface Props {
 const AdminNavItems = ({ toggleMobileNav }: Props) => {
 	const pathname = usePathname();
 	const [open, setOpen] = useState(false);
-	const { user, sidebarCollapsed, userCapsCount } = useDashboardContext();
+	const { user, sidebarCollapsed, userCapsCount, userMeetingsCount } = useDashboardContext();
 
 	const DEVELOPER_DASHBOARD_ALLOWED_EMAILS = ["richie@cap.so"];
 
@@ -97,6 +97,7 @@ const AdminNavItems = ({ toggleMobileNav }: Props) => {
 		{
 			name: "Meeting Recordings",
 			href: `/dashboard/meetings`,
+			extraText: userMeetingsCount,
 			matchChildren: true,
 			icon: <CapIcon />,
 			subNav: [],
