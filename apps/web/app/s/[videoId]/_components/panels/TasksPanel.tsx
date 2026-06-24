@@ -1,5 +1,6 @@
 "use client";
 
+import { Clock, LayoutGrid, List } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GenerateSection } from "../GenerateSection";
 
@@ -19,66 +20,34 @@ interface TasksPanelProps {
 
 type TasksMode = "board" | "checklist";
 
-function getTasksMode(): TasksMode {
-	const val = document.documentElement.dataset.tasks;
-	if (val === "checklist") return "checklist";
-	return "board";
-}
+const PRIORITY_ORDER: Array<"high" | "medium" | "low" | undefined> = [
+	"high",
+	"medium",
+	"low",
+	undefined,
+];
 
-function priorityColor(priority?: "high" | "medium" | "low"): string {
-	if (priority === "high") return "bg-red-100 text-red-700";
-	if (priority === "medium") return "bg-amber-100 text-amber-700";
-	if (priority === "low") return "bg-green-100 text-green-700";
-	return "bg-gray-100 text-gray-500";
-}
+const GROUP_LABEL: Record<string, string> = {
+	high: "High priority",
+	medium: "Medium priority",
+	low: "Low priority",
+	none: "No priority",
+};
 
-function Initials({ name }: { name: string }) {
+function initials(name: string): string {
 	const parts = name.trim().split(/\s+/);
-	const letters =
+	return (
 		parts.length >= 2
-			? ((parts[0]?.[0] ?? "") + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase()
-			: name.slice(0, 2).toUpperCase();
-	return (
-		<span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700">
-			{letters}
-		</span>
-	);
+			? (parts[0]?.[0] ?? "") + (parts[parts.length - 1]?.[0] ?? "")
+			: name.slice(0, 2)
+	).toUpperCase();
 }
 
-function DeadlinePill({ deadline }: { deadline: string }) {
-	return (
-		<span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-600">
-			{deadline}
-		</span>
-	);
-}
-
-function PriorityBadge({ priority }: { priority?: "high" | "medium" | "low" }) {
-	if (!priority) return null;
-	return (
-		<span
-			className={`rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${priorityColor(priority)}`}
-		>
-			{priority}
-		</span>
-	);
-}
-
-function ProgressBar({ done, total }: { done: number; total: number }) {
-	const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-	return (
-		<div className="flex items-center gap-3">
-			<div className="relative h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
-				<div
-					className="absolute inset-y-0 left-0 rounded-full bg-gray-800 transition-all duration-300"
-					style={{ width: `${pct}%` }}
-				/>
-			</div>
-			<span className="w-10 shrink-0 text-right text-xs font-semibold text-gray-700">
-				{pct}%
-			</span>
-		</div>
-	);
+const AVATAR_COLORS = ["#475569", "#2563eb", "#0ea5e9", "#7c3aed", "#0d9488"];
+function avatarColor(name: string): string {
+	let h = 0;
+	for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+	return AVATAR_COLORS[h % AVATAR_COLORS.length] ?? "#475569";
 }
 
 export function TasksPanel({
@@ -88,28 +57,25 @@ export function TasksPanel({
 }: TasksPanelProps) {
 	const [mode, setMode] = useState<TasksMode>("board");
 	const [tasks, setTasks] = useState<Task[]>(initialTasks);
-	const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+	// Persist the Board/Checklist choice (design: localStorage key `taskView`).
 	useEffect(() => {
-		setMode(getTasksMode());
-		const observer = new MutationObserver(() => setMode(getTasksMode()));
-		observer.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ["data-tasks"],
-		});
-		return () => observer.disconnect();
+		const saved = localStorage.getItem("taskView");
+		if (saved === "checklist" || saved === "board") setMode(saved);
 	}, []);
+	const setView = (v: TasksMode) => {
+		setMode(v);
+		localStorage.setItem("taskView", v);
+	};
 
 	const done = tasks.filter((t) => t.done).length;
 	const total = tasks.length;
+	const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
 	function toggle(index: number) {
 		setTasks((prev) => {
-			const next = prev.map((t, i) =>
-				i === index ? { ...t, done: !t.done } : t,
-			);
-
+			const next = prev.map((t, i) => (i === index ? { ...t, done: !t.done } : t));
 			if (debounceRef.current) clearTimeout(debounceRef.current);
 			debounceRef.current = setTimeout(() => {
 				fetch("/api/video/tasks/toggle", {
@@ -122,14 +88,13 @@ export function TasksPanel({
 					}),
 				}).catch(() => undefined);
 			}, 400);
-
 			return next;
 		});
 	}
 
 	if (total === 0) {
 		return (
-			<div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+			<div className="rd-empty">
 				<GenerateSection
 					videoId={videoId}
 					kind="ai"
@@ -141,184 +106,104 @@ export function TasksPanel({
 		);
 	}
 
-	return (
-		<div className="flex flex-col gap-4">
-			<ProgressBar done={done} total={total} />
-
-			{mode === "board" ? (
-				<BoardView tasks={tasks} onToggle={toggle} />
-			) : (
-				<ChecklistView
-					tasks={tasks}
-					onToggle={toggle}
-					collapsed={collapsed}
-					onCollapseToggle={(key) =>
-						setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
-					}
-				/>
-			)}
-		</div>
-	);
-}
-
-function BoardView({
-	tasks,
-	onToggle,
-}: {
-	tasks: Task[];
-	onToggle: (i: number) => void;
-}) {
-	const todo = tasks
-		.map((t, i) => ({ t, i }))
-		.filter(({ t }) => !t.done && t.priority !== "high");
-	const inProgress = tasks
-		.map((t, i) => ({ t, i }))
-		.filter(({ t }) => !t.done && t.priority === "high");
-	const done = tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.done);
-
-	return (
-		<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-			<Column label="To Do" items={todo} onToggle={onToggle} />
-			<Column label="In Progress" items={inProgress} onToggle={onToggle} />
-			<Column label="Done" items={done} onToggle={onToggle} />
-		</div>
-	);
-}
-
-function Column({
-	label,
-	items,
-	onToggle,
-}: {
-	label: string;
-	items: { t: Task; i: number }[];
-	onToggle: (i: number) => void;
-}) {
-	return (
-		<div className="flex flex-col gap-2 bg-gray-50 border border-gray-200 rounded-xl p-4 min-h-[120px] overflow-hidden">
-			<div className="flex items-center gap-2">
-				<span className="text-xs font-semibold text-gray-600">{label}</span>
-				<span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
-					{items.length}
-				</span>
-			</div>
-			<div className="flex flex-col gap-2">
-				{items.map(({ t, i }) => (
-					<TaskCard key={i} task={t} index={i} onToggle={onToggle} />
-				))}
-				{items.length === 0 && (
-					<div className="rounded-xl border border-dashed border-gray-200 p-3 text-center">
-						<span className="text-[11px] text-gray-400">Empty</span>
-					</div>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function TaskCard({
-	task,
-	index,
-	onToggle,
-}: {
-	task: Task;
-	index: number;
-	onToggle: (i: number) => void;
-}) {
-	return (
-		<div
-			className={`flex flex-col gap-2 rounded-lg border p-3 shadow-sm transition-opacity ${task.done ? "border-gray-100 bg-gray-50 opacity-60" : "border-gray-200 bg-white"}`}
-		>
-			<div className="flex items-start gap-2">
-				<input
-					type="checkbox"
-					checked={task.done}
-					onChange={() => onToggle(index)}
-					className="mt-0.5 size-3.5 shrink-0 cursor-pointer accent-gray-800"
-				/>
-				<span
-					className={`text-xs leading-snug text-gray-900 ${task.done ? "line-through" : ""}`}
-				>
-					{task.title}
-				</span>
-			</div>
-			<div className="flex items-center gap-1.5 flex-wrap">
-				<PriorityBadge priority={task.priority} />
-				{task.assignee && <Initials name={task.assignee} />}
-				{task.deadline && <DeadlinePill deadline={task.deadline} />}
-			</div>
-		</div>
-	);
-}
-
-const PRIORITY_ORDER: Array<"high" | "medium" | "low" | undefined> = [
-	"high",
-	"medium",
-	"low",
-	undefined,
-];
-
-function ChecklistView({
-	tasks,
-	onToggle,
-	collapsed,
-	onCollapseToggle,
-}: {
-	tasks: Task[];
-	onToggle: (i: number) => void;
-	collapsed: Record<string, boolean>;
-	onCollapseToggle: (key: string) => void;
-}) {
 	const groups = PRIORITY_ORDER.map((p) => ({
 		key: p ?? "none",
-		label: p ? p.charAt(0).toUpperCase() + p.slice(1) : "No priority",
+		label: GROUP_LABEL[p ?? "none"],
 		items: tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.priority === p),
 	})).filter(({ items }) => items.length > 0);
 
 	return (
-		<div className="flex flex-col gap-3">
-			{groups.map(({ key, label, items }) => (
-				<div key={key} className="flex flex-col gap-1">
+		<>
+			{/* Progress header */}
+			<div className="tasks-head">
+				<div className="th-top">
+					<span className="t">
+						{done} / {total} done
+					</span>
+					<span className="th-pct">{pct}%</span>
+				</div>
+				<div className="th-bar">
+					<div className="th-bar-fill" style={{ width: `${pct}%` }} />
+				</div>
+				<div className="s">Extracted action items from this meeting</div>
+			</div>
+
+			{/* View switch */}
+			<div className="tasks-toolbar">
+				<div className="tasks-switch" role="tablist" aria-label="Tasks view">
 					<button
 						type="button"
-						onClick={() => onCollapseToggle(key)}
-						className="flex items-center gap-2 text-left"
+						className={`tasks-switch-btn${mode === "board" ? " active" : ""}`}
+						onClick={() => setView("board")}
 					>
-						<span
-							className={`text-[10px] transition-transform ${collapsed[key] ? "" : "rotate-90"}`}
-						>
-							▶
-						</span>
-						<span className="text-xs font-semibold text-gray-600">{label}</span>
-						<span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
-							{items.length}
-						</span>
+						<LayoutGrid /> Board
 					</button>
-
-					{!collapsed[key] && (
-						<div className="flex flex-col divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
-							{items.map(({ t, i }) => (
-								<div key={i} className="flex items-center gap-3 px-3 py-2.5">
-									<input
-										type="checkbox"
-										checked={t.done}
-										onChange={() => onToggle(i)}
-										className="size-3.5 shrink-0 cursor-pointer accent-gray-800"
-									/>
-									<span
-										className={`flex-1 text-sm text-gray-900 ${t.done ? "line-through opacity-50" : ""}`}
-									>
-										{t.title}
-									</span>
-									<PriorityBadge priority={t.priority} />
-									{t.assignee && <Initials name={t.assignee} />}
-									{t.deadline && <DeadlinePill deadline={t.deadline} />}
-								</div>
-							))}
-						</div>
-					)}
+					<button
+						type="button"
+						className={`tasks-switch-btn${mode === "checklist" ? " active" : ""}`}
+						onClick={() => setView("checklist")}
+					>
+						<List /> Checklist
+					</button>
 				</div>
-			))}
-		</div>
+			</div>
+
+			<div className="tasks-wrap" data-tasks={mode}>
+				{groups.map((g) => (
+					<div className="task-group" key={g.key}>
+						<div className="task-group-header">
+							{g.label}
+							<span className="task-group-count">{g.items.length}</span>
+						</div>
+						<div className="task-grid">
+							{g.items.map(({ t, i }) => {
+								const prioClass = t.done
+									? "is-done"
+									: t.priority === "high"
+										? "p-high"
+										: t.priority === "medium"
+											? "p-med"
+											: t.priority === "low"
+												? "p-low"
+												: "";
+								return (
+									<div className={`task-card ${prioClass}`} key={i}>
+										<button
+											type="button"
+											aria-label={t.done ? "Mark not done" : "Mark done"}
+											className={`task-check${t.done ? " done" : ""}`}
+											onClick={() => toggle(i)}
+										/>
+										<div className="task-body">
+											<div className="task-title">{t.title}</div>
+											{(t.assignee || t.deadline) && (
+												<div className="task-meta">
+													{t.assignee && (
+														<span className="task-assignee">
+															<span
+																className="assignee-av"
+																style={{ background: avatarColor(t.assignee) }}
+															>
+																{initials(t.assignee)}
+															</span>
+															<span className="assignee-name">{t.assignee}</span>
+														</span>
+													)}
+													{t.deadline && (
+														<span className="task-tag deadline">
+															<Clock /> {t.deadline}
+														</span>
+													)}
+												</div>
+											)}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+				))}
+			</div>
+		</>
 	);
 }

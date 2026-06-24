@@ -22,6 +22,7 @@ import type { CommentType } from "../Share";
 import type { VideoData } from "../types";
 import { AuthOverlay } from "./AuthOverlay";
 import { MeetingCostPanel } from "./panels/MeetingCostPanel";
+import "./share-redesign.css";
 import { Comments } from "./tabs/Activity/Comments";
 
 type AiGenerationStatus =
@@ -126,25 +127,31 @@ const ReactionsBlock = ({
 	reactions: Record<string, number>;
 	onReact: (emoji: string) => void;
 }) => (
-	<div className="flex flex-wrap gap-2 p-4 border-t border-gray-5">
-		{REACTIONS.map(({ emoji, label }) => (
-			<button
-				key={emoji}
-				type="button"
-				aria-label={label}
-				onClick={() => onReact(emoji)}
-				className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-5 bg-gray-1 hover:bg-gray-3 transition-colors text-sm font-emoji"
-			>
-				<span role="img" aria-label={label}>
-					{emoji}
-				</span>
-				{reactions[emoji] != null && reactions[emoji] > 0 && (
-					<span className="text-xs text-gray-9 font-sans">
-						{reactions[emoji]}
-					</span>
-				)}
-			</button>
-		))}
+	<div className="share-rd">
+		<div className="reactions-block">
+			<div className="reactions-label">Reactions</div>
+			<div className="reactions-row">
+				<div className="emoji-pill">
+					{REACTIONS.map(({ emoji, label }) => {
+						const count = reactions[emoji] ?? 0;
+						return (
+							<button
+								key={emoji}
+								type="button"
+								aria-label={label}
+								onClick={() => onReact(emoji)}
+								className={`emoji-btn font-emoji${count > 0 ? " reacted" : ""}`}
+							>
+								<span role="img" aria-label={label}>
+									{emoji}
+								</span>
+								{count > 0 && <span className="emoji-count">{count}</span>}
+							</button>
+						);
+					})}
+				</div>
+			</div>
+		</div>
 	</div>
 );
 

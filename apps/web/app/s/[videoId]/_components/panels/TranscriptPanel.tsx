@@ -1,5 +1,6 @@
 "use client";
 
+import { Play } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { GenerateSection } from "../GenerateSection";
 
@@ -118,38 +119,12 @@ function formatTimestamp(seconds: number): string {
 	return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-function speakerHue(name: string): number {
-	let hash = 0;
-	for (let i = 0; i < name.length; i++) {
-		hash = (hash * 31 + name.charCodeAt(i)) & 0xffffffff;
-	}
-	return Math.abs(hash) % 360;
-}
-
 function speakerInitials(name: string): string {
 	return name
 		.split(/\s+/)
 		.slice(0, 2)
 		.map((w) => w[0]?.toUpperCase() ?? "")
 		.join("");
-}
-
-interface CueGroup {
-	speaker: string;
-	cues: Cue[];
-}
-
-function groupBySpeaker(cues: Cue[]): CueGroup[] {
-	const groups: CueGroup[] = [];
-	for (const cue of cues) {
-		const last = groups[groups.length - 1];
-		if (last && last.speaker === cue.speaker) {
-			last.cues.push(cue);
-		} else {
-			groups.push({ speaker: cue.speaker, cues: [cue] });
-		}
-	}
-	return groups;
 }
 
 function isActive(cue: Cue, currentTime: number): boolean {
@@ -167,7 +142,6 @@ export function TranscriptPanel({
 	const activeRef = useRef<HTMLDivElement>(null);
 
 	const cues = transcriptContent ? parseVTTCues(transcriptContent) : [];
-	const groups = groupBySpeaker(cues);
 
 	const activeCueId = cues.find((c) => isActive(c, currentTime))?.id ?? null;
 
@@ -185,11 +159,11 @@ export function TranscriptPanel({
 		// Transcript already done but cues empty (e.g. NO_AUDIO) → plain message.
 		// Otherwise offer on-demand generation.
 		return (
-			<div className="flex items-center justify-center h-full p-4">
+			<div className="rd-empty">
 				{transcriptionStatus === "COMPLETE" ||
 				transcriptionStatus === "NO_AUDIO" ||
 				transcriptionStatus === "SKIPPED" ? (
-					<p className="text-sm text-gray-500">No transcript available.</p>
+					"No transcript available."
 				) : (
 					<GenerateSection
 						videoId={videoId}
@@ -202,66 +176,43 @@ export function TranscriptPanel({
 		);
 	}
 
+	// Two-tone speaker coloring (design: --sp-1 slate, .s2 = accent). First
+	// distinct speaker is slate; subsequent speakers alternate to accent.
+	const speakerOrder: string[] = [];
+	for (const c of cues) {
+		if (!speakerOrder.includes(c.speaker)) speakerOrder.push(c.speaker);
+	}
+	const isS2 = (speaker: string) => speakerOrder.indexOf(speaker) % 2 === 1;
+
 	return (
-		<div ref={containerRef} className="flex flex-col gap-1 overflow-y-auto p-4">
-			{groups.map((group, gi) => {
-				const hue = speakerHue(group.speaker);
-				const initials = speakerInitials(group.speaker);
-				const avatarBg = `hsl(${hue},55%,55%)`;
-
+		<div ref={containerRef} className="transcript-list">
+			{cues.map((cue) => {
+				const active = cue.id === activeCueId;
+				const s2 = isS2(cue.speaker);
 				return (
-					<div key={`${group.speaker}-${gi}`} className="flex flex-col gap-0.5">
-						{group.cues.map((cue) => {
-							const active = cue.id === activeCueId;
-							return (
-								<div
-									key={cue.id}
-									ref={active ? activeRef : undefined}
-									className={`grid items-start rounded-lg px-2 py-2 transition-colors group ${
-										active
-											? "border-l-2 border-purple-600 bg-purple-50 pl-3"
-											: "border-l-2 border-transparent hover:bg-gray-50"
-									}`}
-									style={{ gridTemplateColumns: "42px 1fr 34px" }}
-								>
-									<div className="flex flex-col items-center gap-1 pt-0.5">
-										<div
-											className="flex size-7 items-center justify-center rounded-full text-[10px] font-semibold text-white shrink-0"
-											style={{ backgroundColor: avatarBg }}
-											title={group.speaker}
-										>
-											{initials}
-										</div>
-										<span className="text-[10px] font-medium text-gray-400 tabular-nums">
-											{cue.timestamp}
-										</span>
-									</div>
-
-									<p className="min-w-0 px-2 pt-1 text-sm leading-relaxed text-gray-800 break-words">
-										{cue.text}
-									</p>
-
-									<div className="flex items-start justify-end pt-1">
-										<button
-											type="button"
-											onClick={() => onVideoJump?.(cue.startSeconds)}
-											aria-label={`Jump to ${cue.timestamp}`}
-											className="flex size-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 opacity-0 transition-all duration-150 group-hover:opacity-100 hover:scale-110 hover:bg-purple-100 hover:text-purple-600"
-										>
-											<svg
-												aria-hidden="true"
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 24 24"
-												fill="currentColor"
-												className="size-3"
-											>
-												<path d="M8 5v14l11-7z" />
-											</svg>
-										</button>
-									</div>
-								</div>
-							);
-						})}
+					<div
+						key={cue.id}
+						ref={active ? activeRef : undefined}
+						className={`transcript-entry${s2 ? " s2" : ""}${active ? " active" : ""}`}
+					>
+						<div className="transcript-avatar" title={cue.speaker}>
+							{speakerInitials(cue.speaker)}
+						</div>
+						<div className="transcript-body">
+							<div className="transcript-meta">
+								<span className="transcript-meta-speaker">{cue.speaker}</span>
+								<span className="transcript-meta-time">{cue.timestamp}</span>
+							</div>
+							<div className="transcript-text">{cue.text}</div>
+						</div>
+						<button
+							type="button"
+							className="transcript-play"
+							onClick={() => onVideoJump?.(cue.startSeconds)}
+							aria-label={`Jump to ${cue.timestamp}`}
+						>
+							<Play fill="currentColor" />
+						</button>
 					</div>
 				);
 			})}

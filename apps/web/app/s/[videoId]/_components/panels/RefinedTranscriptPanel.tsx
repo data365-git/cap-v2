@@ -25,7 +25,7 @@ export function RefinedTranscriptPanel({
 }: RefinedTranscriptPanelProps) {
 	if (!refinedTranscript || refinedTranscript.chapters.length === 0) {
 		return (
-			<div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-8 text-center">
+			<div className="rd-empty">
 				<GenerateSection
 					videoId={videoId}
 					kind="ai"
@@ -38,44 +38,32 @@ export function RefinedTranscriptPanel({
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
+		<>
 			{refinedTranscript.chapters.map((chapter) => (
-				<section
-					key={chapter.startSec}
-					className="refined-section rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-				>
-					<div className="mb-3 flex items-center gap-2">
+				<section className="refined-section" key={chapter.startSec}>
+					<div className="refined-head">
 						<button
 							type="button"
-							onClick={() => onVideoJump?.(chapter.startSec)}
-							className="rounded-md bg-purple-50 px-2 py-0.5 font-mono text-xs font-medium text-purple-700 transition-colors hover:bg-purple-100"
-						>
-							{formatTimeMinutes(chapter.startSec)}
-						</button>
-						<h3 className="flex-1 text-sm font-semibold text-gray-900">
-							{chapter.title}
-						</h3>
-						<button
-							type="button"
+							className="refined-play"
 							onClick={() => onVideoJump?.(chapter.startSec)}
 							aria-label={`Play from ${chapter.title}`}
-							className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-purple-50 text-purple-600 transition-colors hover:bg-purple-100"
 						>
-							<Play className="size-3.5 fill-current" />
+							<Play fill="currentColor" />
 						</button>
+						<div className="refined-head-text">
+							<div className="refined-section-title">{chapter.title}</div>
+							<div className="refined-time-badge">
+								{formatTimeMinutes(chapter.startSec)}
+							</div>
+						</div>
 					</div>
-					<div className="flex flex-col gap-2">
-						{chapter.paragraphs.map((paragraph) => (
-							<p
-								key={paragraph}
-								className="text-sm leading-relaxed text-gray-700"
-							>
-								{paragraph}
-							</p>
-						))}
-					</div>
+					{chapter.paragraphs.map((paragraph) => (
+						<p className="refined-para" key={paragraph}>
+							{paragraph}
+						</p>
+					))}
 				</section>
 			))}
-		</div>
+		</>
 	);
 }

@@ -531,8 +531,10 @@ export const Share = ({
 			transcriptionStatus={transcriptionStatus}
 		>
 			<div className="mt-4">
-				<div className="flex flex-col gap-4 lg:flex-row">
-					<div className="flex-1">
+				{/* Design shell: main content flex, gap 20px, top-aligned; sidebar
+				    sticky 320px while the long left column scrolls. */}
+				<div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+					<div className="flex-1 min-w-0">
 						<div className="overflow-visible relative bg-white rounded-2xl border aspect-video border-gray-5">
 							<div className="absolute inset-3 w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] overflow-visible rounded-xl">
 								<ShareVideo
@@ -557,7 +559,7 @@ export const Share = ({
 					</div>
 
 					{!allSettingsDisabled && (
-						<div className="flex flex-col lg:w-80">
+						<div className="flex flex-col gap-4 lg:w-80 lg:sticky lg:top-4 lg:self-start">
 							<Sidebar
 								data={{
 									...data,
