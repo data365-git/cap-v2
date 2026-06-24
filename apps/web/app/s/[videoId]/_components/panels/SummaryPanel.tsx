@@ -1,13 +1,10 @@
 "use client";
 
-import { Clock, LayoutGrid, List, ListChecks, Sparkles, Users } from "lucide-react";
-import { useState } from "react";
+import { Clock, LayoutGrid, ListChecks, Sparkles, Users } from "lucide-react";
 import { GenerateSection } from "../GenerateSection";
 import { RichText } from "../RichText";
 import { Skeleton, SkeletonGroup } from "../Skeleton";
 import { formatTimeMinutes } from "../utils/transcript-utils";
-
-type SummaryView = "cards" | "timeline" | "document";
 
 interface SummaryPanelProps {
 	videoId: string;
@@ -27,26 +24,16 @@ interface SummaryPanelProps {
 	onVideoJump?: (seconds: number) => void;
 }
 
-/** Format seconds → "M:SS" */
-function fmtSec(sec: number): string {
-	const m = Math.floor(sec / 60);
-	const s = sec % 60;
-	return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 export function SummaryPanel({
 	videoId,
 	transcriptionStatus,
 	aiGenerationStatus,
 	isOwner = false,
 	data,
-	onVideoJump,
 }: SummaryPanelProps) {
-	const [view, setView] = useState<SummaryView>("cards");
 	const { aiSummary } = data;
 	const topics = aiSummary?.topics ?? [];
 	const nextSteps = aiSummary?.nextSteps ?? [];
-	const chapters = aiSummary?.chapters ?? [];
 
 	if (!aiSummary) {
 		const isInFlight =
@@ -126,167 +113,53 @@ export function SummaryPanel({
 				</div>
 			)}
 
-			{/* View switcher */}
-			<div className="sum-switcher-toolbar">
-				<div className="tasks-switch" role="tablist" aria-label="Summary view">
-					<button
-						className={`tasks-switch-btn${view === "cards" ? " active" : ""}`}
-						type="button"
-						role="tab"
-						aria-selected={view === "cards"}
-						aria-controls="summary-panel-cards"
-						onClick={() => setView("cards")}
-					>
-						<LayoutGrid size={15} aria-hidden="true" />
-						Cards
-					</button>
-					<button
-						className={`tasks-switch-btn${view === "timeline" ? " active" : ""}`}
-						type="button"
-						role="tab"
-						aria-selected={view === "timeline"}
-						aria-controls="summary-panel-timeline"
-						onClick={() => setView("timeline")}
-					>
-						<Clock size={15} aria-hidden="true" />
-						Timeline
-					</button>
-					<button
-						className={`tasks-switch-btn${view === "document" ? " active" : ""}`}
-						type="button"
-						role="tab"
-						aria-selected={view === "document"}
-						aria-controls="summary-panel-document"
-						onClick={() => setView("document")}
-					>
-						<List size={15} aria-hidden="true" />
-						Document
-					</button>
-				</div>
-			</div>
-
-			{/* ===== CARDS view ===== */}
-			{view === "cards" && (
-				<div id="summary-panel-cards" role="tabpanel">
-					{/* Topic cards */}
-					{topics.length > 0 && (
-						<>
-							<div className="sec-eyebrow">
-								<span className="ic" aria-hidden="true">
-									<LayoutGrid size={14} aria-hidden="true" />
-								</span>
-								Topics
+			{/* Topic cards */}
+			{topics.length > 0 && (
+				<>
+					<div className="sec-eyebrow">
+						<span className="ic" aria-hidden="true">
+							<LayoutGrid size={14} aria-hidden="true" />
+						</span>
+						Topics
+					</div>
+					<div className="topic-grid">
+						{topics.map((topic) => (
+							<div className="topic-card" key={topic.title}>
+								<div className="topic-dot" aria-hidden="true">
+									<Sparkles aria-hidden="true" />
+								</div>
+								<div className="topic-text">
+									<b>{topic.title}</b>
+									{topic.body ? <> — <RichText inline>{topic.body}</RichText></> : null}
+								</div>
 							</div>
-							<div className="topic-grid">
-								{topics.map((topic) => (
-									<div className="topic-card" key={topic.title}>
-										<div className="topic-dot" aria-hidden="true">
-											<Sparkles aria-hidden="true" />
-										</div>
-										<div className="topic-text">
-											<b>{topic.title}</b>
-											{topic.body ? <> — <RichText inline>{topic.body}</RichText></> : null}
-										</div>
-									</div>
-								))}
-							</div>
-						</>
-					)}
-
-					{/* Next steps — accent checklist */}
-					{nextSteps.length > 0 && (
-						<>
-							<div className="sec-eyebrow">
-								<span className="ic" aria-hidden="true">
-									<ListChecks size={14} aria-hidden="true" />
-								</span>
-								Next steps
-							</div>
-							<div className="step-list">
-								{nextSteps.map((step, i) => (
-									<div className="step-item" key={step}>
-										<span className="step-num">{String(i + 1).padStart(2, "0")}</span>
-										<span className="t"><RichText inline>{step}</RichText></span>
-									</div>
-								))}
-							</div>
-						</>
-					)}
-
-					{topics.length === 0 && nextSteps.length === 0 && (
-						<div className="rd-empty">No content available yet.</div>
-					)}
-				</div>
+						))}
+					</div>
+				</>
 			)}
 
-			{/* ===== TIMELINE view ===== */}
-			{view === "timeline" && (
-				<div id="summary-panel-timeline" role="tabpanel" aria-labelledby="summary-timeline-tab">
-					{chapters.length > 0 ? (
-						<>
-							<div className="sec-eyebrow">
-								<span className="ic" aria-hidden="true">
-									<Clock size={14} aria-hidden="true" />
-								</span>
-								Chapters
+			{/* Next steps — accent checklist */}
+			{nextSteps.length > 0 && (
+				<>
+					<div className="sec-eyebrow">
+						<span className="ic" aria-hidden="true">
+							<ListChecks size={14} aria-hidden="true" />
+						</span>
+						Next steps
+					</div>
+					<div className="step-list">
+						{nextSteps.map((step, i) => (
+							<div className="step-item" key={step}>
+								<span className="step-num">{String(i + 1).padStart(2, "0")}</span>
+								<span className="t"><RichText inline>{step}</RichText></span>
 							</div>
-							<div className="chapter-list">
-								{chapters.map((ch) => (
-									<div className="chapter" key={ch.startSec}>
-										<span className="chapter-dot" />
-										<button
-											className="chapter-time"
-											type="button"
-											onClick={() => onVideoJump?.(ch.startSec)}
-										>
-											{fmtSec(ch.startSec)}
-										</button>
-										<div className="chapter-body">
-											<div className="ct">{ch.title}</div>
-											{ch.body && <div className="cd">{ch.body}</div>}
-										</div>
-									</div>
-								))}
-							</div>
-						</>
-					) : (
-						<div className="rd-empty">No chapters available yet.</div>
-					)}
-				</div>
+						))}
+					</div>
+				</>
 			)}
 
-			{/* ===== DOCUMENT view ===== */}
-			{view === "document" && (
-				<div className="doc-view" id="summary-panel-document" role="tabpanel" aria-labelledby="summary-document-tab">
-					{topics.length > 0 && (
-						<>
-							<div className="sec-eyebrow">Topics</div>
-							<ul>
-								{topics.map((topic) => (
-									<li key={topic.title}>
-										<b>{topic.title}</b>
-										{topic.body ? <> — <RichText inline>{topic.body}</RichText></> : null}
-									</li>
-								))}
-							</ul>
-						</>
-					)}
-
-					{nextSteps.length > 0 && (
-						<>
-							<div className="sec-eyebrow">Next steps</div>
-							<ul>
-								{nextSteps.map((step) => (
-									<li key={step}><RichText inline>{step}</RichText></li>
-								))}
-							</ul>
-						</>
-					)}
-
-					{topics.length === 0 && nextSteps.length === 0 && (
-						<div className="rd-empty">No content available yet.</div>
-					)}
-				</div>
+			{topics.length === 0 && nextSteps.length === 0 && (
+				<div className="rd-empty">No content available yet.</div>
 			)}
 		</>
 	);
