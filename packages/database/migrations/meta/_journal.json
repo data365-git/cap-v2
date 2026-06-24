@@ -239,6 +239,13 @@
 			"when": 1782000000000,
 			"tag": "0033_add_video_folder_context",
 			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "5",
+			"when": 1782100000000,
+			"tag": "0034_add_ai_usage_event_outcome",
+			"breakpoints": true
 		}
 	]
 }

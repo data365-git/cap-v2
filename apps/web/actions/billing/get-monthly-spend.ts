@@ -14,9 +14,21 @@ function currentBillingMonth(): string {
 	return `${year}-${month}`;
 }
 
+export interface OperationSpend {
+	/** Total cents (success + failed) */
+	totalUsdCents: number;
+	successUsdCents: number;
+	failedUsdCents: number;
+	successCount: number;
+	failedCount: number;
+}
+
 const ZERO_RESULT = {
 	totalUsdCents: 0,
 	breakdown: {} as Record<string, number>,
+	breakdownDetail: {} as Record<string, OperationSpend>,
+	totalSuccessUsdCents: 0,
+	totalFailedUsdCents: 0,
 	capUsdCents: null as number | null,
 	percentUsed: 0,
 };
@@ -27,21 +39,24 @@ export async function getMonthlySpend(scope: {
 }): Promise<{
 	totalUsdCents: number;
 	breakdown: Record<string, number>;
+	breakdownDetail: Record<string, OperationSpend>;
+	totalSuccessUsdCents: number;
+	totalFailedUsdCents: number;
 	capUsdCents: number | null;
 	percentUsed: number;
 }> {
 	const user = await getCurrentUser();
-	if (!user) return { ...ZERO_RESULT, breakdown: {} };
+	if (!user) return { ...ZERO_RESULT, breakdown: {}, breakdownDetail: {} };
 
 	// Authorization per scope type.
 	if (scope.type === "user") {
-		if (scope.id !== user.id) return { ...ZERO_RESULT, breakdown: {} };
+		if (scope.id !== user.id) return { ...ZERO_RESULT, breakdown: {}, breakdownDetail: {} };
 	} else if (scope.type === "org") {
 		const access = await getOrganizationAccess(
 			user.id,
 			Organisation.OrganisationId.make(scope.id),
 		);
-		if (!access) return { ...ZERO_RESULT, breakdown: {} };
+		if (!access) return { ...ZERO_RESULT, breakdown: {}, breakdownDetail: {} };
 	} else {
 		// type === "video"
 		const [video] = await db()
@@ -50,13 +65,13 @@ export async function getMonthlySpend(scope: {
 			.where(eq(videos.id, Video.VideoId.make(scope.id)))
 			.limit(1);
 
-		if (!video) return { ...ZERO_RESULT, breakdown: {} };
+		if (!video) return { ...ZERO_RESULT, breakdown: {}, breakdownDetail: {} };
 
 		if (video.ownerId !== user.id) {
 			const access = video.orgId
 				? await getOrganizationAccess(user.id, video.orgId)
 				: null;
-			if (!access) return { ...ZERO_RESULT, breakdown: {} };
+			if (!access) return { ...ZERO_RESULT, breakdown: {}, breakdownDetail: {} };
 		}
 	}
 
@@ -70,10 +85,13 @@ export async function getMonthlySpend(scope: {
 
 	const col = colMap[scope.type];
 
+	// Fetch rows grouped by operation AND status to split success vs failed.
 	const rows = await db()
 		.select({
 			operation: aiUsageEvents.operation,
+			status: aiUsageEvents.status,
 			totalMicros: sql<number>`COALESCE(SUM(${aiUsageEvents.costUsdMicros}), 0)`,
+			eventCount: sql<number>`COUNT(*)`,
 		})
 		.from(aiUsageEvents)
 		.where(
@@ -82,19 +100,52 @@ export async function getMonthlySpend(scope: {
 				eq(aiUsageEvents.billingMonth, billingMonth),
 			),
 		)
-		.groupBy(aiUsageEvents.operation);
+		.groupBy(aiUsageEvents.operation, aiUsageEvents.status);
 
 	let totalMicros = 0;
 	const breakdown: Record<string, number> = {};
+	const breakdownDetail: Record<string, OperationSpend> = {};
 
 	for (const row of rows) {
 		const micros = Number(row.totalMicros);
+		const count = Number(row.eventCount);
+		const op = row.operation;
+		const isFailed = row.status === "failed";
+
+		if (!breakdownDetail[op]) {
+			breakdownDetail[op] = {
+				totalUsdCents: 0,
+				successUsdCents: 0,
+				failedUsdCents: 0,
+				successCount: 0,
+				failedCount: 0,
+			};
+		}
+
 		const cents = Math.round(micros / 10_000);
-		breakdown[row.operation] = cents;
+		breakdownDetail[op].totalUsdCents += cents;
 		totalMicros += micros;
+
+		if (isFailed) {
+			breakdownDetail[op].failedUsdCents += cents;
+			breakdownDetail[op].failedCount += count;
+		} else {
+			// null (legacy) or "success" both count as successful
+			breakdownDetail[op].successUsdCents += cents;
+			breakdownDetail[op].successCount += count;
+		}
+
+		breakdown[op] = (breakdown[op] ?? 0) + cents;
 	}
 
 	const totalUsdCents = Math.round(totalMicros / 10_000);
+
+	let totalSuccessUsdCents = 0;
+	let totalFailedUsdCents = 0;
+	for (const detail of Object.values(breakdownDetail)) {
+		totalSuccessUsdCents += detail.successUsdCents;
+		totalFailedUsdCents += detail.failedUsdCents;
+	}
 
 	const capUsdCents: number | null = null;
 
@@ -103,5 +154,5 @@ export async function getMonthlySpend(scope: {
 			? Math.round((totalUsdCents / capUsdCents) * 100)
 			: 0;
 
-	return { totalUsdCents, breakdown, capUsdCents, percentUsed };
+	return { totalUsdCents, breakdown, breakdownDetail, totalSuccessUsdCents, totalFailedUsdCents, capUsdCents, percentUsed };
 }

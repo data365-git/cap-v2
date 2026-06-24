@@ -117,6 +117,7 @@ interface Props {
 	chapters?: { startSec: number; title: string }[];
 	videoSize?: "sm" | "md" | "lg";
 	onVideoSizeChange?: (size: "sm" | "md" | "lg") => void;
+	onAspectRatioChange?: (ratio: number) => void;
 }
 
 export function CapVideoPlayer({
@@ -153,6 +154,7 @@ export function CapVideoPlayer({
 	chapters = [],
 	videoSize,
 	onVideoSizeChange,
+	onAspectRatioChange,
 }: Props) {
 	const [currentCue, setCurrentCue] = useState<string>("");
 	const [controlsVisible, setControlsVisible] = useState(false);
@@ -332,7 +334,9 @@ export function CapVideoPlayer({
 			adoptFileDuration();
 			const { videoWidth, videoHeight } = video;
 			if (videoWidth > 0 && videoHeight > 0) {
-				setVideoAspectRatio(videoWidth / videoHeight);
+				const ratio = videoWidth / videoHeight;
+				setVideoAspectRatio(ratio);
+				onAspectRatioChange?.(ratio);
 			}
 		};
 
@@ -343,7 +347,7 @@ export function CapVideoPlayer({
 		return () => {
 			video.removeEventListener("loadedmetadata", handleLoadedMetadata);
 		};
-	}, [videoRef, fallbackDuration]);
+	}, [videoRef, fallbackDuration, onAspectRatioChange]);
 
 	// Track when all data is ready for comment markers
 	const [markersReady, setMarkersReady] = useState(false);

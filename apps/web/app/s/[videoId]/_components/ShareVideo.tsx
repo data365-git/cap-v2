@@ -130,6 +130,7 @@ export const ShareVideo = forwardRef<
 				localStorage.setItem("videoSize", size);
 			}
 		}, []);
+		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
 		const autoFinalizeAttemptedRef = useRef(false);
 		const segmentUploadProgress = useUploadProgress(
 			data.id,
@@ -374,11 +375,17 @@ export const ShareVideo = forwardRef<
 		return (
 			<>
 				<div
-					className="mx-auto relative h-full"
+					className="mx-auto relative"
 					style={{
 						viewTransitionName: "cap-edit-video",
 						maxWidth: videoSizeMaxWidth[videoSize],
 						transition: "max-width 320ms ease",
+						background: "#000",
+						borderRadius: 12,
+						overflow: "hidden",
+						...(videoAspectRatio != null
+							? { aspectRatio: String(videoAspectRatio) }
+							: {}),
 					}}
 				>
 					{isActivelyRecording ? (
@@ -414,7 +421,7 @@ export const ShareVideo = forwardRef<
 					) : (
 						<CapVideoPlayer
 							videoId={data.id}
-							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl overflow-visible"
+							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
 							videoSrc={videoSrc}
 							rawFallbackSrc={rawFallbackSrc}
 							duration={data.duration}
@@ -474,6 +481,7 @@ export const ShareVideo = forwardRef<
 							}
 							videoSize={videoSize}
 							onVideoSizeChange={setVideoSize}
+							onAspectRatioChange={setVideoAspectRatio}
 						/>
 					)}
 					{showFinalizeRecordingControl && (

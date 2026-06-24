@@ -28,6 +28,7 @@ import {
 	enhanceAudioFromUrl,
 } from "@/lib/audio-enhance";
 import {
+	type AudioSlice,
 	checkHasAudioTrack,
 	chunkAudio,
 	extractAudioFromUrl,
@@ -506,8 +507,11 @@ interface TranscriptionResult {
 }
 
 const CHUNK_THRESHOLD_SEC = 12 * 60; // chunk audio longer than 12 minutes
-const CHUNK_WINDOW_SEC = 10 * 60; // 10-minute windows
+const CHUNK_WINDOW_SEC = 5 * 60; // 5-minute windows (lower per-call token pressure)
 const CHUNK_OVERLAP_SEC = 5; // 5-second overlap to avoid mid-word cuts
+// When the real duration is unknown we still must not send the whole file to
+// Gemini. Assume a long recording so the chunker engages by default.
+const UNKNOWN_DURATION_ASSUMED_SEC = 60 * 60;
 
 async function transcribeAudio(
 	audioUrl: string,
@@ -540,9 +544,16 @@ async function transcribeAudio(
 	}
 
 	const resolvedApiKey = apiKey;
-	const totalDuration = videoDuration ?? 0;
-	const shouldChunk =
-		totalDuration > CHUNK_THRESHOLD_SEC && Number.isFinite(totalDuration);
+	const knownDuration =
+		videoDuration != null && Number.isFinite(videoDuration) && videoDuration > 0
+			? videoDuration
+			: null;
+	const totalDuration = knownDuration ?? 0;
+	// Only send the whole file to Gemini in ONE call when we KNOW the duration AND
+	// it's under the threshold. When duration is unknown we must NOT assume short —
+	// fall through to the chunked path (which probes the real length) so we never
+	// send an unbounded file in one shot.
+	const shouldChunk = knownDuration == null || knownDuration > CHUNK_THRESHOLD_SEC;
 
 	if (!shouldChunk) {
 		const startedAt = new Date().toISOString();
@@ -560,10 +571,12 @@ async function transcribeAudio(
 			videoId: context.videoId,
 			operation: "transcription",
 			model: "gemini-3-flash-preview",
+			// A truncated single call still consumed tokens — record it as failed.
+			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
 				const res = await transcribeWithGemini(audioUrl, {
 					apiKey: resolvedApiKey,
-					audioDurationSec: videoDuration ?? undefined,
+					audioDurationSec: knownDuration ?? undefined,
 				});
 				console.info(
 					`[CAP-TRANSCRIBE] chunk 1/1 offsetSec=0 durationSec=${totalDuration} finishReason=${res.finishReason} cueCount=${res.cues.length}`,
@@ -613,7 +626,105 @@ async function transcribeAudio(
 	const audioBuf = Buffer.from(await audioResponse.arrayBuffer());
 	await fs.writeFile(localAudioPath, audioBuf);
 
-	let slices: Awaited<ReturnType<typeof chunkAudio>> = [];
+	// When the caller's duration was unknown, probe the actual extracted audio
+	// length so the chunker slices on the real timeline rather than a guess. If
+	// even the probe can't read it, fall back to an assumed-long duration so we
+	// still chunk into fixed windows instead of sending the whole file.
+	let effectiveDuration = totalDuration;
+	if (knownDuration == null) {
+		const probe = await checkHasAudioTrack(localAudioPath);
+		effectiveDuration =
+			probe.durationSec != null && Number.isFinite(probe.durationSec)
+				? probe.durationSec
+				: UNKNOWN_DURATION_ASSUMED_SEC;
+		console.info(
+			`[CAP-TRANSCRIBE] duration unknown — probed local audio durationSec=${probe.durationSec ?? "null"}, using ${effectiveDuration}s for chunking`,
+		);
+	}
+
+	/**
+	 * Transcribe one slice, recovering from MAX_TOKENS truncation by re-splitting
+	 * the slice into halves and transcribing each (depth-limited). Returns merged
+	 * cues for the slice and whether every sub-part completed. Every Gemini call
+	 * — including the re-split halves — is recorded via withCostGuard and tagged
+	 * success/failed by its own finishReason.
+	 */
+	async function transcribeChunk(
+		slice: AudioSlice,
+		chunkLabel: string,
+		depth: number,
+	): Promise<{ cues: VttCue[]; isComplete: boolean }> {
+		const result = await withCostGuard({
+			orgId: context.orgId,
+			userId: context.userId,
+			videoId: context.videoId,
+			operation: "transcription",
+			model: "gemini-3-flash-preview",
+			// A chunk that truncated still consumed tokens — record it failed.
+			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
+			fn: async () => {
+				const res = await transcribeWithGemini(audioUrl, {
+					apiKey: resolvedApiKey,
+					audioDurationSec: slice.durationSec,
+					audioPath: slice.path,
+					startOffsetSec: slice.startOffsetSec,
+				});
+				console.info(
+					`[CAP-TRANSCRIBE] chunk ${chunkLabel} offsetSec=${slice.startOffsetSec} durationSec=${slice.durationSec} finishReason=${res.finishReason} cueCount=${res.cues.length}`,
+				);
+				return {
+					transcriptVtt: res.transcriptVtt,
+					cues: res.cues,
+					finishReason: res.finishReason,
+					isComplete: res.isComplete,
+					inputTokens: res.inputTokens,
+					outputTokens: res.outputTokens,
+				};
+			},
+		});
+
+		// Recover truncated chunks by halving and retrying (cap depth at 2).
+		if (result.finishReason === "MAX_TOKENS" && depth < 2) {
+			const halfWindow = Math.max(30, Math.ceil(slice.durationSec / 2));
+			console.warn(
+				`[CAP-TRANSCRIBE] chunk ${chunkLabel} hit MAX_TOKENS — re-splitting into ~${halfWindow}s halves (depth ${depth + 1})`,
+			);
+			const subSlices = await chunkAudio(
+				slice.path,
+				slice.durationSec,
+				halfWindow,
+				CHUNK_OVERLAP_SEC,
+			);
+			const subCues: VttCue[] = [];
+			let subComplete = true;
+			try {
+				for (let j = 0; j < subSlices.length; j++) {
+					const sub = subSlices[j];
+					if (!sub) continue;
+					// The sub-slice offset is relative to the parent slice; shift it
+					// back onto the absolute timeline before transcribing.
+					const absolute: AudioSlice = {
+						...sub,
+						startOffsetSec: slice.startOffsetSec + sub.startOffsetSec,
+					};
+					const r = await transcribeChunk(
+						absolute,
+						`${chunkLabel}.${j + 1}`,
+						depth + 1,
+					);
+					subCues.push(...r.cues);
+					if (!r.isComplete) subComplete = false;
+				}
+			} finally {
+				await Promise.all(subSlices.map((s) => s.cleanup()));
+			}
+			return { cues: subCues, isComplete: subComplete };
+		}
+
+		return { cues: result.cues, isComplete: result.isComplete };
+	}
+
+	let slices: AudioSlice[] = [];
 	const perChunkResults: Array<{ cues: VttCue[]; startOffsetSec: number }> = [];
 	let allComplete = true;
 	let totalCueCount = 0;
@@ -621,7 +732,7 @@ async function transcribeAudio(
 	try {
 		slices = await chunkAudio(
 			localAudioPath,
-			totalDuration,
+			effectiveDuration,
 			CHUNK_WINDOW_SEC,
 			CHUNK_OVERLAP_SEC,
 		);
@@ -642,32 +753,7 @@ async function transcribeAudio(
 			const chunkLabel = `${i + 1}/${slices.length}`;
 			const chunkStart = Date.now();
 
-			const result = await withCostGuard({
-				orgId: context.orgId,
-				userId: context.userId,
-				videoId: context.videoId,
-				operation: "transcription",
-				model: "gemini-3-flash-preview",
-				fn: async () => {
-					const res = await transcribeWithGemini(audioUrl, {
-						apiKey: resolvedApiKey,
-						audioDurationSec: slice.durationSec,
-						audioPath: slice.path,
-						startOffsetSec: slice.startOffsetSec,
-					});
-					console.info(
-						`[CAP-TRANSCRIBE] chunk ${chunkLabel} offsetSec=${slice.startOffsetSec} durationSec=${slice.durationSec} finishReason=${res.finishReason} cueCount=${res.cues.length}`,
-					);
-					return {
-						transcriptVtt: res.transcriptVtt,
-						cues: res.cues,
-						finishReason: res.finishReason,
-						isComplete: res.isComplete,
-						inputTokens: res.inputTokens,
-						outputTokens: res.outputTokens,
-					};
-				},
-			});
+			const result = await transcribeChunk(slice, chunkLabel, 0);
 
 			// Cues from transcribeWithGemini are already shifted by startOffsetSec —
 			// pass 0 to mergeVtt so we don't double-shift.
@@ -694,7 +780,7 @@ async function transcribeAudio(
 	const merged = mergeVtt(perChunkResults);
 
 	console.info(
-		`[CAP-TRANSCRIBE] merged transcript: ${slices.length} chunks, ${totalCueCount} total cues, ${totalDuration} total duration sec, allComplete=${allComplete}`,
+		`[CAP-TRANSCRIBE] merged transcript: ${slices.length} chunks, ${totalCueCount} total cues, ${effectiveDuration} total duration sec, allComplete=${allComplete}`,
 	);
 
 	return {

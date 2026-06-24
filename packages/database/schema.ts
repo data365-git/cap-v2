@@ -1544,6 +1544,14 @@ export const aiUsageEvents = mysqlTable(
 			.notNull()
 			.default(0),
 		billingMonth: varchar("billingMonth", { length: 7 }).notNull(),
+		// Outcome of the token-consuming call. Nullable so existing rows (recorded
+		// before this column existed) stay valid; new rows are tagged on write.
+		status: varchar("status", {
+			length: 16,
+			enum: ["success", "failed"],
+		}),
+		// Attempt / regeneration number for this operation; null when unknown.
+		attempt: int("attempt"),
 		createdAt: timestamp("createdAt").notNull().defaultNow(),
 	},
 	(table) => [

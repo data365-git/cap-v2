@@ -50,7 +50,45 @@ interface CostGuardOptions<T> {
 	model: string;
 	budgetCapUserMicros?: number | null;
 	budgetCapOrgMicros?: number | null;
+	/**
+	 * Attempt / regeneration number for this operation. Persisted on the usage
+	 * event so failed attempts are countable. Null when the caller has no notion
+	 * of attempts.
+	 */
+	attempt?: number | null;
+	/**
+	 * Inspect the (successful) result and decide whether the outcome should be
+	 * recorded as "failed" — e.g. a transcription that RETURNS truncated. When
+	 * omitted, a returned result is recorded as "success".
+	 */
+	determineStatus?: (
+		result: T & { inputTokens: number; outputTokens: number },
+	) => "success" | "failed";
 	fn: () => Promise<T & { inputTokens: number; outputTokens: number }>;
+}
+
+/**
+ * Best-effort extraction of partial token usage from a thrown error. Some Gemini
+ * errors carry usage metadata even when the call ultimately fails; capturing it
+ * means a failed attempt is still billed/recorded rather than silently lost.
+ */
+function tokensFromError(error: unknown): {
+	inputTokens: number;
+	outputTokens: number;
+} {
+	const e = error as {
+		inputTokens?: number;
+		outputTokens?: number;
+		usageMetadata?: {
+			promptTokenCount?: number;
+			candidatesTokenCount?: number;
+		};
+	} | null;
+	const inputTokens =
+		Number(e?.inputTokens ?? e?.usageMetadata?.promptTokenCount ?? 0) || 0;
+	const outputTokens =
+		Number(e?.outputTokens ?? e?.usageMetadata?.candidatesTokenCount ?? 0) || 0;
+	return { inputTokens, outputTokens };
 }
 
 export async function withCostGuard<T>(
@@ -88,13 +126,32 @@ export async function withCostGuard<T>(
 		}
 	}
 
-	const result = await options.fn();
+	// Run the wrapped call. Every token-consuming outcome — success, a returned
+	// result the caller deems failed (truncation), or a throw — gets recorded and
+	// tagged so failed attempts are never lost.
+	let result: (T & { inputTokens: number; outputTokens: number }) | undefined;
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let status: "success" | "failed" = "success";
+	let thrown: unknown;
 
-	const costUsdMicros = priceForMicros(
-		options.model,
-		result.inputTokens,
-		result.outputTokens,
-	);
+	try {
+		result = await options.fn();
+		inputTokens = result.inputTokens;
+		outputTokens = result.outputTokens;
+		status =
+			options.determineStatus != null
+				? options.determineStatus(result)
+				: "success";
+	} catch (error) {
+		thrown = error;
+		status = "failed";
+		const partial = tokensFromError(error);
+		inputTokens = partial.inputTokens;
+		outputTokens = partial.outputTokens;
+	}
+
+	const costUsdMicros = priceForMicros(options.model, inputTokens, outputTokens);
 
 	await db()
 		.insert(aiUsageEvents)
@@ -105,11 +162,17 @@ export async function withCostGuard<T>(
 			videoId: (options.videoId as Video.VideoId) ?? null,
 			operation: options.operation,
 			model: options.model,
-			inputTokens: result.inputTokens,
-			outputTokens: result.outputTokens,
+			inputTokens,
+			outputTokens,
 			costUsdMicros,
 			billingMonth,
+			status,
+			attempt: options.attempt ?? null,
 		});
+
+	if (thrown !== undefined) {
+		throw thrown;
+	}
 
 	// Check budget thresholds and create alerts
 	if (options.budgetCapUserMicros != null && options.budgetCapUserMicros > 0) {
@@ -178,5 +241,7 @@ export async function withCostGuard<T>(
 		}
 	}
 
-	return result;
+	// `result` is defined here: the only path that leaves it undefined is a throw,
+	// which already rethrew above.
+	return result as T & { inputTokens: number; outputTokens: number };
 }
