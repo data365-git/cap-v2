@@ -18,15 +18,29 @@ async function verifyRawFileUploaded(
 	const [bucket] = await Storage.getAccessForVideo(
 		decodeStorageVideo(video),
 	).pipe(runPromise);
-	const head = await bucket
-		.headObject(rawFileKey)
-		.pipe(
-			Effect.retry({ times: 3, schedule: Schedule.exponential("100 millis") }),
-			runPromise,
-		);
+	try {
+		// A browser PUT can return 200 a moment before the object is visible to a
+		// server-side HEAD (R2 read-after-write timing). Retry generously (~8s)
+		// before giving up.
+		const head = await bucket
+			.headObject(rawFileKey)
+			.pipe(
+				Effect.retry({ times: 8, schedule: Schedule.spaced("1 seconds") }),
+				runPromise,
+			);
 
-	if ((head.ContentLength ?? 0) <= 0) {
-		throw new Error("Uploaded video file is empty");
+		if ((head.ContentLength ?? 0) <= 0) {
+			throw new Error("Uploaded video file is empty");
+		}
+	} catch (err) {
+		// Don't block processing on a failed pre-flight check. The processing
+		// workflow fetches the raw file itself and will surface a proper, durable
+		// error on the video if it is genuinely missing — whereas throwing here
+		// dead-ends a successful upload with "processing failed to start".
+		console.warn(
+			`[CAP-IMPORT] verifyRawFileUploaded could not confirm ${rawFileKey}; proceeding to start processing anyway:`,
+			err,
+		);
 	}
 }
 
