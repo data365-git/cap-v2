@@ -372,6 +372,7 @@ export function AIChatPopup({
 			if (last?.role === "assistant") {
 				updated[updated.length - 1] = { ...last, stopped: true };
 			}
+			messagesRef.current = updated;
 			return updated;
 		});
 	}, []);
