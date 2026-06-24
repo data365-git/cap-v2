@@ -38,15 +38,12 @@ export function AIFab({ onClick, isOpen }: AIFabProps) {
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					aria-hidden="true"
-					style={{ transform: "translateY(1px)" }}
 				>
-					<path d="M12 3v2M12 19v2M5 12H3M21 12h-2" />
 					<path
-						d="M12 7.5 13.2 11l3.3 1-3.3 1L12 16.5 10.8 13l-3.3-1 3.3-1z"
+						d="M12 4 L13.3 10.7 L20 12 L13.3 13.3 L12 20 L10.7 13.3 L4 12 L10.7 10.7 Z"
 						fill="currentColor"
 						stroke="none"
 					/>
-					<circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
 				</svg>
 			)}
 		</button>

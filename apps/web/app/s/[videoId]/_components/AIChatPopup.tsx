@@ -20,7 +20,9 @@ interface Message {
 
 let msgIdCounter = 0;
 function nextMsgId() {
-	return `msg-${++msgIdCounter}`;
+	return typeof crypto !== "undefined" && crypto.randomUUID
+		? crypto.randomUUID()
+		: `msg-${++msgIdCounter}`;
 }
 
 interface AIChatPopupProps {
@@ -305,11 +307,20 @@ export function AIChatPopup({
 	onClose,
 	isOpen = false,
 }: AIChatPopupProps) {
-	const [messages, setMessages] = useState<Message[]>([]);
+	const storageKey = `cap:chat:${videoId}`;
+	const [messages, setMessages] = useState<Message[]>(() => {
+		if (typeof window === "undefined") return [];
+		try {
+			const raw = sessionStorage.getItem(`cap:chat:${videoId}`);
+			return raw ? (JSON.parse(raw) as Message[]) : [];
+		} catch {
+			return [];
+		}
+	});
 	// Always-current snapshot of messages so callbacks can read the latest array
 	// synchronously (regenerate updates state + ref together to avoid a stale-
 	// closure race when it immediately re-calls sendMessage).
-	const messagesRef = useRef<Message[]>([]);
+	const messagesRef = useRef<Message[]>(messages);
 	const [input, setInput] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
 	const [lastUserPrompt, setLastUserPrompt] = useState<string>("");
@@ -328,6 +339,17 @@ export function AIChatPopup({
 		startH: number;
 	} | null>(null);
 
+	// Persist messages to sessionStorage on every change (capped to 50)
+	useEffect(() => {
+		if (messages.length === 0) return;
+		try {
+			const capped = messages.length > 50 ? messages.slice(-50) : messages;
+			sessionStorage.setItem(storageKey, JSON.stringify(capped));
+		} catch {
+			/* storage full/unavailable */
+		}
+	}, [messages, storageKey]);
+
 	// Stop in-flight stream when popup closes
 	useEffect(() => {
 		if (!isOpen && isStreaming) {
@@ -337,11 +359,9 @@ export function AIChatPopup({
 
 	// Focus textarea when popup opens
 	useEffect(() => {
-		if (isOpen) {
-			// Small delay so the CSS transition has started and the element is interactive
-			const t = setTimeout(() => textareaRef.current?.focus(), 50);
-			return () => clearTimeout(t);
-		}
+		if (!isOpen) return;
+		const t = setTimeout(() => textareaRef.current?.focus(), 300);
+		return () => clearTimeout(t);
 	}, [isOpen]);
 
 	useEffect(() => {
@@ -490,10 +510,10 @@ export function AIChatPopup({
 				let errorContent: string;
 				if (err instanceof TypeError) {
 					errorContent = "Aloqa uzildi — qayta urinib ko'ring.";
-				} else if (responseStatus === 429) {
-					errorContent = "Lavozimga yetdik. Bir oz kuting va qayta urining.";
-				} else if (responseStatus >= 500 && responseStatus < 600) {
-					errorContent = "Server xatosi. Qayta urinib ko'ring.";
+				} else if (responseStatus >= 500) {
+					errorContent = "Server xatosi — qayta urining.";
+				} else if (responseStatus >= 400) {
+					errorContent = "So'rov rad etildi.";
 				} else {
 					errorContent = "Xato yuz berdi. Qayta urinib ko'ring.";
 				}
@@ -679,11 +699,7 @@ export function AIChatPopup({
 							<div className="bubble">
 								{msg.role === "assistant" ? (
 									msg.content === "" && isStreaming && msg.id === messages[messages.length - 1]?.id ? (
-										<div className="ai-typing">
-											<span />
-											<span />
-											<span />
-										</div>
+										<span className="ai-caret" aria-hidden="true" />
 									) : (
 										<MarkdownContent
 											text={msg.content}
