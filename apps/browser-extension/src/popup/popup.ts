@@ -600,10 +600,24 @@ function renderRecording(
 
 	const btnRow = el("div", { className: "btn-row" }, pauseBtn, stopBtn);
 
+	// Always-available recovery: CANCEL force-resets to idle even if the capture
+	// tab is gone / the service worker lost track of it (Stop depends on the
+	// capture tab and can otherwise leave the popup stuck on "recording").
+	const cancelBtn = el(
+		"button",
+		{ className: "link-btn" },
+		"Cancel & discard recording",
+	);
+	cancelBtn.addEventListener("click", () => {
+		cancelBtn.textContent = "Cancelling…";
+		sendMsg({ type: "CANCEL" });
+	});
+
 	root.appendChild(header);
 	root.appendChild(timerEl);
 	root.appendChild(modeEl);
 	root.appendChild(btnRow);
+	root.appendChild(cancelBtn);
 
 	const startedAt = state.startedAt;
 	timerInterval = setInterval(() => {

@@ -340,8 +340,21 @@ async function handleMessage(
 
 		// ── Overlay: delete (discard + cancel, no upload, no restart) ───────
 		case "DELETE_RECORDING": {
+			// Resilient: do NOT depend on the capture tab replying with
+			// RECORDER_DISCARDED (it may be closed, or the MV3 service worker may
+			// have restarted and lost track of it — which left the state stuck on
+			// "recording"). Tell the capture page best-effort, then force idle here.
 			pendingDeleteAfterDiscard = true;
 			await sendToCapturePage({ type: "DISCARD_RECORDING" }).catch(() => {});
+			if (captureTabId !== null) {
+				chrome.tabs.remove(captureTabId).catch(() => {});
+				captureTabId = null;
+			}
+			discardUpload();
+			stopKeepAlive();
+			clearOverlayTabs();
+			await setState({ kind: "idle" });
+			updateBadge({ kind: "idle" });
 			return { ok: true };
 		}
 
@@ -365,12 +378,14 @@ async function handleMessage(
 
 		// ── Popup: cancel ─────────────────────────────────────────────────
 		case "CANCEL": {
+			await sendToCapturePage({ type: "DISCARD_RECORDING" }).catch(() => {});
 			if (captureTabId !== null) {
 				chrome.tabs.remove(captureTabId).catch(() => {});
 				captureTabId = null;
 			}
 			clearOverlayTabs(); // Overlay self-removes via state→idle
-			await sendToCapturePage({ type: "STOP_CAPTURE" }).catch(() => {});
+			discardUpload();
+			stopKeepAlive();
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
 			return { ok: true };
@@ -545,16 +560,18 @@ async function handleMessage(
 			await setState({ kind: "idle" });
 			updateBadge({ kind: "idle" });
 
-			if (pendingDeleteAfterDiscard) {
-				// DELETE path — just go idle, no restart.
+			// Only auto-restart for a genuine RESTART of an active recording. If this
+			// is a DELETE, or DELETE already forced idle (state is no longer
+			// "recording"), stay idle — never resurrect a deleted recording.
+			if (pendingDeleteAfterDiscard || discardSt.kind !== "recording") {
 				pendingDeleteAfterDiscard = false;
 				return { ok: true };
 			}
 
 			// RESTART path — launch a fresh recording.
-			const restartMode = discardSt.kind === "recording" ? discardSt.mode : "instruction";
-			const restartMeetingId = discardSt.kind === "recording" ? discardSt.meetingId : undefined;
-			const restartTabId = discardSt.kind === "recording" ? discardSt.tabId : undefined;
+			const restartMode = discardSt.mode;
+			const restartMeetingId = discardSt.meetingId;
+			const restartTabId = discardSt.tabId;
 			const restartSettings = await getSettings();
 			await setState({ kind: "arming", mode: restartMode, meetingId: restartMeetingId, tabId: restartTabId });
 			await launchMeetCapture(restartMeetingId, restartTabId, restartSettings);
