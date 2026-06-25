@@ -10,9 +10,7 @@ import {
 } from "@cap/database/auth/create-user-from-invite";
 import { and, eq, gt, sql } from "drizzle-orm";
 
-export type RequestOtpResult =
-	| { allowed: false }
-	| { allowed: true; code: string };
+export type RequestOtpResult = { allowed: false } | { allowed: true };
 
 export async function requestOtp(email: string): Promise<RequestOtpResult> {
 	const normalized = email.trim().toLowerCase();
@@ -67,8 +65,6 @@ export async function requestOtp(email: string): Promise<RequestOtpResult> {
 			expires: new Date(Date.now() + 10 * 60 * 1000),
 		});
 
-	console.log(`[OTP] code for ${normalized}: ${code}`);
-
-	// Return the code directly — email delivery is not yet configured
-	return { allowed: true, code };
+	// Code is delivered out-of-band (email). Never returned to the caller.
+	return { allowed: true };
 }
