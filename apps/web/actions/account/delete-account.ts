@@ -4,10 +4,15 @@ import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import {
 	accounts,
+	authApiKeys,
+	comments,
+	messengerMessages,
+	notifications,
 	organizationMembers,
 	organizations,
 	sessions,
 	users,
+	videos,
 } from "@cap/database/schema";
 import { eq } from "drizzle-orm";
 
@@ -30,6 +35,23 @@ export async function deleteAccount(): Promise<
 	}
 
 	await db().transaction(async (tx) => {
+		// User-authored content. comments.authorId has no FK cascade, so
+		// orphaned authorIds would point at a deleted user — wipe them first.
+		await tx.delete(comments).where(eq(comments.authorId, user.id));
+		// Anonymise messenger messages instead of cascade-deleting whole
+		// conversations (others may have participated). userId is nullable.
+		await tx
+			.update(messengerMessages)
+			.set({ userId: null })
+			.where(eq(messengerMessages.userId, user.id));
+		await tx
+			.delete(notifications)
+			.where(eq(notifications.recipientId, user.id));
+		await tx.delete(authApiKeys).where(eq(authApiKeys.userId, user.id));
+		// Videos owned by this user. The schema cascades comments/sharedVideos
+		// off videos.id, so deleting the videos row also clears child rows.
+		await tx.delete(videos).where(eq(videos.ownerId, user.id));
+
 		await tx
 			.delete(organizationMembers)
 			.where(eq(organizationMembers.userId, user.id));
