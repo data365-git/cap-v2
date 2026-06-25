@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@cap/database";
+import { getCurrentUser } from "@cap/database/auth/session";
 import { videos } from "@cap/database/schema";
 import { Storage } from "@cap/web-backend";
 import type { Video } from "@cap/web-domain";
@@ -38,6 +39,11 @@ export async function translateTranscript(
 		};
 	}
 
+	const user = await getCurrentUser();
+	if (!user) {
+		return { success: false, message: "Not authenticated" };
+	}
+
 	const groq = getGroqClient();
 	if (!groq) {
 		return {
@@ -56,6 +62,10 @@ export async function translateTranscript(
 	}
 
 	const { video } = query[0];
+
+	if (video.ownerId !== user.id) {
+		return { success: false, message: "You don't own this video." };
+	}
 
 	const translatedKey = `${video.ownerId}/${videoId}/transcription.${targetLanguage}.vtt`;
 
