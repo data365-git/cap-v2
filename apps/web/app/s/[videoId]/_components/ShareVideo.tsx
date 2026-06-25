@@ -442,7 +442,7 @@ export const ShareVideo = forwardRef<
 						transition: "max-width 320ms ease",
 						background: "#000",
 						borderRadius: 12,
-						overflow: "hidden",
+						overflow: isActivelyRecording ? "visible" : "hidden",
 						...(isPinned ? { maxHeight: "48vh" } : {}),
 						...(videoAspectRatio != null
 							? { aspectRatio: String(videoAspectRatio) }
