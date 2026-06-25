@@ -2809,8 +2809,8 @@ function MediaPlayerPlaybackSpeedDial(
 	const showSavings = effectiveDuration > 0 && displaySpeed > 1;
 
 	return (
-		<div className="flex absolute inset-0 z-20 justify-center items-center pointer-events-none">
-			<div className="translate-y-[3.5rem] xs:translate-y-20 md:translate-y-28">
+		<div className="flex absolute inset-0 z-20 justify-center items-end pb-12 xs:pb-16 md:pb-20 pointer-events-none">
+			<div>
 				<AnimatePresence>
 					{show && (
 						<motion.div
