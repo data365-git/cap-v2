@@ -1,14 +1,25 @@
 import { db } from "@cap/database";
 import { decrypt } from "@cap/database/crypto";
 import { nanoId } from "@cap/database/helpers";
-import { aiUsageEvents, users, videos } from "@cap/database/schema";
+import {
+	aiUsageEvents,
+	organizations,
+	users,
+	videos,
+} from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
 import { priceForMicros } from "@cap/utils";
 import { type Organisation, type User, Video } from "@cap/web-domain";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
 import { retrieveTopK } from "@/lib/transcript-retrieve";
+
+interface AiBudgetSettings {
+	monthlyUsdCents?: number;
+	alertAtPct?: number;
+	enabled?: boolean;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -71,10 +82,90 @@ export async function POST(request: NextRequest) {
 	}
 
 	const [owner] = await db()
-		.select({ geminiApiKey: users.geminiApiKey })
+		.select({
+			geminiApiKey: users.geminiApiKey,
+			preferences: users.preferences,
+		})
 		.from(users)
 		.where(eq(users.id, video.ownerId))
 		.limit(1);
+
+	// Enforce aiBudget: reject when current-month spend ≥ configured cap.
+	// Org budget (settings.aiBudget) takes precedence over the owner's
+	// personal budget (preferences.aiBudget). Both honour `enabled !== false`.
+	const billingMonthCheck = (() => {
+		const now = new Date();
+		return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+	})();
+
+	let budgetCap: number | null = null;
+	let budgetScope: "org" | "user" | null = null;
+	let budgetScopeCol = aiUsageEvents.userId;
+	let budgetScopeId: string = video.ownerId;
+
+	if (video.orgId) {
+		const [org] = await db()
+			.select({ settings: organizations.settings })
+			.from(organizations)
+			.where(eq(organizations.id, video.orgId))
+			.limit(1);
+		const orgBudget = (org?.settings as { aiBudget?: AiBudgetSettings } | null)
+			?.aiBudget;
+		if (
+			orgBudget &&
+			orgBudget.enabled !== false &&
+			typeof orgBudget.monthlyUsdCents === "number" &&
+			orgBudget.monthlyUsdCents > 0
+		) {
+			budgetCap = orgBudget.monthlyUsdCents;
+			budgetScope = "org";
+			budgetScopeCol = aiUsageEvents.orgId;
+			budgetScopeId = video.orgId;
+		}
+	}
+
+	if (budgetCap === null) {
+		const userBudget = (
+			owner?.preferences as { aiBudget?: AiBudgetSettings } | null
+		)?.aiBudget;
+		if (
+			userBudget &&
+			userBudget.enabled !== false &&
+			typeof userBudget.monthlyUsdCents === "number" &&
+			userBudget.monthlyUsdCents > 0
+		) {
+			budgetCap = userBudget.monthlyUsdCents;
+			budgetScope = "user";
+			budgetScopeCol = aiUsageEvents.userId;
+			budgetScopeId = video.ownerId;
+		}
+	}
+
+	if (budgetCap !== null) {
+		const [spendRow] = await db()
+			.select({
+				totalMicros: sql<number>`COALESCE(SUM(${aiUsageEvents.costUsdMicros}), 0)`,
+			})
+			.from(aiUsageEvents)
+			.where(
+				and(
+					sql`${budgetScopeCol} = ${budgetScopeId}`,
+					eq(aiUsageEvents.billingMonth, billingMonthCheck),
+				),
+			);
+
+		const spentCents = Math.round(Number(spendRow?.totalMicros ?? 0) / 10_000);
+		if (spentCents >= budgetCap) {
+			return new Response(
+				JSON.stringify({
+					error: `AI budget reached for this ${budgetScope ?? "account"} ($${(
+						spentCents / 100
+					).toFixed(2)} / $${(budgetCap / 100).toFixed(2)} this month).`,
+				}),
+				{ status: 402 },
+			);
+		}
+	}
 
 	let apiKey: string | undefined;
 
