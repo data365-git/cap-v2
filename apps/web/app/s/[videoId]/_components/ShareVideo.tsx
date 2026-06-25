@@ -450,7 +450,9 @@ export const ShareVideo = forwardRef<
 					}}
 				>
 					{isActivelyRecording ? (
-						<div className="relative h-full overflow-hidden rounded-xl bg-black">
+						// overflow-visible so the bottom control bar + speed/time HUD aren't
+						// clipped (the video itself is rounded via the player's rounded-xl).
+						<div className="relative h-full overflow-visible rounded-xl bg-black">
 							<CapVideoPlayer
 								videoId={data.id}
 								mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
