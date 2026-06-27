@@ -346,6 +346,10 @@ export function CapVideoPlayer({
 
 		adoptFileDuration();
 
+		// Metadata is often already available before this effect attaches the
+		// listener (the <video> resolves its src first), so the event never fires
+		// and the aspect ratio is never reported. Read it immediately in that case.
+		if (video.readyState >= 1) handleLoadedMetadata();
 		video.addEventListener("loadedmetadata", handleLoadedMetadata);
 
 		return () => {
