@@ -419,6 +419,11 @@ export const ShareVideo = forwardRef<
 			lg: "100%",
 		};
 
+		// Aspect ratio used to size the player frame. Falls back to 16:9 until the
+		// video's real ratio is reported (onAspectRatioChange), so a non-16:9
+		// recording letterboxes (object-contain) instead of cropping.
+		const videoFrameRatio = videoAspectRatio ?? 16 / 9;
+
 		return (
 			<>
 				<div
@@ -438,15 +443,22 @@ export const ShareVideo = forwardRef<
 					className="mx-auto relative"
 					style={{
 						viewTransitionName: "cap-edit-video",
+						// Size by HEIGHT when pinned so the 48vh cap never crops the
+						// frame: bound the width to `48vh * ratio`, then derive height
+						// from aspectRatio (mirrors the edit view). When unpinned, bound
+						// only by the chosen max-width. Fall back to 16:9 until the real
+						// ratio loads. overflow-visible + object-contain keep the bottom
+						// control bar + speed/time HUD and the full frame visible.
+						aspectRatio: String(videoFrameRatio),
+						width: isPinned
+							? `min(${videoSizeMaxWidth[videoSize]}, calc(48vh * ${videoFrameRatio}))`
+							: undefined,
 						maxWidth: videoSizeMaxWidth[videoSize],
+						maxHeight: isPinned ? "48vh" : undefined,
 						transition: "max-width 320ms ease",
 						background: "#000",
 						borderRadius: 12,
-						overflow: isActivelyRecording ? "visible" : "hidden",
-						...(isPinned ? { maxHeight: "48vh" } : {}),
-						...(videoAspectRatio != null
-							? { aspectRatio: String(videoAspectRatio) }
-							: {}),
+						overflow: "visible",
 					}}
 				>
 					{isActivelyRecording ? (
@@ -484,7 +496,7 @@ export const ShareVideo = forwardRef<
 					) : (
 						<CapVideoPlayer
 							videoId={data.id}
-							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
+							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl [&_video]:rounded-xl"
 							videoSrc={videoSrc}
 							rawFallbackSrc={rawFallbackSrc}
 							duration={data.duration}
