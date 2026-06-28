@@ -4,6 +4,7 @@ import { useStore } from "@tanstack/react-store";
 import { Store } from "@tanstack/store";
 import type React from "react";
 import { createContext, useContext, useEffect, useState } from "react";
+import { cancelUpload } from "@/actions/video/cancel-upload";
 
 export type UploadStatus =
 	| {
@@ -31,11 +32,24 @@ export type UploadStatus =
 	| {
 			status: "serverProcessing";
 			capId: string;
+	  }
+	| {
+			status: "processing";
+			capId: string;
+			startedAt: number;
 	  };
 
+interface UploadingStoreState {
+	uploadStatus?: UploadStatus;
+	abortController: AbortController | null;
+}
+
 interface UploadingContextType {
-	uploadingStore: Store<{ uploadStatus?: UploadStatus }>;
+	uploadingStore: Store<UploadingStoreState>;
 	setUploadStatus: (state: UploadStatus | undefined) => void;
+	setAbortController: (c: AbortController | null) => void;
+	cancelCurrent: () => void;
+	dismissProcessing: () => void;
 }
 
 const UploadingContext = createContext<UploadingContextType | undefined>(
@@ -66,25 +80,61 @@ export function useUploadingStatus() {
 }
 
 export function UploadingProvider({ children }: { children: React.ReactNode }) {
-	const [uploadingStore] = useState<Store<{ uploadStatus?: UploadStatus }>>(
-		() => new Store({}),
+	const [uploadingStore] = useState<Store<UploadingStoreState>>(
+		() => new Store<UploadingStoreState>({ abortController: null }),
 	);
+
+	const setUploadStatus = (status: UploadStatus | undefined) => {
+		uploadingStore.setState((state) => ({
+			...state,
+			uploadStatus: status,
+		}));
+	};
+
+	const setAbortController = (c: AbortController | null) => {
+		uploadingStore.setState((state) => ({
+			...state,
+			abortController: c,
+		}));
+	};
+
+	const cancelCurrent = () => {
+		const { abortController, uploadStatus } = uploadingStore.state;
+		abortController?.abort();
+		if (uploadStatus && "capId" in uploadStatus) {
+			cancelUpload({ videoId: uploadStatus.capId }).catch(() => {});
+		}
+		uploadingStore.setState((state) => ({
+			...state,
+			uploadStatus: undefined,
+			abortController: null,
+		}));
+	};
+
+	const dismissProcessing = () => {
+		const { uploadStatus } = uploadingStore.state;
+		if (uploadStatus?.status === "processing") {
+			uploadingStore.setState((state) => ({
+				...state,
+				uploadStatus: undefined,
+			}));
+		}
+	};
 
 	return (
 		<UploadingContext.Provider
 			value={{
 				uploadingStore,
-				setUploadStatus: (status: UploadStatus | undefined) => {
-					uploadingStore.setState((state) => ({
-						...state,
-						uploadStatus: status,
-					}));
-				},
+				setUploadStatus,
+				setAbortController,
+				cancelCurrent,
+				dismissProcessing,
 			}}
 		>
 			{children}
 
 			<ForbidLeaveWhenUploading />
+			<GlobalUploadProgressBarLazy />
 		</UploadingContext.Provider>
 	);
 }
@@ -109,4 +159,18 @@ function ForbidLeaveWhenUploading() {
 	}, [uploadStatus]);
 
 	return null;
+}
+
+// Lazy-load the progress bar to avoid circular imports
+function GlobalUploadProgressBarLazy() {
+	const [Bar, setBar] = useState<React.ComponentType | null>(null);
+
+	useEffect(() => {
+		import("./../_components/GlobalUploadProgressBar")
+			.then((mod) => setBar(() => mod.GlobalUploadProgressBar))
+			.catch(() => {});
+	}, []);
+
+	if (!Bar) return null;
+	return <Bar />;
 }

@@ -80,7 +80,7 @@ export function CapAudioPlayer({
 			</div>
 
 			{/* Compact audio controls bar */}
-			<MediaPlayer className="w-full" autoHide>
+			<MediaPlayer className="w-full">
 				{/*
 				 * MediaPlayerAudio registers the <audio> element with media-chrome's
 				 * MediaProvider so all control primitives (play/pause/volume/time)

@@ -158,13 +158,14 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 	// analyze phase — the single master AI call. Atomic: total:1, flips done
 	// together once generateWithAi returns and the result is persisted. Shares
 	// the same `phases` array seeded by the transcribe workflow (read-modify-write).
+	const isAudioSource = videoData.video.source?.type === "webAudio";
 	const analyzeStart = Date.now();
 	await patchPipelinePhase(videoId, "analyze", {
 		status: "active",
 		done: 0,
 		total: 1,
 		startedAt: new Date().toISOString(),
-	});
+	}, isAudioSource);
 
 	const result = await generateWithAi(
 		transcript,
@@ -190,7 +191,7 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 		total: 1,
 		completedAt: new Date().toISOString(),
 		unitTimesMs: [Date.now() - analyzeStart],
-	});
+	}, isAudioSource);
 
 	return { success: true, message: "AI generation completed successfully" };
 }
@@ -211,8 +212,11 @@ const PHASE_ORDER: PipelinePhaseKey[] = [
 	"analyze",
 ];
 
-function initialPhases(): PipelinePhase[] {
-	return PHASE_ORDER.map((key) => ({
+function initialPhases(isAudioSource = false): PipelinePhase[] {
+	const keys = isAudioSource
+		? (["transcribe", "index", "analyze"] as PipelinePhaseKey[])
+		: PHASE_ORDER;
+	return keys.map((key) => ({
 		key,
 		label: PHASE_LABELS[key],
 		status: "queued" as const,
@@ -230,6 +234,7 @@ async function patchPipelinePhase(
 	videoId: string,
 	phaseKey: PipelinePhaseKey,
 	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
+	isAudioSource = false,
 ): Promise<void> {
 	const current = await getCurrentVideoMetadata(videoId, {});
 	const now = new Date().toISOString();
@@ -237,7 +242,7 @@ async function patchPipelinePhase(
 	const existing = current.pipelineProgress;
 	const base: PipelineProgress = existing ?? {
 		currentPhase: phaseKey,
-		phases: initialPhases(),
+		phases: initialPhases(isAudioSource),
 		startedAt: now,
 		updatedAt: now,
 	};

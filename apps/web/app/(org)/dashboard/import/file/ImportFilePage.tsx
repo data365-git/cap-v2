@@ -31,7 +31,7 @@ export const ImportFilePage = ({
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
 	const inputRef = useRef<HTMLInputElement>(null);
-	const { uploadingStore, setUploadStatus } = useUploadingContext();
+	const { uploadingStore, setUploadStatus, setAbortController } = useUploadingContext();
 	const isUploading = useStore(uploadingStore, (s) => !!s.uploadStatus);
 	const [upgradeModalOpen, setUpgradeModalOpen] = useState(
 		buildEnv.NEXT_PUBLIC_IS_CAP ? !user?.isPro : false,
@@ -58,13 +58,14 @@ export const ImportFilePage = ({
 				context,
 				setUploadSpeedLabel,
 				uploadKind === "audio",
+				setAbortController,
 			);
 			if (ok)
 				router.push(
 					folderId ? `/dashboard/folder/${folderId}` : "/dashboard/caps",
 				);
 		},
-		[user, activeOrganization, setUploadStatus, router, folderId, context, uploadKind],
+		[user, activeOrganization, setUploadStatus, setAbortController, router, folderId, context, uploadKind],
 	);
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,6 +284,7 @@ async function uploadVideoForServerProcessing(
 	context: "meeting" | "instruction" = "instruction",
 	setSpeedLabel: (label: string | null) => void = () => {},
 	isAudio = false,
+	setAbortController: (c: AbortController | null) => void = () => {},
 ) {
 	try {
 		setUploadStatus({ status: "parsing" });
@@ -333,6 +335,9 @@ async function uploadVideoForServerProcessing(
 			progress: 0,
 			thumbnailUrl: undefined,
 		});
+
+		const controller = new AbortController();
+		setAbortController(controller);
 
 		const createProgressTracker = () => {
 			const uploadState = {
@@ -395,6 +400,7 @@ async function uploadVideoForServerProcessing(
 				body: file,
 				fileName: file.name,
 				contentType: videoData.contentType,
+				signal: controller.signal,
 				onProgress: ({ loaded, total }) => {
 					const percent = (loaded / total) * 100;
 					const now = Date.now();
@@ -456,8 +462,16 @@ async function uploadVideoForServerProcessing(
 				},
 			});
 		} catch (uploadError) {
+			if (uploadError instanceof DOMException && uploadError.name === "AbortError") {
+				progressTracker.cleanup();
+				setAbortController(null);
+				setUploadStatus(undefined);
+				setSpeedLabel(null);
+				return false;
+			}
 			if (!progressTracker.didFinishSending()) {
 				progressTracker.cleanup();
+				setAbortController(null);
 				const reason = uploadError instanceof Error ? uploadError.message : "Network error";
 				console.error(`[CAP-IMPORT] Upload failed — ${reason}`, uploadError);
 				throw uploadError;
@@ -469,6 +483,7 @@ async function uploadVideoForServerProcessing(
 			);
 		}
 		progressTracker.cleanup();
+		setAbortController(null);
 		const total = progressTracker.getTotal() || file.size || 1;
 		await sendProgressUpdate(uploadId, total, total);
 
@@ -491,13 +506,19 @@ async function uploadVideoForServerProcessing(
 			return false;
 		}
 
-		setUploadStatus(undefined);
+		setUploadStatus({ status: "processing", capId: uploadId, startedAt: Date.now() });
 		setSpeedLabel(null);
 		toast.success(
 			"Video uploaded! Processing will continue in the background.",
 		);
 		return true;
 	} catch (err) {
+		if (err instanceof DOMException && err.name === "AbortError") {
+			setAbortController(null);
+			setUploadStatus(undefined);
+			setSpeedLabel(null);
+			return false;
+		}
 		const reason =
 			err instanceof Error ? err.message : "Unknown error";
 		console.error(`[CAP-IMPORT] Upload failed — ${reason}`, err);
@@ -511,6 +532,7 @@ async function uploadVideoForServerProcessing(
 		}
 	}
 
+	setAbortController(null);
 	setUploadStatus(undefined);
 	setSpeedLabel(null);
 	return false;

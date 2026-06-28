@@ -72,7 +72,8 @@ export async function transcribeVideoWorkflow(
 		return { success: true, message: "Transcription disabled - skipped" };
 	}
 
-	await initPipelineProgress(videoId);
+	const isAudioSource = videoData.video.source?.type === "webAudio";
+	await initPipelineProgress(videoId, isAudioSource);
 
 	try {
 		const audio = await extractAudio(videoId, userId, videoData.video);
@@ -249,8 +250,11 @@ const PHASE_ORDER: PipelinePhaseKey[] = [
 	"analyze",
 ];
 
-function initialPhases(): PipelinePhase[] {
-	return PHASE_ORDER.map((key) => ({
+function initialPhases(isAudioSource = false): PipelinePhase[] {
+	const keys = isAudioSource
+		? (["transcribe", "index", "analyze"] as PipelinePhaseKey[])
+		: PHASE_ORDER;
+	return keys.map((key) => ({
 		key,
 		label: PHASE_LABELS[key],
 		status: "queued" as const,
@@ -260,15 +264,21 @@ function initialPhases(): PipelinePhase[] {
 }
 
 /**
- * Initialize the full 4-phase pipelineProgress at transcription start. All four
- * phases are seeded as "queued" so the strip shows the unified picture even
- * before the analyze workflow runs. Read-modify-write — never clobbers siblings.
+ * Initialize pipelineProgress at transcription start. For video sources, all
+ * four phases (audio → transcribe → index → analyze) are seeded as "queued".
+ * For audio sources (webAudio), the "audio" extraction phase is omitted so the
+ * strip shows only the three phases that actually run. Read-modify-write —
+ * never clobbers siblings.
  */
-async function initPipelineProgress(videoId: string): Promise<void> {
+async function initPipelineProgress(
+	videoId: string,
+	isAudioSource = false,
+): Promise<void> {
 	const now = new Date().toISOString();
+	const firstPhase: PipelinePhaseKey = isAudioSource ? "transcribe" : "audio";
 	const progress: PipelineProgress = {
-		currentPhase: "audio",
-		phases: initialPhases(),
+		currentPhase: firstPhase,
+		phases: initialPhases(isAudioSource),
 		startedAt: now,
 		updatedAt: now,
 	};
@@ -285,6 +295,7 @@ async function patchPipelinePhase(
 	videoId: string,
 	phaseKey: PipelinePhaseKey,
 	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
+	isAudioSource = false,
 ): Promise<void> {
 	const [row] = await db()
 		.select({ metadata: videos.metadata })
@@ -297,7 +308,7 @@ async function patchPipelinePhase(
 	const existing = currentMetadata.pipelineProgress;
 	const base: PipelineProgress = existing ?? {
 		currentPhase: phaseKey,
-		phases: initialPhases(),
+		phases: initialPhases(isAudioSource),
 		startedAt: now,
 		updatedAt: now,
 	};
@@ -381,10 +392,19 @@ async function extractAudio(
 	"use step";
 
 	const isAudioSource = video.source?.type === "webAudio";
+
+	// Fast path: the raw upload IS already a transcribable audio file.
+	// Skip ffmpeg probe/extraction entirely — just resolve the raw URL and use
+	// the duration that the client wrote to the DB row during upload.
 	if (isAudioSource) {
 		console.log(
-			`[CAP-AUDIO] source=webAudio, skipping video-decode path video=${videoId}`,
+			`[CAP-AUDIO] source=webAudio — skipping ffmpeg extraction, using raw upload video=${videoId}`,
 		);
+		const audioUrl = await resolveVideoSourceUrl(videoId, userId, video);
+		const durationSec = video.duration != null && video.duration > 0
+			? video.duration
+			: null;
+		return { audioUrl, durationSec };
 	}
 
 	const [bucket] = await Storage.getAccessForVideo(

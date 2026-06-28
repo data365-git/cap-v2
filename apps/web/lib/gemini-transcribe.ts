@@ -26,6 +26,103 @@ async function fetchWithTimeout(
 	}
 }
 
+const GEMINI_PRIMARY_MODEL =
+	process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
+const GEMINI_FALLBACK_MODEL =
+	process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-flash";
+const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "4");
+const BACKOFF_BASE_MS = [2000, 5000, 12000, 30000];
+
+function isTransientGeminiError(status: number, msg: string): boolean {
+	if (status === 429 || status === 503) return true;
+	const lower = msg.toLowerCase();
+	return lower.includes("high demand") || lower.includes("overloaded");
+}
+
+function backoffWithJitter(attempt: number): number {
+	const base =
+		BACKOFF_BASE_MS[Math.min(attempt, BACKOFF_BASE_MS.length - 1)] ?? 30000;
+	return Math.round(Math.random() * base);
+}
+
+interface GenResponseData {
+	candidates?: Array<{
+		content: { parts: Array<{ text?: string }> };
+		finishReason?: string;
+	}>;
+	usageMetadata?: {
+		promptTokenCount?: number;
+		candidatesTokenCount?: number;
+	};
+	error?: { message: string };
+}
+
+async function fetchGeminiWithRetry(
+	apiKey: string,
+	endpoint: string,
+	init: RequestInit & { timeoutMs?: number },
+): Promise<GenResponseData> {
+	const models = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
+	let lastError: Error | null = null;
+
+	for (const model of models) {
+		const maxAttempts =
+			model === GEMINI_PRIMARY_MODEL ? GEMINI_MAX_RETRIES + 1 : 1;
+
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			if (attempt > 0) {
+				const delay = backoffWithJitter(attempt - 1);
+				console.log(
+					`[gemini-transcribe] Retry ${attempt}/${GEMINI_MAX_RETRIES} for ${model} after ${delay}ms`,
+				);
+				await new Promise<void>((r) => setTimeout(r, delay));
+			}
+
+			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${endpoint}?key=${apiKey}`;
+			const res = await fetchWithTimeout(url, init);
+			const data = (await res.json()) as GenResponseData;
+
+			if (res.ok) {
+				if (model !== GEMINI_PRIMARY_MODEL) {
+					console.log(
+						`[gemini-transcribe] Fallback to ${model} succeeded`,
+					);
+				}
+				return data;
+			}
+
+			const errorMsg = data.error?.message ?? String(res.status);
+
+			if (res.status === 401 || res.status === 403) {
+				throw new Error(`Gemini auth error: ${errorMsg}`);
+			}
+
+			if (isTransientGeminiError(res.status, errorMsg)) {
+				console.warn(
+					`[gemini-transcribe] Transient error from ${model} (attempt ${attempt + 1}/${maxAttempts}): ${errorMsg}`,
+				);
+				lastError = new Error(
+					`Gemini generateContent failed: ${errorMsg}`,
+				);
+				continue;
+			}
+
+			throw new Error(`Gemini generateContent failed: ${errorMsg}`);
+		}
+
+		if (models.indexOf(model) < models.length - 1) {
+			console.log(
+				`[gemini-transcribe] ${model} exhausted ${GEMINI_MAX_RETRIES} retries, falling back to next model`,
+			);
+		}
+	}
+
+	throw (
+		lastError ??
+		new Error("Gemini generateContent failed after all retries")
+	);
+}
+
 export interface VttCue {
 	index: number;
 	startSec: number;
@@ -322,8 +419,9 @@ export async function transcribeWithGemini(
 		await pollUntilActive(fileName, apiKey);
 	}
 
-	const genRes = await fetchWithTimeout(
-		`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
+	const genData = await fetchGeminiWithRetry(
+		apiKey,
+		"generateContent",
 		{
 			// The long pole. A 5-min audio chunk to Gemini is normally 30-120s; 5 min
 			// is a generous hard ceiling that prevents an indefinite hang.
@@ -413,24 +511,6 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 			}),
 		},
 	);
-
-	const genData = (await genRes.json()) as {
-		candidates?: Array<{
-			content: { parts: Array<{ text?: string }> };
-			finishReason?: string;
-		}>;
-		usageMetadata?: {
-			promptTokenCount?: number;
-			candidatesTokenCount?: number;
-		};
-		error?: { message: string };
-	};
-
-	if (!genRes.ok) {
-		throw new Error(
-			`Gemini generateContent failed: ${genData.error?.message ?? genRes.status}`,
-		);
-	}
 
 	const rawText = genData.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 	const finishReason = genData.candidates?.[0]?.finishReason ?? "UNKNOWN";

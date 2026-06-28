@@ -37,6 +37,7 @@ export async function uploadWithTarget({
 	contentType,
 	onProgress,
 	onRetry,
+	signal,
 }: {
 	target: UploadTarget;
 	body: Blob;
@@ -44,10 +45,18 @@ export async function uploadWithTarget({
 	contentType?: string;
 	onProgress?: (progress: UploadProgress) => void;
 	onRetry?: (attempt: number) => void;
+	signal?: AbortSignal;
 }) {
 	const attemptUpload = (attempt: number): Promise<void> =>
 		new Promise<void>((resolve, reject) => {
+			if (signal?.aborted) {
+				reject(new DOMException("aborted", "AbortError"));
+				return;
+			}
+
 			const xhr = new XMLHttpRequest();
+
+			signal?.addEventListener("abort", () => xhr.abort(), { once: true });
 
 			if (isPostTarget(target)) {
 				const formData = new FormData();
@@ -74,6 +83,7 @@ export async function uploadWithTarget({
 				};
 				xhr.onerror = () =>
 					reject(Object.assign(new Error("Upload failed"), { status: 0 }));
+				xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
 				xhr.send(formData);
 				return;
 			}
@@ -117,6 +127,7 @@ export async function uploadWithTarget({
 			};
 			xhr.onerror = () =>
 				reject(Object.assign(new Error("Upload failed"), { status: 0 }));
+			xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
 			xhr.send(body);
 		});
 
@@ -125,6 +136,9 @@ export async function uploadWithTarget({
 			await attemptUpload(i);
 			return;
 		} catch (error) {
+			if (error instanceof DOMException && error.name === "AbortError") {
+				throw error;
+			}
 			const status = (error as { status?: number }).status ?? -1;
 			if (!isRetryable(status)) {
 				throw error;
