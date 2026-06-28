@@ -79,7 +79,19 @@ async function fetchGeminiWithRetry(
 			}
 
 			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${endpoint}?key=${apiKey}`;
-			const res = await fetchWithTimeout(url, init);
+
+			let res: Response;
+			try {
+				res = await fetchWithTimeout(url, init);
+			} catch (err) {
+				const msg = (err as Error).message ?? "";
+				console.warn(
+					`[gemini-transcribe] Fetch error from ${model} (attempt ${attempt + 1}/${maxAttempts}): ${msg}`,
+				);
+				lastError = err as Error;
+				continue;
+			}
+
 			const data = (await res.json()) as GenResponseData;
 
 			if (res.ok) {
@@ -423,9 +435,7 @@ export async function transcribeWithGemini(
 		apiKey,
 		"generateContent",
 		{
-			// The long pole. A 5-min audio chunk to Gemini is normally 30-120s; 5 min
-			// is a generous hard ceiling that prevents an indefinite hang.
-			timeoutMs: 5 * 60_000,
+			timeoutMs: 8 * 60_000,
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
