@@ -625,7 +625,7 @@ function chunkTranscriptWithTimestamps(
 	return chunks;
 }
 
-const GEMINI_SUMMARY_MODEL = "gemini-3-flash-preview";
+const GEMINI_SUMMARY_MODEL = "gemini-2.5-flash";
 
 interface AiApiResult {
 	content: string;

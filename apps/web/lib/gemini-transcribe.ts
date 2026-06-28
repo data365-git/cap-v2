@@ -27,9 +27,9 @@ async function fetchWithTimeout(
 }
 
 const GEMINI_PRIMARY_MODEL =
-	process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
+	process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const GEMINI_FALLBACK_MODEL =
-	process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-flash";
+	process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-pro";
 const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "4");
 const BACKOFF_BASE_MS = [2000, 5000, 12000, 30000];
 
@@ -192,13 +192,13 @@ function parseVttTimestamp(ts: string): number | null {
 			Number(h) * 3600 +
 			Number(m) * 60 +
 			Number(s) +
-			Number(ms.padEnd(3, "0")) / 1000
+			Number((ms ?? "0").padEnd(3, "0")) / 1000
 		);
 	}
 	const m2 = ts.match(/^(\d+):(\d{2})[.,](\d{1,3})$/);
 	if (m2) {
 		const [, m, s, ms] = m2;
-		return Number(m) * 60 + Number(s) + Number(ms.padEnd(3, "0")) / 1000;
+		return Number(m) * 60 + Number(s) + Number((ms ?? "0").padEnd(3, "0")) / 1000;
 	}
 	return null;
 }
@@ -368,13 +368,103 @@ async function readAudio(
 	};
 }
 
-export async function transcribeWithGemini(
+/**
+ * Upload audio from a URL to Gemini's Files API without buffering the entire
+ * file in memory. Returns { fileUri, fileName } on success, or null if the
+ * Content-Length header is missing (caller falls back to buffer upload).
+ *
+ * Strategy: HEAD the URL to get Content-Length, then open a streaming GET and
+ * pipe the response body directly into the resumable upload PUT. Node.js fetch
+ * accepts a ReadableStream as the request body, so we never hold the full file
+ * in memory.
+ */
+async function uploadAudioUrlStreaming(
 	audioUrl: string,
-	options: TranscribeOptions,
-): Promise<GeminiTranscribeResult> {
-	const { apiKey, audioDurationSec = 300, startOffsetSec = 0 } = options;
+	apiKey: string,
+): Promise<{ fileUri: string; fileName: string; state: string } | null> {
+	// HEAD request to get content length without downloading the body.
+	const headRes = await fetch(audioUrl, { method: "HEAD" });
+	const contentLength = headRes.headers.get("content-length");
+	if (!contentLength || Number(contentLength) <= 0) {
+		// No content-length — can't do resumable upload without knowing the size.
+		return null;
+	}
+	const byteLength = Number(contentLength);
+	const mimeType = detectMimeType(audioUrl);
+	const displayName = `cap-audio-${Date.now()}`;
 
-	const { bytes: audioBytes, mimeType } = await readAudio(audioUrl, options);
+	// Start the resumable upload session.
+	const initRes = await fetchWithTimeout(
+		`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+		{
+			method: "POST",
+			headers: {
+				"X-Goog-Upload-Protocol": "resumable",
+				"X-Goog-Upload-Command": "start",
+				"X-Goog-Upload-Header-Content-Length": String(byteLength),
+				"X-Goog-Upload-Header-Content-Type": mimeType,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ file: { display_name: displayName } }),
+			timeoutMs: 30_000,
+		},
+	);
+
+	if (!initRes.ok) {
+		throw new Error(`Gemini upload init failed: ${initRes.status}`);
+	}
+
+	const uploadUrl = initRes.headers.get("x-goog-upload-url");
+	if (!uploadUrl) {
+		throw new Error("No upload URL from Gemini Files API");
+	}
+
+	// Stream the audio directly from the source URL into the upload PUT.
+	const audioRes = await fetch(audioUrl);
+	if (!audioRes.ok) {
+		throw new Error(
+			`Audio URL not accessible: ${audioRes.status} ${audioRes.statusText}`,
+		);
+	}
+	if (!audioRes.body) {
+		// Fallback: let caller handle buffered upload.
+		return null;
+	}
+
+	const uploadRes = await fetchWithTimeout(uploadUrl, {
+		method: "PUT",
+		headers: {
+			"X-Goog-Upload-Offset": "0",
+			"X-Goog-Upload-Command": "upload, finalize",
+			"Content-Length": String(byteLength),
+			"Content-Type": mimeType,
+		},
+		// Pass the ReadableStream directly — no full-file buffer in Node.js.
+		body: audioRes.body,
+		// Large file at typical upload speeds; 10 min ceiling.
+		timeoutMs: 10 * 60_000,
+	} as RequestInit & { timeoutMs?: number });
+
+	if (!uploadRes.ok) {
+		throw new Error(`Gemini audio upload failed: ${uploadRes.status}`);
+	}
+
+	const fileData = (await uploadRes.json()) as GeminiFileResponse;
+	const { name: fileName, uri: fileUri, state } = fileData.file;
+	if (!fileUri || !fileName) {
+		throw new Error(
+			`Gemini upload response missing file info: ${JSON.stringify(fileData)}`,
+		);
+	}
+	return { fileUri, fileName, state };
+}
+
+/** Upload a pre-loaded audio buffer to Gemini's Files API using resumable upload. */
+async function uploadAudioBuffer(
+	audioBytes: Uint8Array,
+	mimeType: string,
+	apiKey: string,
+): Promise<{ fileUri: string; fileName: string; state: string }> {
 	const displayName = `cap-audio-${Date.now()}`;
 
 	const initRes = await fetchWithTimeout(
@@ -410,7 +500,6 @@ export async function transcribeWithGemini(
 			"Content-Length": String(audioBytes.byteLength),
 		},
 		body: audioBytes,
-		// ~5MB per chunk over the wire; 2 min is plenty
 		timeoutMs: 120_000,
 	});
 
@@ -420,14 +509,60 @@ export async function transcribeWithGemini(
 
 	const fileData = (await uploadRes.json()) as GeminiFileResponse;
 	const { name: fileName, uri: fileUri, state } = fileData.file;
-
 	if (!fileUri || !fileName) {
 		throw new Error(
 			`Gemini upload response missing file info: ${JSON.stringify(fileData)}`,
 		);
 	}
+	return { fileUri, fileName, state };
+}
 
-	if (state !== "ACTIVE") {
+export async function transcribeWithGemini(
+	audioUrl: string,
+	options: TranscribeOptions,
+): Promise<GeminiTranscribeResult> {
+	const { apiKey, audioDurationSec = 300, startOffsetSec = 0 } = options;
+
+	// When the caller provides a URL (no audioPath, no audioBytes), attempt a
+	// streaming upload so we never hold the full file in Node.js memory.
+	const isUrlOnlyPath = !options.audioPath && !options.audioBytes;
+	let fileUri: string;
+	let fileName: string;
+	let mimeType: string;
+	let uploadedState: string;
+
+	if (isUrlOnlyPath) {
+		mimeType = detectMimeType(audioUrl);
+		const streamed = await uploadAudioUrlStreaming(audioUrl, apiKey);
+		if (streamed) {
+			fileUri = streamed.fileUri;
+			fileName = streamed.fileName;
+			uploadedState = streamed.state;
+			console.info(
+				`[gemini-transcribe] Streaming upload complete: ${fileName}`,
+			);
+		} else {
+			// Fallback: HEAD had no Content-Length — buffer the file (small files,
+			// unusual servers). Log a warning so it's visible.
+			console.warn(
+				"[gemini-transcribe] No Content-Length from audio URL — falling back to buffered upload",
+			);
+			const { bytes: audioBytes } = await readAudio(audioUrl, options);
+			const uploadResult = await uploadAudioBuffer(audioBytes, mimeType, apiKey);
+			fileUri = uploadResult.fileUri;
+			fileName = uploadResult.fileName;
+			uploadedState = uploadResult.state;
+		}
+	} else {
+		const audio = await readAudio(audioUrl, options);
+		mimeType = audio.mimeType;
+		const uploadResult = await uploadAudioBuffer(audio.bytes, mimeType, apiKey);
+		fileUri = uploadResult.fileUri;
+		fileName = uploadResult.fileName;
+		uploadedState = uploadResult.state;
+	}
+
+	if (uploadedState !== "ACTIVE") {
 		await pollUntilActive(fileName, apiKey);
 	}
 

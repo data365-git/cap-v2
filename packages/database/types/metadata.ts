@@ -119,6 +119,13 @@ export interface VideoMetadata {
 	 * errorMessage column). Cleared at the start of every transcription run.
 	 */
 	transcriptionError?: string;
+	/**
+	 * Per-chunk VTT results for parallel audio transcription (T12 path).
+	 * Keys are chunk indices (as strings). Written after each chunk succeeds so
+	 * a retry can skip already-completed chunks without re-transcribing them.
+	 * Cleared when transcription completes successfully.
+	 */
+	completedChunks?: Record<string, string>;
 }
 
 export type VideoEditRange = {
