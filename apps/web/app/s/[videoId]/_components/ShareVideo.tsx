@@ -472,7 +472,14 @@ export const ShareVideo = forwardRef<
 				>
 				{isWebAudio ? (
 					/* ── Audio branch: cover image + compact audio bar ── */
-					<div className="mx-auto relative" style={{ viewTransitionName: "cap-edit-video" }}>
+					<div
+						className="mx-auto relative"
+						style={{
+							viewTransitionName: "cap-edit-video",
+							maxWidth: videoSizeMaxWidth[videoSize],
+							transition: "max-width 320ms ease",
+						}}
+					>
 						<CapAudioPlayer
 							videoSrc={videoSrc}
 							videoRef={videoRef}
