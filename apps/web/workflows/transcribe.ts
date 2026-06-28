@@ -550,8 +550,8 @@ const CHUNK_OVERLAP_SEC = 5; // 5-second overlap to avoid mid-word cuts
 const UNKNOWN_DURATION_ASSUMED_SEC = 60 * 60;
 // T11: audio ≤ this duration → single-shot (no chunking, one Gemini call)
 const AUDIO_SINGLE_SHOT_MAX_SEC = 90 * 60; // 90 minutes
-// T12: parallel pool size for audio chunked path
-const AUDIO_PARALLEL_POOL = 6;
+// T12: parallel pool size for audio chunked path (3 avoids Gemini RPM limits)
+const AUDIO_PARALLEL_POOL = 3;
 
 async function transcribeAudio(
 	audioUrl: string,
@@ -946,6 +946,56 @@ async function transcribeAudio(
 				});
 			}
 
+			// Sequential retry pass for any chunks that failed in the parallel batches.
+			const failedIndices = slices
+				.map((_, i) => i)
+				.filter((i) => orderedResults[i] === null);
+
+			if (failedIndices.length > 0) {
+				console.info(
+					`[CAP-TRANSCRIBE] T12 retry: ${failedIndices.length} chunks failed in parallel pass, retrying sequentially`,
+				);
+				for (const fi of failedIndices) {
+					const slice = slices[fi];
+					if (!slice) continue;
+					const chunkLabel = `${fi + 1}/${slices.length} (retry)`;
+					const t0 = Date.now();
+					try {
+						const result = await transcribeChunk(slice, chunkLabel, 0);
+						const chunkVtt = cuesToVtt(result.cues);
+						savedChunks[String(fi)] = chunkVtt;
+						orderedResults[fi] = { cues: result.cues, startOffsetSec: 0 };
+						unitTimesMs.push(Date.now() - t0);
+						if (!result.isComplete) allComplete = false;
+
+						await patchVideoMetadata(context.videoId, { completedChunks: { ...savedChunks } });
+						doneCount = orderedResults.filter(Boolean).length;
+						await patchPipelinePhase(context.videoId, "transcribe", {
+							status: "active",
+							done: doneCount,
+							total: slices.length,
+							unitTimesMs: [...unitTimesMs],
+						});
+					} catch (retryErr) {
+						console.error(
+							`[CAP-TRANSCRIBE] T12 retry chunk ${fi + 1}/${slices.length} also failed:`,
+							retryErr,
+						);
+					}
+				}
+			}
+
+			doneCount = orderedResults.filter(Boolean).length;
+			if (doneCount === slices.length) {
+				await patchPipelinePhase(context.videoId, "transcribe", {
+					status: "done",
+					done: doneCount,
+					total: slices.length,
+					unitTimesMs: [...unitTimesMs],
+					completedAt: new Date().toISOString(),
+				});
+			}
+
 			// Collect results in order.
 			for (let i = 0; i < slices.length; i++) {
 				const r = orderedResults[i];
@@ -953,6 +1003,15 @@ async function transcribeAudio(
 					perChunkResults.push(r);
 					totalCueCount += r.cues.length;
 				}
+			}
+
+			// If some chunks still failed after retry, proceed with partial transcript
+			// rather than marking ERROR (a 95% transcript is far better than nothing).
+			const stillFailed = slices.length - doneCount;
+			if (stillFailed > 0) {
+				console.warn(
+					`[CAP-TRANSCRIBE] T12: ${stillFailed}/${slices.length} chunks failed even after retry — proceeding with partial transcript`,
+				);
 			}
 
 			// Clear completed chunks from metadata now that we have a full transcript.
@@ -1021,19 +1080,20 @@ async function saveTranscription(
 		})
 		.pipe(runPromise);
 
-	if (allComplete) {
-		await db()
-			.update(videos)
-			.set({ transcriptionStatus: "COMPLETE" })
-			.where(eq(videos.id, videoId as Video.VideoId));
-	} else {
-		console.error(
-			`[CAP-TRANSCRIBE] Transcription truncated for ${videoId} — marking ERROR`,
+	if (!transcription || transcription.trim() === "WEBVTT\n\n") {
+		await markError(videoId, "Transkripsiya bo'sh — qayta urinib ko'ring");
+		return;
+	}
+
+	await db()
+		.update(videos)
+		.set({ transcriptionStatus: "COMPLETE" })
+		.where(eq(videos.id, videoId as Video.VideoId));
+
+	if (!allComplete) {
+		console.warn(
+			`[CAP-TRANSCRIBE] Transcription partially truncated for ${videoId} — marked COMPLETE with available cues`,
 		);
-		// videos table has no errorMessage column — persist the human-readable
-		// reason into metadata (read-modify-write) alongside the ERROR status so
-		// UI revalidation can surface it.
-		await markError(videoId, "Transkripsiya juda uzun — qayta urinib ko'ring");
 	}
 }
 
