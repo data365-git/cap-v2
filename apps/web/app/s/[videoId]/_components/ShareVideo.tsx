@@ -416,6 +416,34 @@ export const ShareVideo = forwardRef<
 
 		const isWebAudio = data.source.type === "webAudio";
 
+		// Resolve chapters once, share between video + audio branches so the
+		// segmented progress bar is identical regardless of media type.
+		// Precedence: refinedTranscript.chapters → aiSummary.chapters → bare chapters.
+		const resolvedChapters: { startSec: number; title: string }[] =
+			areChaptersDisabled
+				? []
+				: (() => {
+						const refinedChapters =
+							data.metadata?.aiSummary?.refinedTranscript?.chapters;
+						if (refinedChapters && refinedChapters.length > 0) {
+							return refinedChapters.map((ch) => ({
+								startSec: ch.startSec,
+								title: ch.title,
+							}));
+						}
+						const aiChapters = data.metadata?.aiSummary?.chapters;
+						if (aiChapters && aiChapters.length > 0) {
+							return aiChapters.map((ch) => ({
+								startSec: ch.startSec,
+								title: ch.title,
+							}));
+						}
+						return chapters.map((ch) => ({
+							startSec: ch.start,
+							title: ch.title,
+						}));
+					})();
+
 		const videoSizeMaxWidth: Record<"sm" | "md" | "lg", string> = {
 			sm: "62%",
 			md: "82%",
@@ -452,6 +480,7 @@ export const ShareVideo = forwardRef<
 							defaultPlaybackSpeed={defaultPlaybackSpeed}
 							isPinned={isPinned}
 							onTogglePin={() => setIsPinned(!isPinned)}
+							chapters={resolvedChapters}
 						/>
 					</div>
 				) : (
@@ -543,33 +572,7 @@ export const ShareVideo = forwardRef<
 							isCaptionLoading={captionContext.isTranslating}
 							hasCaptions={data.transcriptionStatus === "COMPLETE"}
 							canRetryProcessing={canRetryProcessing}
-							chapters={
-								areChaptersDisabled
-									? []
-									: (() => {
-											const refinedChapters =
-												data.metadata?.aiSummary?.refinedTranscript
-													?.chapters;
-											if (refinedChapters && refinedChapters.length > 0) {
-												return refinedChapters.map((ch) => ({
-													startSec: ch.startSec,
-													title: ch.title,
-												}));
-											}
-											const aiChapters =
-												data.metadata?.aiSummary?.chapters;
-											if (aiChapters && aiChapters.length > 0) {
-												return aiChapters.map((ch) => ({
-													startSec: ch.startSec,
-													title: ch.title,
-												}));
-											}
-											return chapters.map((ch) => ({
-												startSec: ch.start,
-												title: ch.title,
-											}));
-										})()
-							}
+							chapters={resolvedChapters}
 							videoSize={videoSize}
 							onVideoSizeChange={setVideoSize}
 							onAspectRatioChange={setVideoAspectRatio}

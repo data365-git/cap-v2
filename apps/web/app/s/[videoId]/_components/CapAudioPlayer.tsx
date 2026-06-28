@@ -27,6 +27,12 @@ import {
 } from "./video/media-player";
 import { SegmentedProgressBar } from "./video/SegmentedProgressBar";
 
+interface Chapter {
+	startSec: number;
+	title: string;
+	body?: string;
+}
+
 interface Props {
 	videoSrc: string;
 	videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -34,6 +40,12 @@ interface Props {
 	defaultPlaybackSpeed?: number;
 	isPinned?: boolean;
 	onTogglePin?: () => void;
+	/**
+	 * Refined-transcript chapters used to render the segmented progress bar.
+	 * Audio share pages get the exact same segmentation as video share pages —
+	 * this is the parity point that lets the timeline be cut by section.
+	 */
+	chapters?: Chapter[];
 }
 
 export function CapAudioPlayer({
@@ -42,6 +54,7 @@ export function CapAudioPlayer({
 	duration,
 	isPinned,
 	onTogglePin,
+	chapters = [],
 }: Props) {
 	const playerDuration = duration ?? 0;
 
@@ -90,7 +103,7 @@ export function CapAudioPlayer({
 				<MediaPlayerControls className="flex-col items-start gap-2.5" isUploadingOrFailed={false}>
 					<MediaPlayerControlsOverlay className="rounded-b-xl" />
 					<SegmentedProgressBar
-						chapters={[]}
+						chapters={chapters.map((c) => ({ startSec: c.startSec, title: c.title }))}
 						duration={playerDuration}
 						fallbackDuration={playerDuration}
 						videoRef={videoRef}
