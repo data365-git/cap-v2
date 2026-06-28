@@ -140,13 +140,21 @@ const getPlaylistResponse = (
 			video.source.type === "desktopMP4" ||
 			video.source.type === "webMP4" ||
 			video.source.type === "extensionWeb";
+		const isAudioSource = video.source.type === "webAudio";
 
 		// Stream an R2/S3 object through this same-origin endpoint instead of
 		// 302-redirecting the browser straight to the bucket. This removes the
 		// cross-origin (CORS) dependency entirely: the browser only ever talks to
 		// our origin. HTTP Range requests are forwarded so the <video> element can
 		// seek/scrub — R2 replies 206 + Content-Range, which we relay verbatim.
-		const proxyObject = (objectKey: string) =>
+		// `defaultContentType` is used only when neither upstream nor headObject
+		// reports one (e.g. octet-stream uploads). Default is video/mp4; pass an
+		// audio MIME for webAudio sources so the browser dispatches the bytes to
+		// <audio>.
+		const proxyObject = (
+			objectKey: string,
+			defaultContentType: string = "video/mp4",
+		) =>
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 
@@ -162,7 +170,7 @@ const getPlaylistResponse = (
 						HttpServerResponse.setHeaders({
 							"Accept-Ranges": "bytes",
 							"Content-Length": String(head.value.ContentLength ?? 0),
-							"Content-Type": head.value.ContentType ?? "video/mp4",
+							"Content-Type": head.value.ContentType ?? defaultContentType,
 						}),
 					);
 				}
@@ -191,7 +199,8 @@ const getPlaylistResponse = (
 				// set forwarding exactly what the <video> element needs for seeking.
 				const forwarded: Record<string, string> = {
 					"Accept-Ranges": "bytes",
-					"Content-Type": upstream.headers.get("content-type") ?? "video/mp4",
+					"Content-Type":
+						upstream.headers.get("content-type") ?? defaultContentType,
 				};
 				const pass = (from: string, to: string) => {
 					const value = upstream.headers.get(from);
@@ -208,6 +217,47 @@ const getPlaylistResponse = (
 					headers: forwarded,
 				});
 			});
+
+		// webAudio: resolve the raw upload key (extension may be mp3/m4a/wav/…)
+		// and pick a sensible audio default Content-Type.
+		const AUDIO_EXT_TO_MIME: Record<string, string> = {
+			mp3: "audio/mpeg",
+			m4a: "audio/mp4",
+			aac: "audio/aac",
+			wav: "audio/wav",
+			ogg: "audio/ogg",
+			opus: "audio/opus",
+			flac: "audio/flac",
+		};
+		const resolveAudioKey = (v: Video.Video) =>
+			Effect.gen(function* () {
+				const db = yield* Database;
+				const [uploadRecord] = yield* db.use((db) =>
+					db
+						.select({ rawFileKey: Db.videoUploads.rawFileKey })
+						.from(Db.videoUploads)
+						.where(eq(Db.videoUploads.videoId, v.id)),
+				);
+				if (uploadRecord?.rawFileKey) {
+					return uploadRecord.rawFileKey;
+				}
+				// Upload row may have been cleared after processing. Probe known
+				// audio extensions under raw-upload.<ext>.
+				const base = `${v.ownerId}/${v.id}/raw-upload`;
+				for (const ext of Object.keys(AUDIO_EXT_TO_MIME)) {
+					const key = `${base}.${ext}`;
+					const head = yield* bucket.headObject(key).pipe(Effect.option);
+					if (Option.isSome(head) && (head.value.ContentLength ?? 0) > 0) {
+						return key;
+					}
+				}
+				return yield* Effect.fail(new HttpApiError.NotFound());
+			});
+		const audioMimeForKey = (key: string): string => {
+			const m = key.match(/\.([a-zA-Z0-9]+)$/);
+			const ext = m?.[1]?.toLowerCase() ?? "";
+			return AUDIO_EXT_TO_MIME[ext] ?? "audio/mpeg";
+		};
 
 		// The single-file recording is stored under a key that reflects its real
 		// container: extension/web MediaRecorder uploads are usually WebM
@@ -232,6 +282,14 @@ const getPlaylistResponse = (
 				}
 				return Option.none<string>();
 			});
+
+		// webAudio sources have no transcoded video — the raw upload IS the audio
+		// file. Bypass the mp4/webm/raw resolution dance and serve the audio file
+		// directly with an audio Content-Type so <audio src=...> plays it.
+		if (isAudioSource) {
+			const audioKey = yield* resolveAudioKey(video);
+			return yield* proxyObject(audioKey, audioMimeForKey(audioKey));
+		}
 
 		if (urlParams.videoType === "raw-preview") {
 			const rawFileKey = yield* resolveRawPreviewKey(video);

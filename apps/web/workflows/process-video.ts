@@ -61,14 +61,30 @@ export async function processVideoWorkflow(
 	const { videoId, userId, rawFileKey } = payload;
 
 	try {
+		// Determine source type upfront so we can short-circuit steps that don't
+		// apply to audio-only uploads (no video track → no thumbnail/transcode).
+		const videoRow = await loadVideoRow(videoId);
+		const isAudioSource =
+			(videoRow.source as { type?: string } | null)?.type === "webAudio";
+
 		// 1. Probe + write duration/width/height back to the videos row.
 		const probe = await probeAndStoreMetadata(videoId, userId, rawFileKey);
 
 		// 2. Ensure a Safari-friendly MP4 lives at <owner>/<id>/transcoded.mp4.
-		await ensureMp4Variant(videoId, userId, rawFileKey, probe);
+		// Audio uploads have no video track — ffmpeg transcode is not needed.
+		if (!isAudioSource) {
+			await ensureMp4Variant(videoId, userId, rawFileKey, probe);
+		}
 
 		// 3. Thumbnail + GIF preview (non-fatal — placeholder if all retries fail).
-		await ensurePreviewAssets(videoId, userId, probe);
+		// Audio uploads use /audio-cover-default.svg in the UI; skip ffmpeg frame grab.
+		if (!isAudioSource) {
+			await ensurePreviewAssets(videoId, userId, probe);
+		} else {
+			console.info(
+				`[CAP-THUMB] skipping previews video=${videoId} reason=audio_source`,
+			);
+		}
 
 		// 4. Clear the upload row — the upload is fully processed.
 		await db()

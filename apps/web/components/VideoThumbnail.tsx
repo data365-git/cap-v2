@@ -28,6 +28,7 @@ interface VideoThumbnailProps {
 	imageStatus: ImageLoadingStatus;
 	setImageStatus: (status: ImageLoadingStatus) => void;
 	hasActiveUpload?: boolean;
+	isAudio?: boolean;
 }
 
 const formatDuration = (durationSecs: number) => {
@@ -89,8 +90,9 @@ export const VideoThumbnail: React.FC<VideoThumbnailProps> = memo(
 		imageStatus,
 		setImageStatus,
 		hasActiveUpload = false,
+		isAudio = false,
 	}) => {
-		const thumbnailUrl = useThumnailQuery(videoId, !hasActiveUpload);
+		const thumbnailUrl = useThumnailQuery(videoId, !hasActiveUpload && !isAudio);
 		const containerRef = useRef<HTMLDivElement>(null);
 		const imageRef = useRef<HTMLImageElement>(null);
 		const latestVideoId = useRef(videoId);
@@ -165,34 +167,50 @@ export const VideoThumbnail: React.FC<VideoThumbnailProps> = memo(
 				)}
 				style={{ backgroundImage: randomGradient }}
 			>
-				{showFallbackLayer && ownerId && (
-					<div className="absolute inset-0 z-0">
-						<VideoFrameFallback
-							videoId={videoId}
-							ownerId={ownerId}
-							className="rounded-t-xl"
-							objectFit="cover"
-						/>
-					</div>
-				)}
-				{thumbnailUrl.data && (
+				{isAudio ? (
 					<Image
-						ref={imageRef}
-						src={thumbnailUrl.data}
+						src="/audio-cover-default.svg"
 						unoptimized
 						fill={true}
 						sizes="(max-width: 768px) 100vw, 33vw"
 						alt={alt}
 						key={videoId}
-						style={{ objectFit }}
-						className={clsx(
-							"w-full h-full rounded-t-xl",
-							imageClass,
-							imageStatus === "loading" && "opacity-0",
-						)}
+						style={{ objectFit: "cover" }}
+						className="w-full h-full rounded-t-xl"
 						onLoad={() => setImageStatus("success")}
-						onError={() => setImageStatus("error")}
 					/>
+				) : (
+					<>
+						{showFallbackLayer && ownerId && (
+							<div className="absolute inset-0 z-0">
+								<VideoFrameFallback
+									videoId={videoId}
+									ownerId={ownerId}
+									className="rounded-t-xl"
+									objectFit="cover"
+								/>
+							</div>
+						)}
+						{thumbnailUrl.data && (
+							<Image
+								ref={imageRef}
+								src={thumbnailUrl.data}
+								unoptimized
+								fill={true}
+								sizes="(max-width: 768px) 100vw, 33vw"
+								alt={alt}
+								key={videoId}
+								style={{ objectFit }}
+								className={clsx(
+									"w-full h-full rounded-t-xl",
+									imageClass,
+									imageStatus === "loading" && "opacity-0",
+								)}
+								onLoad={() => setImageStatus("success")}
+								onError={() => setImageStatus("error")}
+							/>
+						)}
+					</>
 				)}
 				{showPreview && (
 					<Image

@@ -380,6 +380,13 @@ async function extractAudio(
 ): Promise<{ audioUrl: string; durationSec: number | null } | null> {
 	"use step";
 
+	const isAudioSource = video.source?.type === "webAudio";
+	if (isAudioSource) {
+		console.log(
+			`[CAP-AUDIO] source=webAudio, skipping video-decode path video=${videoId}`,
+		);
+	}
+
 	const [bucket] = await Storage.getAccessForVideo(
 		decodeStorageVideo(video),
 	).pipe(runPromise);
@@ -475,10 +482,15 @@ async function resolveVideoSourceUrl(
 		.where(eq(videoUploads.videoId, videoId as Video.VideoId))
 		.limit(1);
 
-	const candidateKeys = [
-		`${userId}/${videoId}/result.mp4`,
-		upload[0]?.rawFileKey,
-	].filter(
+	// webAudio uploads have no server-side `result.mp4` — the raw upload IS the
+	// audio file. Look at the raw upload key first so we don't probe a 404
+	// before falling through.
+	const isAudioSource = video.source?.type === "webAudio";
+	const candidateKeys = (
+		isAudioSource
+			? [upload[0]?.rawFileKey, `${userId}/${videoId}/result.mp4`]
+			: [`${userId}/${videoId}/result.mp4`, upload[0]?.rawFileKey]
+	).filter(
 		(value, index, values): value is string =>
 			Boolean(value) && values.indexOf(value) === index,
 	);

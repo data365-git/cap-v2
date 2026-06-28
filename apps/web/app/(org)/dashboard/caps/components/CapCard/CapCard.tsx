@@ -783,6 +783,7 @@ export const CapCard = ({
 								uploadProgress.status !== "failed" &&
 								uploadProgress.status !== "error"
 							}
+							isAudio={cap.source?.type === "webAudio"}
 						/>
 						{effectivePasswordProtected && (
 							<div

@@ -374,6 +374,7 @@ export const videos = mysqlTable(
 				| { type: "desktopMP4" }
 				| { type: "desktopSegments" }
 				| { type: "webMP4" }
+				| { type: "webAudio" }
 				| {
 						type: "extensionWeb";
 						context: "meeting" | "instruction";

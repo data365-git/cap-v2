@@ -21,6 +21,7 @@ import type { VideoData } from "../types";
 import { AIChatPopup } from "./AIChatPopup";
 import { AIFab } from "./AIFab";
 import { BelowVideoTabs } from "./BelowVideoTabs";
+import { CapAudioPlayer } from "./CapAudioPlayer";
 import { GenerateStrip } from "./GenerateStrip";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
@@ -413,6 +414,8 @@ export const ShareVideo = forwardRef<
 				: undefined;
 		const enableCrossOrigin = true;
 
+		const isWebAudio = data.source.type === "webAudio";
+
 		const videoSizeMaxWidth: Record<"sm" | "md" | "lg", string> = {
 			sm: "62%",
 			md: "82%",
@@ -439,6 +442,19 @@ export const ShareVideo = forwardRef<
 							: { position: "static" }
 					}
 				>
+				{isWebAudio ? (
+					/* ── Audio branch: cover image + compact audio bar ── */
+					<div className="mx-auto relative" style={{ viewTransitionName: "cap-edit-video" }}>
+						<CapAudioPlayer
+							videoSrc={videoSrc}
+							videoRef={videoRef}
+							duration={data.duration}
+							defaultPlaybackSpeed={defaultPlaybackSpeed}
+							isPinned={isPinned}
+							onTogglePin={() => setIsPinned(!isPinned)}
+						/>
+					</div>
+				) : (
 				<div
 					className="mx-auto relative"
 					style={{
@@ -603,6 +619,7 @@ export const ShareVideo = forwardRef<
 						</div>
 					)}
 				</div>
+				)}{/* end isWebAudio ternary */}
 				</div>{/* end sticky wrapper */}
 
 				{!data.owner.isPro && (

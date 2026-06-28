@@ -28,6 +28,7 @@ export class Video extends Schema.Class<Video>("Video")({
 			"desktopSegments",
 			"webMP4",
 			"extensionWeb",
+			"webAudio",
 		),
 	}),
 	metadata: Schema.OptionFromNullOr(

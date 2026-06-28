@@ -27,6 +27,13 @@ function mimeFromExt(name: string): string {
     case 'mkv': return 'video/x-matroska';
     case 'avi': return 'video/x-msvideo';
     case 'm4v': return 'video/x-m4v';
+    case 'mp3': return 'audio/mpeg';
+    case 'm4a': return 'audio/mp4';
+    case 'wav': return 'audio/wav';
+    case 'ogg': return 'audio/ogg';
+    case 'opus': return 'audio/opus';
+    case 'flac': return 'audio/flac';
+    case 'aac': return 'audio/aac';
     default: return 'video/mp4';
   }
 }
@@ -39,6 +46,16 @@ function extFromMime(mime: string): string {
     'video/x-matroska': 'mkv',
     'video/x-msvideo': 'avi',
     'video/x-m4v': 'm4v',
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/wav': 'wav',
+    'audio/wave': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/ogg': 'ogg',
+    'audio/opus': 'opus',
+    'audio/flac': 'flac',
+    'audio/aac': 'aac',
+    'audio/x-aac': 'aac',
   };
   return map[mime] ?? 'mp4';
 }
@@ -64,6 +81,7 @@ export async function createVideoForServerProcessing({
 	context = "instruction",
 	fileType,
 	fileName,
+	isAudio = false,
 }: {
 	duration?: number;
 	resolution?: string;
@@ -72,6 +90,7 @@ export async function createVideoForServerProcessing({
 	context?: "meeting" | "instruction";
 	fileType?: string;
 	fileName?: string;
+	isAudio?: boolean;
 }): Promise<CreateForProcessingResult> {
 	const user = await getCurrentUser();
 
@@ -119,7 +138,7 @@ export async function createVideoForServerProcessing({
 			name: `Cap Upload - ${formattedDate}`,
 			ownerId: user.id,
 			orgId,
-			source: { type: "webMP4" as const },
+			source: isAudio ? { type: "webAudio" as const } : { type: "webMP4" as const },
 			bucket: Option.getOrNull(uploadResult.bucketId),
 			storageIntegrationId: Option.getOrNull(uploadResult.storageIntegrationId),
 			public: serverEnv().CAP_VIDEOS_DEFAULT_PUBLIC,

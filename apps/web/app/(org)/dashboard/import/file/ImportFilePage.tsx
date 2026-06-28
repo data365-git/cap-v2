@@ -36,6 +36,7 @@ export const ImportFilePage = ({
 	const [upgradeModalOpen, setUpgradeModalOpen] = useState(
 		buildEnv.NEXT_PUBLIC_IS_CAP ? !user?.isPro : false,
 	);
+	const [uploadKind, setUploadKind] = useState<"video" | "audio">("video");
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [pendingFile, setPendingFile] = useState<File | null>(null);
 	const [uploadSpeedLabel, setUploadSpeedLabel] = useState<string | null>(null);
@@ -56,19 +57,26 @@ export const ImportFilePage = ({
 				setUploadStatus,
 				context,
 				setUploadSpeedLabel,
+				uploadKind === "audio",
 			);
 			if (ok)
 				router.push(
 					folderId ? `/dashboard/folder/${folderId}` : "/dashboard/caps",
 				);
 		},
-		[user, activeOrganization, setUploadStatus, router, folderId, context],
+		[user, activeOrganization, setUploadStatus, router, folderId, context, uploadKind],
 	);
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0];
 		if (!file) return;
-		void processFile(file);
+		if (uploadKind === "audio") {
+			// Audio fast-path: skip trim modal, upload immediately
+			void processFile(file);
+		} else {
+			// Video path: open trim modal first
+			setPendingFile(file);
+		}
 		if (inputRef.current) inputRef.current.value = "";
 	};
 
@@ -79,16 +87,29 @@ export const ImportFilePage = ({
 			const file = e.dataTransfer.files[0];
 			if (!file) return;
 
-			const isVideo =
-				file.type.startsWith("video/") ||
-				/\.(mov|mp4|avi|mkv|webm|m4v)$/i.test(file.name);
-			if (!isVideo) {
-				toast.error("Please drop a video file.");
-				return;
+			if (uploadKind === "audio") {
+				const isAudioFile =
+					file.type.startsWith("audio/") ||
+					/\.(mp3|m4a|wav|ogg|opus|flac|aac)$/i.test(file.name);
+				if (!isAudioFile) {
+					toast.error("Please drop an audio file.");
+					return;
+				}
+				// Audio fast-path: skip trim modal, upload immediately
+				void processFile(file);
+			} else {
+				const isVideo =
+					file.type.startsWith("video/") ||
+					/\.(mov|mp4|avi|mkv|webm|m4v)$/i.test(file.name);
+				if (!isVideo) {
+					toast.error("Please drop a video file.");
+					return;
+				}
+				// Video path: open trim modal first
+				setPendingFile(file);
 			}
-			void processFile(file);
 		},
-		[processFile],
+		[processFile, uploadKind],
 	);
 
 	const handleBrowseClick = () => {
@@ -133,6 +154,31 @@ export const ImportFilePage = ({
 				<p className="mt-1 text-sm text-gray-10">
 					Upload a video file from your device.
 				</p>
+			</div>
+
+			<div className="inline-flex items-center gap-1 p-1 rounded-lg bg-gray-3 mb-6 self-start">
+				<button
+					type="button"
+					onClick={() => setUploadKind("video")}
+					className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+						uploadKind === "video"
+							? "bg-gray-12 text-gray-1 shadow-sm"
+							: "text-gray-10 hover:text-gray-12"
+					}`}
+				>
+					Video
+				</button>
+				<button
+					type="button"
+					onClick={() => setUploadKind("audio")}
+					className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+						uploadKind === "audio"
+							? "bg-gray-12 text-gray-1 shadow-sm"
+							: "text-gray-10 hover:text-gray-12"
+					}`}
+				>
+					Audio
+				</button>
 			</div>
 
 			<button
@@ -181,10 +227,14 @@ export const ImportFilePage = ({
 						</span>
 						<span className="flex flex-col items-center gap-1">
 							<span className="text-sm font-medium text-gray-12">
-								Drag and drop your video here
+								{uploadKind === "audio"
+									? "Drag and drop your audio here"
+									: "Drag and drop your video here"}
 							</span>
 							<span className="text-xs text-gray-10">
-								MP4, MOV, AVI, MKV, WebM up to any size
+								{uploadKind === "audio"
+									? "Audio files: MP3, M4A, WAV, OGG, OPUS, FLAC, AAC"
+									: "MP4, MOV, AVI, MKV, WebM up to any size"}
 							</span>
 						</span>
 						<span className="inline-flex items-center justify-center mt-2 h-8 px-3 rounded-full bg-gray-12 text-sm font-medium text-gray-1">
@@ -197,7 +247,11 @@ export const ImportFilePage = ({
 			<input
 				ref={inputRef}
 				type="file"
-				accept="video/*,.mov,.MOV,.mp4,.MP4,.avi,.AVI,.mkv,.MKV,.webm,.WEBM,.m4v,.M4V"
+				accept={
+					uploadKind === "audio"
+						? "audio/*,.mp3,.m4a,.wav,.ogg,.opus,.flac,.aac"
+						: "video/*,.mov,.MOV,.mp4,.MP4,.avi,.AVI,.mkv,.MKV,.webm,.WEBM,.m4v,.M4V"
+				}
 				onChange={handleFileChange}
 				className="hidden"
 			/>
@@ -228,6 +282,7 @@ async function uploadVideoForServerProcessing(
 	setUploadStatus: (state: UploadStatus | undefined) => void,
 	context: "meeting" | "instruction" = "instruction",
 	setSpeedLabel: (label: string | null) => void = () => {},
+	isAudio = false,
 ) {
 	try {
 		setUploadStatus({ status: "parsing" });
@@ -267,6 +322,7 @@ async function uploadVideoForServerProcessing(
 			context,
 			fileType: file.type,
 			fileName: file.name,
+			isAudio,
 		});
 
 		const uploadId = videoData.id;
