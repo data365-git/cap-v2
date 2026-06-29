@@ -7,6 +7,9 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSub,
+	DropdownMenuSubContent,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@cap/ui";
 import { calculateStrokeDashoffset, getProgressCircleConfig } from "@cap/utils";
@@ -19,6 +22,7 @@ import {
 	faCopy,
 	faDownload,
 	faEllipsis,
+	faFileAlt,
 	faGear,
 	faLink,
 	faLock,
@@ -36,6 +40,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type PropsWithChildren, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { getTranscript } from "@/actions/videos/get-transcript";
 import { ConfirmationDialog } from "@/app/(org)/dashboard/_components/ConfirmationDialog";
 import { useDashboardContext } from "@/app/(org)/dashboard/Contexts";
 import { useUploadProgress } from "@/app/s/[videoId]/_components/ProgressCircle";
@@ -43,6 +48,15 @@ import {
 	type ImageLoadingStatus,
 	VideoThumbnail,
 } from "@/components/VideoThumbnail";
+import {
+	sanitizeFilename,
+	toJson,
+	toMarkdown,
+	toPlainText,
+	toVtt,
+	triggerBrowserDownload,
+} from "@/lib/transcript-export";
+import { parseVTT } from "@/app/s/[videoId]/_components/utils/transcript-utils";
 import { useEffectMutation, useRpcClient } from "@/lib/EffectRuntime";
 import { ThumbnailRequest } from "@/lib/Requests/ThumbnailRequest";
 import { usePublicEnv } from "@/utils/public-env";
@@ -160,6 +174,7 @@ export const CapCard = ({
 	const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
 	const { user, setUpgradeModalOpen } = useDashboardContext();
 	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [isTranscriptDownloading, setIsTranscriptDownloading] = useState(false);
 
 	const [isFreshlyUploaded, setIsFreshlyUploaded] = useState(() => {
 		if (!cap.createdAt) return false;
@@ -380,6 +395,74 @@ export const CapCard = ({
 		router.push(`/s/${cap.id}/edit`);
 	};
 
+	const transcriptHidden =
+		cap.settings?.disableTranscript === true;
+
+	const TRANSCRIPT_FORMATS = [
+		{
+			label: "TXT (oddiy matn)",
+			ext: "txt",
+			mime: "text/plain",
+			formatter: toPlainText,
+		},
+		{
+			label: "Markdown (boblar bilan)",
+			ext: "md",
+			mime: "text/markdown",
+			formatter: toMarkdown,
+		},
+		{
+			label: "VTT (vaqt belgilari bilan)",
+			ext: "vtt",
+			mime: "text/vtt",
+			formatter: toVtt,
+		},
+		{
+			label: "JSON (to'liq AI ma'lumotlari)",
+			ext: "json",
+			mime: "application/json",
+			formatter: toJson,
+		},
+	] as const;
+
+	const handleTranscriptDownload = async (
+		ext: string,
+		mime: string,
+		formatter: (input: Parameters<typeof toPlainText>[0]) => string,
+	) => {
+		if (isTranscriptDownloading) return;
+		setIsTranscriptDownloading(true);
+		try {
+			const result = await getTranscript(cap.id);
+			if (!result.success || !result.content) {
+				toast.error("Transkripsiya topilmadi");
+				return;
+			}
+			const entries = parseVTT(result.content);
+			const vttCues = entries.map((entry, idx) => ({
+				startSec: entry.startTime,
+				endSec: entries[idx + 1]?.startTime ?? entry.startTime + 3,
+				text: entry.text,
+			}));
+			const exportInput = {
+				videoId: cap.id,
+				title: cap.name,
+				durationSec: cap.duration ?? null,
+				vttCues,
+				refinedTranscript:
+					cap.metadata?.aiSummary?.refinedTranscript ?? null,
+				aiSummary: cap.metadata?.aiSummary ?? null,
+			};
+			const content = formatter(exportInput);
+			const filename = sanitizeFilename(cap.name, cap.id, ext);
+			triggerBrowserDownload(content, filename, mime);
+		} catch {
+			toast.error("Yuklab olishda xatolik yuz berdi");
+		} finally {
+			setIsTranscriptDownloading(false);
+		}
+	};
+
 	return (
 		<>
 			<SharingDialog
@@ -538,6 +621,43 @@ export const CapCard = ({
 								<FontAwesomeIcon icon={faDownload} />
 								<p className="text-sm text-gray-12">Download</p>
 							</DropdownMenuItem>
+							{!transcriptHidden && (
+								<>
+									<DropdownMenuSub>
+										<DropdownMenuSubTrigger
+											className="flex gap-2 items-center rounded-lg"
+											disabled={isTranscriptDownloading}
+										>
+											<FontAwesomeIcon className="size-3" icon={faFileAlt} />
+											<p className="text-sm text-gray-12">
+												{isTranscriptDownloading
+													? "Yuklanmoqda..."
+													: "Transkriptni yuklab olish"}
+											</p>
+										</DropdownMenuSubTrigger>
+										<DropdownMenuSubContent>
+											{TRANSCRIPT_FORMATS.map((format) => (
+												<DropdownMenuItem
+													key={format.ext}
+													onClick={(e) => {
+														e.stopPropagation();
+														handleTranscriptDownload(
+															format.ext,
+															format.mime,
+															format.formatter,
+														);
+													}}
+													className="flex gap-2 items-center rounded-lg"
+												>
+													<p className="text-sm text-gray-12">
+														{format.label}
+													</p>
+												</DropdownMenuItem>
+											))}
+										</DropdownMenuSubContent>
+									</DropdownMenuSub>
+								</>
+							)}
 							<DropdownMenuItem
 								onClick={(e) => {
 									e.stopPropagation();

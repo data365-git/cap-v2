@@ -21,9 +21,12 @@ import { useCurrentUser } from "@/app/Layout/AuthContext";
 import type { CommentType } from "../Share";
 import type { VideoData } from "../types";
 import { AuthOverlay } from "./AuthOverlay";
+import { useCaptionContextOptional } from "./CaptionContext";
+import { DownloadTranscriptButton } from "./DownloadTranscriptButton";
 import { MeetingCostPanel } from "./panels/MeetingCostPanel";
 import "./share-redesign.css";
 import { Comments } from "./tabs/Activity/Comments";
+import { parseVTT } from "./utils/transcript-utils";
 
 type AiGenerationStatus =
 	| "QUEUED"
@@ -185,6 +188,19 @@ export const Sidebar = forwardRef<{ scrollToBottom: () => void }, SidebarProps>(
 			false;
 		const canReact = !(disableReactions ?? false);
 
+		const captionCtx = useCaptionContextOptional();
+		const rawVtt = captionCtx?.currentVttContent ?? null;
+
+		const vttCues = useMemo(() => {
+			if (!rawVtt) return [];
+			const entries = parseVTT(rawVtt);
+			return entries.map((entry, idx) => ({
+				startSec: entry.startTime,
+				endSec: entries[idx + 1]?.startTime ?? entry.startTime + 3,
+				text: entry.text,
+			}));
+		}, [rawVtt]);
+
 		const reactionsByEmoji = useMemo(() => {
 			const map: Record<string, number> = {};
 			for (const c of optimisticComments) {
@@ -304,6 +320,18 @@ export const Sidebar = forwardRef<{ scrollToBottom: () => void }, SidebarProps>(
 						onClose={() => setShowAuthOverlay(false)}
 					/>
 				</div>
+
+				<DownloadTranscriptButton
+					videoId={data.id}
+					title={data.name ?? ""}
+					durationSec={data.duration ?? null}
+					vttCues={vttCues}
+					refinedTranscript={
+						data.metadata?.aiSummary?.refinedTranscript ?? null
+					}
+					aiSummary={data.metadata?.aiSummary ?? null}
+					transcriptionStatus={data.transcriptionStatus ?? undefined}
+				/>
 			</div>
 		);
 	},
