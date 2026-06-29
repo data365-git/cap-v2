@@ -49,6 +49,10 @@ interface PipelinePhase {
   startedAt?: string;
   completedAt?: string;
   unitTimesMs?: number[];
+  activeUnitIndex?: number;
+  activeUnitStartedAt?: string;
+  activeUnitLabel?: string;
+  activeUnitEtaSec?: number;
 }
 
 interface PipelineProgress {
@@ -94,8 +98,8 @@ function medianOf(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1
-    ? sorted[mid]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
 function formatCountdown(sec: number): string {
@@ -182,6 +186,11 @@ export function GenerateStrip({
 
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Per-chunk elapsed time counter (ticks every 1s while activeUnitStartedAt is set)
+  const [chunkElapsedSec, setChunkElapsedSec] = useState(0);
+  const chunkStartedAtRef = useRef<string | null>(null);
+  const chunkElapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- ETA countdown tick (called every 1s) ---
   const tickEta = useCallback(() => {
@@ -346,6 +355,26 @@ export function GenerateStrip({
         // No transcribe total yet — just show computing
         setEtaDisplay("Hisoblanmoqda…");
       }
+
+      // Per-chunk elapsed-time interval: start/restart when activeUnitStartedAt changes.
+      const newStartedAt = transcribe?.activeUnitStartedAt ?? null;
+      if (newStartedAt !== chunkStartedAtRef.current) {
+        chunkStartedAtRef.current = newStartedAt;
+        if (chunkElapsedIntervalRef.current) {
+          clearInterval(chunkElapsedIntervalRef.current);
+          chunkElapsedIntervalRef.current = null;
+        }
+        if (newStartedAt) {
+          const computeElapsed = () =>
+            Math.floor((Date.now() - new Date(newStartedAt).getTime()) / 1000);
+          setChunkElapsedSec(computeElapsed());
+          chunkElapsedIntervalRef.current = setInterval(() => {
+            setChunkElapsedSec(computeElapsed());
+          }, 1000);
+        } else {
+          setChunkElapsedSec(0);
+        }
+      }
     },
     [computeOverallPct, initialAnchorEta, reanchorEta],
   );
@@ -355,6 +384,9 @@ export function GenerateStrip({
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
       stopCountdown();
+      if (chunkElapsedIntervalRef.current) {
+        clearInterval(chunkElapsedIntervalRef.current);
+      }
     };
   }, [stopCountdown]);
 
@@ -365,6 +397,12 @@ export function GenerateStrip({
     etaRangeHiRef.current = null;
     prevTranscribeDoneRef.current = 0;
     prevUnitTimesMsLenRef.current = 0;
+    chunkStartedAtRef.current = null;
+    if (chunkElapsedIntervalRef.current) {
+      clearInterval(chunkElapsedIntervalRef.current);
+      chunkElapsedIntervalRef.current = null;
+    }
+    setChunkElapsedSec(0);
     setProgressPct(0);
     setEtaDisplay("Hisoblanmoqda…");
     setPipelinePhases([]);
@@ -578,15 +616,29 @@ export function GenerateStrip({
   // --- Phase chip detail line ---
   const renderPhaseDetail = (p: PipelinePhase): string | null => {
     if (p.status !== "active") return null;
-    if (p.key === "transcribe" || p.key === "index") {
+    if (p.key === "transcribe") {
+      if (p.total > 0 && p.activeUnitIndex != null) {
+        // Per-chunk live label with elapsed + server ETA hint.
+        const label = p.activeUnitLabel ?? "Gemini'ga yuborilmoqda…";
+        const etaPart = p.activeUnitEtaSec != null ? ` · ~${p.activeUnitEtaSec}s qoldi` : "";
+        return `Transkripsiya — qism ${p.activeUnitIndex + 1}/${p.total} · ${label} · ${chunkElapsedSec}s${etaPart}`;
+      }
       if (p.total > 0) {
-        // Compute per-phase ETA from unitTimesMs
+        // Fallback: no activeUnitIndex — show phase-level ETA (old behaviour).
         const unitMs = p.unitTimesMs ?? [];
-        const medianMs = medianOf(unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000]);
+        const mdn = medianOf(unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000]);
         const remaining = Math.max(0, p.total - p.done);
-        const phaseSec = (remaining * medianMs) / 1000;
-        const etaStr = formatPhaseEta(phaseSec);
-        return `${p.label} — ${p.done}/${p.total} qism · ${etaStr}`;
+        const phaseSec = (remaining * mdn) / 1000;
+        return `${p.label} — ${p.done}/${p.total} qism · ${formatPhaseEta(phaseSec)}`;
+      }
+    }
+    if (p.key === "index") {
+      if (p.total > 0) {
+        const unitMs = p.unitTimesMs ?? [];
+        const mdn = medianOf(unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000]);
+        const remaining = Math.max(0, p.total - p.done);
+        const phaseSec = (remaining * mdn) / 1000;
+        return `${p.label} — ${p.done}/${p.total} qism · ${formatPhaseEta(phaseSec)}`;
       }
     }
     if (p.key === "audio") {
@@ -651,16 +703,32 @@ export function GenerateStrip({
           </div>
         </div>
 
-        {/* Primary / Retry button */}
+        {/* Primary / Retry button, or billing link for quota errors */}
         {isError ? (
-          <button type="button" className="gen-btn gen-btn--retry" onClick={onRetry} aria-label="Retry generation">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <span className="gen-btn-text">Retry</span>
-          </button>
+          errorMsg?.includes("aistudio.google.com") ? (
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="gen-btn gen-btn--billing"
+              aria-label="Open Gemini billing settings"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                <polyline points="13 2 13 9 20 9" />
+              </svg>
+              <span className="gen-btn-text">Billing'ni sozlash</span>
+            </a>
+          ) : (
+            <button type="button" className="gen-btn gen-btn--retry" onClick={onRetry} aria-label="Retry generation">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span className="gen-btn-text">Retry</span>
+            </button>
+          )
         ) : (
           <button
             type="button"
@@ -710,6 +778,9 @@ export function GenerateStrip({
             const isAnalyzeDone = p.key === "analyze" && p.status === "done";
             const isAudioSpinner = p.key === "audio" && p.status === "active" && p.total === 0;
             const isIndexChip = p.key === "index";
+            // Mini-ticks for transcribe phase when activeUnitIndex is present.
+            const showTicks = p.key === "transcribe" && p.status === "active" && p.activeUnitIndex != null && p.total > 0;
+            const useProgressBar = showTicks && p.total > 60;
             return (
               <div
                 key={p.key}
@@ -740,7 +811,31 @@ export function GenerateStrip({
                         </ul>
                       </>
                     ) : detail ? (
-                      detail
+                      <>
+                        {detail}
+                        {showTicks && (
+                          <div className="gen-chunk-ticks" aria-hidden="true">
+                            {useProgressBar ? (
+                              <div className="gen-chunk-bar">
+                                <div
+                                  className="gen-chunk-bar-fill"
+                                  style={{ width: `${Math.round((p.done / p.total) * 100)}%` }}
+                                />
+                              </div>
+                            ) : (
+                              Array.from({ length: p.total }, (_, idx) => (
+                                <span
+                                  key={idx}
+                                  className={[
+                                    "gen-chunk-tick",
+                                    idx < p.done ? "done" : idx === p.activeUnitIndex ? "active" : "queued",
+                                  ].join(" ")}
+                                />
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </>
                     ) : isAudioSpinner ? (
                       <span className="gen-chip-spinner-inline" aria-hidden="true" />
                     ) : null}

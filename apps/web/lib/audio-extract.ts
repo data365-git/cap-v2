@@ -268,9 +268,14 @@ export async function extractAudioFromUrl(
 	const ffmpeg = getFfmpegPath();
 	const outputPath = join(tmpdir(), `audio-${randomUUID()}.mp3`);
 
+	// -copyts / -avoid_negative_ts make_zero: preserve input timestamps so
+	// that transcription cues align with the original video timeline.
 	const ffmpegArgs = [
+		"-copyts",
 		"-i",
 		videoUrl,
+		"-avoid_negative_ts",
+		"make_zero",
 		"-vn",
 		"-acodec",
 		"libmp3lame",

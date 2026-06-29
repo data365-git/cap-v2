@@ -1,4 +1,15 @@
 /**
+ * Error thrown when Gemini API quota is exceeded. This short-circuits the
+ * retry/fallback loop — no retries or fallback to Pro model.
+ */
+export class QuotaExceededError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "QuotaExceededError";
+	}
+}
+
+/**
  * fetch with a hard timeout via AbortController. Without this, a Gemini API
  * call can hang indefinitely (observed: chunk 3 of a 5-chunk transcription
  * hung silently for hours, leaving the video stuck in PROCESSING). Any
@@ -33,6 +44,17 @@ const GEMINI_FALLBACK_MODEL =
 const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "4");
 const BACKOFF_BASE_MS = [2000, 5000, 12000, 30000];
 
+function isQuotaExceededError(status: number, msg: string): boolean {
+	if (status === 429 && msg.toLowerCase().includes("quota")) return true;
+	const lower = msg.toLowerCase();
+	return (
+		lower.includes("exceeded your current quota") ||
+		lower.includes("resource_exhausted") ||
+		lower.includes("generate_content_free_tier") ||
+		lower.includes("limit: 0")
+	);
+}
+
 function isTransientGeminiError(status: number, msg: string): boolean {
 	if (status === 429 || status === 503) return true;
 	const lower = msg.toLowerCase();
@@ -61,6 +83,7 @@ async function fetchGeminiWithRetry(
 	apiKey: string,
 	endpoint: string,
 	init: RequestInit & { timeoutMs?: number },
+	onAttempt?: (attempt: number, total: number, reason: "initial" | "retry" | "fallback") => void,
 ): Promise<GenResponseData> {
 	const models = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
 	let lastError: Error | null = null;
@@ -76,6 +99,13 @@ async function fetchGeminiWithRetry(
 					`[gemini-transcribe] Retry ${attempt}/${GEMINI_MAX_RETRIES} for ${model} after ${delay}ms`,
 				);
 				await new Promise<void>((r) => setTimeout(r, delay));
+			}
+
+			// Notify caller of this attempt.
+			if (onAttempt) {
+				const isFallback = model !== GEMINI_PRIMARY_MODEL;
+				const reason = isFallback ? "fallback" : attempt === 0 ? "initial" : "retry";
+				onAttempt(attempt + 1, maxAttempts, reason);
 			}
 
 			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${endpoint}?key=${apiKey}`;
@@ -104,6 +134,15 @@ async function fetchGeminiWithRetry(
 			}
 
 			const errorMsg = data.error?.message ?? String(res.status);
+
+			// Check for quota errors BEFORE transient retry logic — quota errors
+			// short-circuit immediately without retry or fallback.
+			if (isQuotaExceededError(res.status, errorMsg)) {
+				console.error(
+					`[gemini-transcribe] Quota exceeded from ${model}: ${errorMsg}`,
+				);
+				throw new QuotaExceededError(`Gemini quota exceeded: ${errorMsg}`);
+			}
 
 			if (res.status === 401 || res.status === 403) {
 				throw new Error(`Gemini auth error: ${errorMsg}`);
@@ -338,6 +377,13 @@ export interface TranscribeOptions {
 	 * call is transcribing a slice of a longer recording.
 	 */
 	startOffsetSec?: number;
+	/**
+	 * Optional callback fired at the start of each Gemini attempt.
+	 * `attempt` is 1-based; `total` is the max attempts for this model tier.
+	 * `reason` is "initial" for the first try, "retry" for subsequent tries on
+	 * the primary model, and "fallback" when switching to the fallback model.
+	 */
+	onAttempt?: (attempt: number, total: number, reason: "initial" | "retry" | "fallback") => void;
 }
 
 async function readAudio(
@@ -655,6 +701,7 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 				},
 			}),
 		},
+		options.onAttempt,
 	);
 
 	const rawText = genData.candidates?.[0]?.content?.parts?.[0]?.text ?? "";

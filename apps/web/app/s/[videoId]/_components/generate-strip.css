@@ -532,3 +532,55 @@
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
+
+/* === Per-chunk mini-ticks (transcribe phase live progress) === */
+.gen-chunk-ticks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 5px;
+}
+
+/* Individual tick: 6×4px */
+.gen-chunk-tick {
+  display: inline-block;
+  width: 6px;
+  height: 4px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.gen-chunk-tick.done {
+  background: #7c3aed;
+}
+
+.gen-chunk-tick.active {
+  background: #a78bfa;
+  animation: tickPulse 1s ease-in-out infinite;
+}
+
+.gen-chunk-tick.queued {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+@keyframes tickPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Thin progress bar fallback for > 60 chunks */
+.gen-chunk-bar {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+.gen-chunk-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  transition: width 600ms ease;
+}
