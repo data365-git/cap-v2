@@ -136,10 +136,14 @@ export const ShareVideo = forwardRef<
 			}
 		}, []);
 
+		// Default to NOT pinned: a pinned player is position:sticky and would
+		// scroll over the page content (Summary, Topics, Next steps) below it,
+		// covering the text. Static (unpinned) lets the player scroll away with
+		// the content so nothing is obscured. Users can still opt in via the pin
+		// toggle; an explicit "true" preference is respected.
 		const [isPinned, setIsPinnedState] = useState<boolean>(() => {
-			if (typeof window === "undefined") return true;
-			const stored = localStorage.getItem("videoPinned");
-			return stored === null ? true : stored === "true";
+			if (typeof window === "undefined") return false;
+			return localStorage.getItem("videoPinned") === "true";
 		});
 
 		const setIsPinned = useCallback((pinned: boolean) => {
