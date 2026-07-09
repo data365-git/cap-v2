@@ -22,9 +22,9 @@ import { AIChatPopup } from "./AIChatPopup";
 import { AIFab } from "./AIFab";
 import { BelowVideoTabs } from "./BelowVideoTabs";
 import { CapAudioPlayer } from "./CapAudioPlayer";
-import { GenerateStrip } from "./GenerateStrip";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
+import { GenerateStrip } from "./GenerateStrip";
 import {
 	shouldDeferPlaybackSource,
 	shouldReloadPlaybackAfterUploadCompletes,
@@ -158,7 +158,10 @@ export const ShareVideo = forwardRef<
 		// Write --pinned-player-height CSS var via ResizeObserver when pinned
 		useEffect(() => {
 			if (!isPinned) {
-				document.documentElement.style.setProperty("--pinned-player-height", "0px");
+				document.documentElement.style.setProperty(
+					"--pinned-player-height",
+					"0px",
+				);
 				return;
 			}
 			const el = wrapperRef.current;
@@ -166,15 +169,23 @@ export const ShareVideo = forwardRef<
 			const ro = new ResizeObserver(([entry]) => {
 				if (!entry) return;
 				const h = Math.round(entry.contentRect.height);
-				document.documentElement.style.setProperty("--pinned-player-height", `${h}px`);
+				document.documentElement.style.setProperty(
+					"--pinned-player-height",
+					`${h}px`,
+				);
 			});
 			ro.observe(el);
 			return () => {
 				ro.disconnect();
-				document.documentElement.style.setProperty("--pinned-player-height", "0px");
+				document.documentElement.style.setProperty(
+					"--pinned-player-height",
+					"0px",
+				);
 			};
 		}, [isPinned]);
-		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
+		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(
+			null,
+		);
 		const autoFinalizeAttemptedRef = useRef(false);
 		const segmentUploadProgress = useUploadProgress(
 			data.id,
@@ -474,167 +485,169 @@ export const ShareVideo = forwardRef<
 							: { position: "static" }
 					}
 				>
-				{isWebAudio ? (
-					/* ── Audio branch: cover image + compact audio bar ── */
-					<div
-						className="mx-auto relative"
-						style={{
-							viewTransitionName: "cap-edit-video",
-							maxWidth: videoSizeMaxWidth[videoSize],
-							transition: "max-width 320ms ease",
-						}}
-					>
-						<CapAudioPlayer
-							videoSrc={videoSrc}
-							videoRef={videoRef}
-							duration={data.duration}
-							defaultPlaybackSpeed={defaultPlaybackSpeed}
-							isPinned={isPinned}
-							onTogglePin={() => setIsPinned(!isPinned)}
-							chapters={resolvedChapters}
-						/>
-					</div>
-				) : (
-				<div
-					className="mx-auto relative"
-					style={{
-						viewTransitionName: "cap-edit-video",
-						// Size by HEIGHT when pinned so the 48vh cap never crops the
-						// frame: bound the width to `48vh * ratio`, then derive height
-						// from aspectRatio (mirrors the edit view). When unpinned, bound
-						// only by the chosen max-width. Fall back to 16:9 until the real
-						// ratio loads. overflow-visible + object-contain keep the bottom
-						// control bar + speed/time HUD and the full frame visible.
-						aspectRatio: String(videoFrameRatio),
-						width: isPinned
-							? `min(${videoSizeMaxWidth[videoSize]}, calc(48vh * ${videoFrameRatio}))`
-							: undefined,
-						maxWidth: videoSizeMaxWidth[videoSize],
-						maxHeight: isPinned ? "48vh" : undefined,
-						transition: "max-width 320ms ease",
-						background: "#000",
-						borderRadius: 12,
-						overflow: "visible",
-					}}
-				>
-					{isActivelyRecording ? (
-						// overflow-visible so the bottom control bar + speed/time HUD aren't
-						// clipped (the video itself is rounded via the player's rounded-xl).
-						<div className="relative h-full overflow-visible rounded-xl bg-black">
-							<CapVideoPlayer
-								videoId={data.id}
-								mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
+					{isWebAudio ? (
+						/* ── Audio branch: cover image + compact audio bar ── */
+						<div
+							className="mx-auto relative"
+							style={{
+								viewTransitionName: "cap-edit-video",
+								maxWidth: videoSizeMaxWidth[videoSize],
+								transition: "max-width 320ms ease",
+							}}
+						>
+							<CapAudioPlayer
 								videoSrc={videoSrc}
-								duration={data.duration}
-								disableCaptions
-								disableCommentStamps
-								disableReactionStamps
-								disablePreviewGif
-								chaptersSrc=""
-								captionsSrc=""
 								videoRef={videoRef}
-								enableCrossOrigin={enableCrossOrigin}
-								hasActiveUpload={data.hasActiveUpload}
-								autoplay
+								duration={data.duration}
+								defaultPlaybackSpeed={defaultPlaybackSpeed}
+								isPinned={isPinned}
+								onTogglePin={() => setIsPinned(!isPinned)}
+								chapters={resolvedChapters}
 							/>
-							<div className="absolute inset-0 z-20">
-								<RecordingInProgressOverlay
-									onConfirmStopped={handleConfirmStopped}
-									isConfirmingStopped={isConfirmingStopped}
-									confirmStoppedError={confirmStoppedError}
-									className="h-full"
-									variant="overlay"
-								/>
-							</div>
 						</div>
-					) : isProcessingInProgress ? (
-						<PreparingVideoOverlay className="h-full" />
 					) : (
-						<CapVideoPlayer
-							videoId={data.id}
-							mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl [&_video]:rounded-xl"
-							videoSrc={videoSrc}
-							rawFallbackSrc={rawFallbackSrc}
-							duration={data.duration}
-							defaultPlaybackSpeed={defaultPlaybackSpeed}
-							showPlaybackStatusBadge={showPlaybackStatusBadge}
-							disableCaptions={areCaptionsDisabled ?? false}
-							disableCommentStamps={areCommentStampsDisabled ?? false}
-							disableReactionStamps={areReactionStampsDisabled ?? false}
-							chaptersSrc={areChaptersDisabled ? "" : chaptersUrl || ""}
-							captionsSrc={areCaptionsDisabled ? "" : subtitleUrl || ""}
-							videoRef={videoRef}
-							enableCrossOrigin={enableCrossOrigin}
-							hasActiveUpload={data.hasActiveUpload}
-							blockPlaybackDuringProcessing={isEditProcessing}
-							onUploadComplete={handleUploadComplete}
-							comments={commentsData.map((comment) => ({
-								id: comment.id,
-								type: comment.type,
-								timestamp: comment.timestamp,
-								content: comment.content,
-								authorName: comment.authorName,
-								authorImage: comment.authorImage ?? undefined,
-							}))}
-							onSeek={handleSeek}
-							captionLanguage={captionContext.selectedLanguage}
-							onCaptionLanguageChange={handleCaptionLanguageChange}
-							availableCaptions={captionContext.availableTranslations}
-							isCaptionLoading={captionContext.isTranslating}
-							hasCaptions={data.transcriptionStatus === "COMPLETE"}
-							canRetryProcessing={canRetryProcessing}
-							chapters={resolvedChapters}
-							videoSize={videoSize}
-							onVideoSizeChange={setVideoSize}
-							onAspectRatioChange={setVideoAspectRatio}
-							isPinned={isPinned}
-							onTogglePin={() => setIsPinned(!isPinned)}
-						/>
-					)}
-					{showFinalizeRecordingControl && (
-						<div className="absolute bottom-3 left-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5">
-							<div className="flex items-center gap-1.5">
-								<button
-									type="button"
-									onClick={handleConfirmStopped}
-									disabled={isConfirmingStopped}
-									className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/15 bg-black/65 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-70"
-								>
-									{isConfirmingStopped ? (
-										<Loader2Icon className="size-3 animate-spin" />
-									) : (
-										<CheckCircle2 className="size-3" />
-									)}
-									{isConfirmingStopped
-										? "Marking as completed..."
-										: "Mark video as completed"}
-								</button>
-								<TooltipPrimitive.Provider delayDuration={150}>
-									<Tooltip
-										position="top"
-										className="max-w-[260px] items-start text-left leading-relaxed"
-										content="We didn't receive confirmation that this recording finished uploading. Mark it as completed to publish what's been uploaded. Next time, keep the desktop app open after you stop recording until the video loads here, so all files finish uploading."
-									>
+						<div
+							className="mx-auto relative"
+							style={{
+								viewTransitionName: "cap-edit-video",
+								// Size by HEIGHT when pinned so the 48vh cap never crops the
+								// frame: bound the width to `48vh * ratio`, then derive height
+								// from aspectRatio (mirrors the edit view). When unpinned, bound
+								// only by the chosen max-width. Fall back to 16:9 until the real
+								// ratio loads. overflow-visible + object-contain keep the bottom
+								// control bar + speed/time HUD and the full frame visible.
+								aspectRatio: String(videoFrameRatio),
+								width: isPinned
+									? `min(${videoSizeMaxWidth[videoSize]}, calc(48vh * ${videoFrameRatio}))`
+									: undefined,
+								maxWidth: videoSizeMaxWidth[videoSize],
+								maxHeight: isPinned ? "48vh" : undefined,
+								transition: "max-width 320ms ease",
+								background: "#000",
+								borderRadius: 12,
+								overflow: "visible",
+							}}
+						>
+							{isActivelyRecording ? (
+								// overflow-visible so the bottom control bar + speed/time HUD aren't
+								// clipped (the video itself is rounded via the player's rounded-xl).
+								<div className="relative h-full overflow-visible rounded-xl bg-black">
+									<CapVideoPlayer
+										videoId={data.id}
+										mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl"
+										videoSrc={videoSrc}
+										duration={data.duration}
+										disableCaptions
+										disableCommentStamps
+										disableReactionStamps
+										disablePreviewGif
+										chaptersSrc=""
+										captionsSrc=""
+										videoRef={videoRef}
+										enableCrossOrigin={enableCrossOrigin}
+										hasActiveUpload={data.hasActiveUpload}
+										autoplay
+									/>
+									<div className="absolute inset-0 z-20">
+										<RecordingInProgressOverlay
+											onConfirmStopped={handleConfirmStopped}
+											isConfirmingStopped={isConfirmingStopped}
+											confirmStoppedError={confirmStoppedError}
+											className="h-full"
+											variant="overlay"
+										/>
+									</div>
+								</div>
+							) : isProcessingInProgress ? (
+								<PreparingVideoOverlay className="h-full" />
+							) : (
+								<CapVideoPlayer
+									videoId={data.id}
+									mediaPlayerClassName="w-full h-full max-w-full max-h-full rounded-xl [&_video]:rounded-xl"
+									videoSrc={videoSrc}
+									rawFallbackSrc={rawFallbackSrc}
+									duration={data.duration}
+									defaultPlaybackSpeed={defaultPlaybackSpeed}
+									showPlaybackStatusBadge={showPlaybackStatusBadge}
+									disableCaptions={areCaptionsDisabled ?? false}
+									disableCommentStamps={areCommentStampsDisabled ?? false}
+									disableReactionStamps={areReactionStampsDisabled ?? false}
+									chaptersSrc={areChaptersDisabled ? "" : chaptersUrl || ""}
+									captionsSrc={areCaptionsDisabled ? "" : subtitleUrl || ""}
+									videoRef={videoRef}
+									enableCrossOrigin={enableCrossOrigin}
+									hasActiveUpload={data.hasActiveUpload}
+									blockPlaybackDuringProcessing={isEditProcessing}
+									onUploadComplete={handleUploadComplete}
+									comments={commentsData.map((comment) => ({
+										id: comment.id,
+										type: comment.type,
+										timestamp: comment.timestamp,
+										content: comment.content,
+										authorName: comment.authorName,
+										authorImage: comment.authorImage ?? undefined,
+									}))}
+									onSeek={handleSeek}
+									captionLanguage={captionContext.selectedLanguage}
+									onCaptionLanguageChange={handleCaptionLanguageChange}
+									availableCaptions={captionContext.availableTranslations}
+									isCaptionLoading={captionContext.isTranslating}
+									hasCaptions={data.transcriptionStatus === "COMPLETE"}
+									canRetryProcessing={canRetryProcessing}
+									chapters={resolvedChapters}
+									videoSize={videoSize}
+									onVideoSizeChange={setVideoSize}
+									onAspectRatioChange={setVideoAspectRatio}
+									isPinned={isPinned}
+									onTogglePin={() => setIsPinned(!isPinned)}
+								/>
+							)}
+							{showFinalizeRecordingControl && (
+								<div className="absolute bottom-3 left-3 z-30 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5">
+									<div className="flex items-center gap-1.5">
 										<button
 											type="button"
-											aria-label="Why this recording needs to be marked as completed"
-											className="inline-flex size-7 items-center justify-center rounded-md border border-white/15 bg-black/65 text-white/80 shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white"
+											onClick={handleConfirmStopped}
+											disabled={isConfirmingStopped}
+											className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/15 bg-black/65 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-70"
 										>
-											<Info className="size-3.5" />
+											{isConfirmingStopped ? (
+												<Loader2Icon className="size-3 animate-spin" />
+											) : (
+												<CheckCircle2 className="size-3" />
+											)}
+											{isConfirmingStopped
+												? "Marking as completed..."
+												: "Mark video as completed"}
 										</button>
-									</Tooltip>
-								</TooltipPrimitive.Provider>
-							</div>
-							{confirmStoppedError && (
-								<p className="max-w-56 rounded-md bg-black/70 px-2 py-1 text-[11px] text-red-100">
-									{confirmStoppedError}
-								</p>
+										<TooltipPrimitive.Provider delayDuration={150}>
+											<Tooltip
+												position="top"
+												className="max-w-[260px] items-start text-left leading-relaxed"
+												content="We didn't receive confirmation that this recording finished uploading. Mark it as completed to publish what's been uploaded. Next time, keep the desktop app open after you stop recording until the video loads here, so all files finish uploading."
+											>
+												<button
+													type="button"
+													aria-label="Why this recording needs to be marked as completed"
+													className="inline-flex size-7 items-center justify-center rounded-md border border-white/15 bg-black/65 text-white/80 shadow-sm backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white"
+												>
+													<Info className="size-3.5" />
+												</button>
+											</Tooltip>
+										</TooltipPrimitive.Provider>
+									</div>
+									{confirmStoppedError && (
+										<p className="max-w-56 rounded-md bg-black/70 px-2 py-1 text-[11px] text-red-100">
+											{confirmStoppedError}
+										</p>
+									)}
+								</div>
 							)}
 						</div>
 					)}
+					{/* end isWebAudio ternary */}
 				</div>
-				)}{/* end isWebAudio ternary */}
-				</div>{/* end sticky wrapper */}
+				{/* end sticky wrapper */}
 
 				{!data.owner.isPro && (
 					<div className="absolute top-4 left-4 z-30">
@@ -674,74 +687,76 @@ export const ShareVideo = forwardRef<
 							!!(
 								data.metadata?.aiSummary?.overview ||
 								(data.metadata?.aiSummary?.tasks?.length ?? 0) > 0 ||
-								(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) > 0
+								(data.metadata?.aiSummary?.refinedTranscript?.chapters
+									?.length ?? 0) > 0
 							)
 						}
 					/>
 				)}
 
 				{/* FIX 3b: hide tabs block when nothing exists and nothing is in flight */}
-				{(
-					!!(data.metadata?.aiSummary?.overview) ||
+				{(!!data.metadata?.aiSummary?.overview ||
 					(data.metadata?.aiSummary?.tasks?.length ?? 0) > 0 ||
-					(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) > 0 ||
+					(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) >
+						0 ||
 					data.transcriptionStatus === "COMPLETE" ||
 					data.transcriptionStatus === "PROCESSING" ||
 					data.transcriptionStatus === "QUEUED" ||
 					aiGenerationStatus === "PROCESSING" ||
-					aiGenerationStatus === "QUEUED"
-				) && (
-				<div className="mt-4">
-					<BelowVideoTabs
-						isOwner={isOwner}
-						summary={
-							<SummaryPanel
-								videoId={data.id}
-								transcriptionStatus={data.transcriptionStatus}
-								aiGenerationStatus={aiGenerationStatus}
-								data={{
-									duration: data.duration ?? undefined,
-									aiSummary: data.metadata?.aiSummary ?? undefined,
-									speakerCount: undefined,
-								}}
-								isOwner={isOwner}
-								onVideoJump={handleSeek}
-							/>
-						}
-						tasks={
-							<TasksPanel
-								videoId={data.id}
-								transcriptionStatus={data.transcriptionStatus}
-								aiGenerationStatus={aiGenerationStatus}
-								tasks={data.metadata?.aiSummary?.tasks ?? []}
-								isOwner={isOwner}
-							/>
-						}
-						transcript={
-							<TranscriptPanel
-								videoId={data.id}
-								transcriptionStatus={data.transcriptionStatus}
-								transcriptContent={transcriptContent ?? undefined}
-								currentTime={currentTime}
-								onVideoJump={handleSeek}
-								isOwner={isOwner}
-							/>
-						}
-						refined={
-							<RefinedTranscriptPanel
-								videoId={data.id}
-								transcriptionStatus={data.transcriptionStatus}
-								aiGenerationStatus={aiGenerationStatus}
-								currentTime={currentTime}
-								refinedTranscript={
-									data.metadata?.aiSummary?.refinedTranscript ?? undefined
-								}
-								onVideoJump={handleSeek}
-								isOwner={isOwner}
-							/>
-						}
-					/>
-				</div>
+					aiGenerationStatus === "QUEUED") && (
+					<div className="mt-4">
+						<BelowVideoTabs
+							isOwner={isOwner}
+							summary={
+								<SummaryPanel
+									videoId={data.id}
+									transcriptionStatus={data.transcriptionStatus}
+									aiGenerationStatus={aiGenerationStatus}
+									data={{
+										duration: data.duration ?? undefined,
+										aiSummary: data.metadata?.aiSummary ?? undefined,
+										speakerCount:
+											data.metadata?.aiSummary?.refinedTranscript?.intro
+												?.participants?.length || undefined,
+									}}
+									isOwner={isOwner}
+									onVideoJump={handleSeek}
+								/>
+							}
+							tasks={
+								<TasksPanel
+									videoId={data.id}
+									transcriptionStatus={data.transcriptionStatus}
+									aiGenerationStatus={aiGenerationStatus}
+									tasks={data.metadata?.aiSummary?.tasks ?? []}
+									isOwner={isOwner}
+								/>
+							}
+							transcript={
+								<TranscriptPanel
+									videoId={data.id}
+									transcriptionStatus={data.transcriptionStatus}
+									transcriptContent={transcriptContent ?? undefined}
+									currentTime={currentTime}
+									onVideoJump={handleSeek}
+									isOwner={isOwner}
+								/>
+							}
+							refined={
+								<RefinedTranscriptPanel
+									videoId={data.id}
+									transcriptionStatus={data.transcriptionStatus}
+									aiGenerationStatus={aiGenerationStatus}
+									currentTime={currentTime}
+									refinedTranscript={
+										data.metadata?.aiSummary?.refinedTranscript ?? undefined
+									}
+									onVideoJump={handleSeek}
+									isOwner={isOwner}
+								/>
+							}
+						/>
+					</div>
 				)}
 
 				<div className={`ai-aura${aiChatOpen ? " show" : ""}`} />

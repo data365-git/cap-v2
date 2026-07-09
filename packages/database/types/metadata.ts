@@ -8,6 +8,8 @@ export interface AiSummary {
 	nextSteps: string[];
 	tasks: {
 		title: string;
+		/** Context group label (a person, workstream, or stage — the AI's chosen axis). */
+		category?: string;
 		assignee: string;
 		priority: "high" | "medium" | "low";
 		deadline: string;
