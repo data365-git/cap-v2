@@ -8,11 +8,14 @@ import { Skeleton, SkeletonGroup } from "../Skeleton";
 
 interface Task {
 	title: string;
+	category?: string;
 	assignee?: string;
 	priority?: "high" | "medium" | "low";
 	deadline?: string;
 	done: boolean;
 }
+
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 interface TasksPanelProps {
 	videoId: string;
@@ -81,7 +84,9 @@ export function TasksPanel({
 
 	function toggle(index: number) {
 		setTasks((prev) => {
-			const next = prev.map((t, i) => (i === index ? { ...t, done: !t.done } : t));
+			const next = prev.map((t, i) =>
+				i === index ? { ...t, done: !t.done } : t,
+			);
 			if (debounceRef.current) clearTimeout(debounceRef.current);
 			debounceRef.current = setTimeout(() => {
 				fetch("/api/video/tasks/toggle", {
@@ -109,8 +114,18 @@ export function TasksPanel({
 			return (
 				<SkeletonGroup>
 					{[0, 1, 2, 3].map((i) => (
-						<div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-							<Skeleton style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0 }} />
+						<div
+							key={i}
+							style={{ display: "flex", alignItems: "center", gap: 10 }}
+						>
+							<Skeleton
+								style={{
+									width: 20,
+									height: 20,
+									borderRadius: "50%",
+									flexShrink: 0,
+								}}
+							/>
 							<Skeleton style={{ flex: 1, height: 20 }} />
 							<Skeleton style={{ width: 36, height: 20, flexShrink: 0 }} />
 						</div>
@@ -136,11 +151,38 @@ export function TasksPanel({
 		);
 	}
 
-	const groups = PRIORITY_ORDER.map((p) => ({
-		key: p ?? "none",
-		label: GROUP_LABEL[p ?? "none"],
-		items: tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.priority === p),
-	})).filter(({ items }) => items.length > 0);
+	// Group by the AI's chosen context axis (category: a person, workstream, or
+	// stage) when it provided one; otherwise fall back to priority buckets.
+	// Priority still drives each card's accent colour either way.
+	const hasCategories = tasks.some((t) => (t.category ?? "").trim() !== "");
+
+	const groups = hasCategories
+		? Array.from(
+				tasks
+					.map((t, i) => ({ t, i }))
+					.reduce((map, entry) => {
+						const key = (entry.t.category ?? "").trim() || "Other";
+						const bucket = map.get(key) ?? [];
+						bucket.push(entry);
+						map.set(key, bucket);
+						return map;
+					}, new Map<string, Array<{ t: Task; i: number }>>()),
+			).map(([key, items]) => ({
+				key,
+				label: key,
+				items: [...items].sort(
+					(a, b) =>
+						(PRIORITY_RANK[a.t.priority ?? "low"] ?? 3) -
+						(PRIORITY_RANK[b.t.priority ?? "low"] ?? 3),
+				),
+			}))
+		: PRIORITY_ORDER.map((p) => ({
+				key: p ?? "none",
+				label: GROUP_LABEL[p ?? "none"],
+				items: tasks
+					.map((t, i) => ({ t, i }))
+					.filter(({ t }) => t.priority === p),
+			})).filter(({ items }) => items.length > 0);
 
 	return (
 		<>
@@ -184,7 +226,12 @@ export function TasksPanel({
 				</div>
 			</div>
 
-			<div className="tasks-wrap" data-tasks={mode} id={mode === "board" ? "tasks-panel-board" : "tasks-panel-checklist"} role="tabpanel">
+			<div
+				className="tasks-wrap"
+				data-tasks={mode}
+				id={mode === "board" ? "tasks-panel-board" : "tasks-panel-checklist"}
+				role="tabpanel"
+			>
 				{groups.map((g) => (
 					<div className="task-group" key={g.key}>
 						<div className="task-group-header">
@@ -211,7 +258,9 @@ export function TasksPanel({
 											onClick={() => toggle(i)}
 										/>
 										<div className="task-body">
-											<div className="task-title"><RichText inline>{t.title}</RichText></div>
+											<div className="task-title">
+												<RichText inline>{t.title}</RichText>
+											</div>
 											{(t.assignee || t.deadline) && (
 												<div className="task-meta">
 													{t.assignee && (
@@ -222,7 +271,9 @@ export function TasksPanel({
 															>
 																{initials(t.assignee)}
 															</span>
-															<span className="assignee-name">{t.assignee}</span>
+															<span className="assignee-name">
+																{t.assignee}
+															</span>
 														</span>
 													)}
 													{t.deadline && (

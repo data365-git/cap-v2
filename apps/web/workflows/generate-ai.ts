@@ -66,6 +66,7 @@ const AiSummarySchema = z.object({
 		.array(
 			z.object({
 				title: z.string(),
+				category: z.string().default(""),
 				assignee: z.string().default(""),
 				priority: z.enum(["high", "medium", "low"]).default("medium"),
 				deadline: z.string().default(""),
@@ -160,12 +161,17 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 	// the same `phases` array seeded by the transcribe workflow (read-modify-write).
 	const isAudioSource = videoData.video.source?.type === "webAudio";
 	const analyzeStart = Date.now();
-	await patchPipelinePhase(videoId, "analyze", {
-		status: "active",
-		done: 0,
-		total: 1,
-		startedAt: new Date().toISOString(),
-	}, isAudioSource);
+	await patchPipelinePhase(
+		videoId,
+		"analyze",
+		{
+			status: "active",
+			done: 0,
+			total: 1,
+			startedAt: new Date().toISOString(),
+		},
+		isAudioSource,
+	);
 
 	const result = await generateWithAi(
 		transcript,
@@ -185,13 +191,18 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 
 	await saveResults(videoId, videoData, result);
 
-	await patchPipelinePhase(videoId, "analyze", {
-		status: "done",
-		done: 1,
-		total: 1,
-		completedAt: new Date().toISOString(),
-		unitTimesMs: [Date.now() - analyzeStart],
-	}, isAudioSource);
+	await patchPipelinePhase(
+		videoId,
+		"analyze",
+		{
+			status: "done",
+			done: 1,
+			total: 1,
+			completedAt: new Date().toISOString(),
+			unitTimesMs: [Date.now() - analyzeStart],
+		},
+		isAudioSource,
+	);
 
 	return { success: true, message: "AI generation completed successfully" };
 }
@@ -372,7 +383,11 @@ async function generateWithAi(
 	const chunks = chunkTranscriptWithTimestamps(transcript.segments);
 
 	let videoDuration: number;
-	if (videoDurationSec != null && Number.isFinite(videoDurationSec) && videoDurationSec > 0) {
+	if (
+		videoDurationSec != null &&
+		Number.isFinite(videoDurationSec) &&
+		videoDurationSec > 0
+	) {
 		videoDuration = videoDurationSec;
 	} else {
 		const fallback = getVideoDuration(transcript.segments);
@@ -435,9 +450,12 @@ async function generateWithAi(
 			}
 		}
 
-		const introCount = result.aiSummary.refinedTranscript?.intro?.participants?.length ?? 0;
+		const introCount =
+			result.aiSummary.refinedTranscript?.intro?.participants?.length ?? 0;
 		if (!result.aiSummary.refinedTranscript?.intro) {
-			console.warn(`[CAP-AI] missing refinedTranscript.intro for video=${videoId}`);
+			console.warn(
+				`[CAP-AI] missing refinedTranscript.intro for video=${videoId}`,
+			);
 		}
 		console.info(
 			`[CAP-AI] final AI output: tasks=${result.aiSummary.tasks.length}, topics=${result.aiSummary.topics.length}, refined.chapters=${result.aiSummary.refinedTranscript?.chapters.length ?? 0}, intro.participants=${introCount}`,
@@ -677,7 +695,11 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 				contents: [{ parts: [{ text: prompt }] }],
 				generationConfig: {
 					temperature: 0.2,
-					maxOutputTokens: 8192,
+					// The summary JSON bundles overview + topics + tasks + chapters +
+					// the whole refined transcript. At 8192 this truncated on real
+					// meetings, producing invalid JSON that failed to parse ("no
+					// parseable summary" → the "Xato yuz berdi" error). Give it room.
+					maxOutputTokens: 65536,
 				},
 			}),
 			timeoutMs: 5 * 60_000,
@@ -687,6 +709,7 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 	const data = (await res.json()) as {
 		candidates?: Array<{
 			content: { parts: Array<{ text?: string }> };
+			finishReason?: string;
 		}>;
 		usageMetadata?: {
 			promptTokenCount?: number;
@@ -701,8 +724,14 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 		);
 	}
 
-	const content =
-		data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+	const finishReason = data.candidates?.[0]?.finishReason;
+	if (finishReason === "MAX_TOKENS") {
+		console.warn(
+			"[generate-ai] Gemini response hit MAX_TOKENS — JSON may be truncated. Consider splitting the transcript further.",
+		);
+	}
+
+	const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
 	const inputTokens = data.usageMetadata?.promptTokenCount ?? 0;
 	const outputTokens = data.usageMetadata?.candidatesTokenCount ?? 0;
 
@@ -724,10 +753,10 @@ const MASTER_SCHEMA_EXAMPLE = `{
   "summary": "The team discussed Q3 roadmap priorities and resolved the deployment blocker.",
   "chapters": [{"title": "Intro", "start": 0}],
   "aiSummary": {
-    "overview": "A weekly sync covering roadmap and blockers.",
-    "topics": [{"title": "Q3 Roadmap", "body": "The team aligned on three key priorities."}],
+    "overview": "**The team locked Q3 priorities and cleared the deployment blocker.**\\n\\n### Asosiy qarorlar\\n- **Ship the billing rewrite** before the **CRM** migration\\n- Freeze new features for two weeks to pay down bugs\\n\\n### Muhim nuqtalar\\n- Signups up **18%** month-over-month\\n- Deployment blocker was a stale cache config\\n\\n### Ochiq masalalar\\n- Who owns the data migration is still undecided",
+    "topics": [{"title": "Q3 Roadmap", "body": "Aligned on **three priorities**; billing rewrite goes first."}],
     "nextSteps": ["Share updated roadmap doc by Friday"],
-    "tasks": [{"title": "Update roadmap", "assignee": "Alice", "priority": "high", "deadline": "2024-07-05", "done": false}],
+    "tasks": [{"title": "Update the roadmap doc", "category": "Alice", "assignee": "Alice", "priority": "high", "deadline": "2024-07-05", "done": false}],
     "chapters": [{"startSec": 0, "title": "Intro", "body": "Brief intro and agenda."}, {"startSec": 45, "title": "Q3 Roadmap", "body": "Discussion of top priorities."}],
     "refinedTranscript": {
       "intro": {
@@ -735,7 +764,7 @@ const MASTER_SCHEMA_EXAMPLE = `{
         "duration": "21 daqiqa 30 soniya",
         "purpose": "Discuss Q3 roadmap and unblock deployment."
       },
-      "chapters": [{"startSec": 0, "title": "Intro", "paragraphs": ["Welcome everyone.", "Today we cover roadmap and blockers."]}]
+      "chapters": [{"startSec": 0, "title": "Roadmap", "paragraphs": ["Alice opened by confirming the **billing rewrite** ships before the **CRM** migration. Bob flagged that the data migration still has no owner."]}]
     }
   }
 }`;
@@ -754,7 +783,7 @@ function buildMasterPrompt(
 	transcriptWithTimestamps: string,
 	languageInstruction: string,
 ): string {
-	return `You are a professional Uzbek meeting analyst. From the timestamped transcript below,
+	return `You are an expert meeting analyst. From the timestamped transcript below,
 produce ONE JSON object with this exact structure (keep property names exactly):
 ${MASTER_SCHEMA_EXAMPLE}
 
@@ -768,7 +797,43 @@ LANGUAGE & FORMATTING RULES (apply to every text field you output):
 - If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
 - Respond in the same language as the transcript.
 
-A) refinedTranscript — the cleaned, readable version of the WHOLE meeting.
+Several fields accept Markdown and are rendered richly (like a Notion doc): use
+**bold** for key terms/decisions/names/numbers, *italic* for emphasis, "- " bullet
+lists, nested bullets (indent 2 spaces), and "### " subheadings where noted. Keep
+Markdown out of the fields marked PLAIN.
+
+A) overview — the SUMMARY, written as a rich Markdown document. Make it genuinely
+   useful to someone who missed the meeting. Structure it EXACTLY like this:
+   - First line: a one-sentence **bold TL;DR** of the meeting's outcome.
+   - Then "### Asosiy qarorlar" (Key decisions) — a bullet list of decisions actually
+     made, each with the concrete detail (**bold** the decision, include numbers/dates).
+   - Then "### Muhim nuqtalar" (Highlights) — a bullet list of the most important
+     points, findings, or numbers discussed.
+   - Then "### Ochiq masalalar" (Open questions / risks) — a bullet list of unresolved
+     issues, blockers, or risks raised. Omit this section if there are none.
+   Use only what was actually said. If a section has no real content, omit it entirely.
+
+B) topics[] — each major theme as {title, body}. PLAIN title. body = 1-2 tight
+   sentences (bold/italic allowed, no lists) capturing the concrete substance —
+   decisions, numbers, names. 3-8 topics, in the order they arose.
+
+C) nextSteps[] — PLAIN one-line follow-ups that are agreed but not owned by a specific
+   person ("Share roadmap by Friday"). Bold/italic allowed, no lists. Keep each to one line.
+
+D) tasks[] — concrete, OWNED action items. Extract only real commitments; never fabricate.
+   Group them by CONTEXT: look at the meeting and pick the ONE grouping axis that makes the
+   tasks most useful — by person (assignee), by workstream/category (e.g. "Backend", "Sales",
+   "Design"), or by stage/phase (e.g. "This week", "Before launch"). Use that SAME axis for
+   every task via the "category" field. For each task:
+       title    = PLAIN imperative action ("Update the CRM pipeline"). Bold/italic allowed, one line.
+       category = the group label on your chosen axis (a person's name, a workstream, or a stage).
+       assignee = the person responsible as named in the audio; if nobody is named, "Unassigned".
+       priority = high | medium | low, judged from urgency/impact cues.
+       deadline = ISO date (YYYY-MM-DD) ONLY if a concrete date is stated or unambiguously derivable; otherwise "". Never guess.
+       done     = false (unless the transcript says it was already completed).
+
+E) refinedTranscript — the meeting distilled to only what matters. This is gold-panning:
+   swirl away the water, keep the gold.
    - refinedTranscript.intro: {
        participants: string[],   // names spoken in the audio; if none, []
        duration: string,         // a human phrase like "21 daqiqa 30 soniya"
@@ -777,32 +842,23 @@ A) refinedTranscript — the cleaned, readable version of the WHOLE meeting.
    - refinedTranscript.chapters: array of {startSec, title, paragraphs[]} in chronological order.
      * startSec: a number from the transcript's timestamps.
      * title: short descriptive section title.
-     * paragraphs: 2-4 clean prose paragraphs covering that section. Remove filler/stutters/
-       false starts; keep the meaning and intent. Attribute speakers inline when it matters
-       ("Aziz:" style) but write flowing paragraphs, not raw cue lines. Cover the entire meeting.
+     * paragraphs: clean Markdown prose covering that section. AGGRESSIVELY remove greetings,
+       small talk, filler ("umm", "yani", "aa"), stutters, false starts, repetitions, thinking-
+       out-loud, and off-topic tangents. Keep ONLY sentences that carry real meaning about the
+       topic: decisions, facts, numbers, arguments, questions, and commitments. Rewrite into
+       polished, readable minutes — flowing prose, not raw cue lines. **Bold** the key points.
+       Attribute speakers inline only when it changes the meaning ("Aziz:" style). Cover the
+       ENTIRE meeting, but a 30-minute meeting should distil to a few tight paragraphs, not a
+       wall of text. If a whole stretch was only small talk, collapse it to one short sentence.
 
-B) overview + topics — the SUMMARY.
-   - overview: 2-4 sentence executive summary of what the meeting was about and what was decided.
-   - topics[]: each major theme as {title, body}. Body = 1-3 sentences with concrete points,
-     decisions, numbers, names. 3-8 topics typical.
-
-C) nextSteps[] + tasks[] — ACTION ITEMS.
-   - nextSteps[]: short follow-up phrases that are agreed but not owned ("Share roadmap by Friday").
-   - tasks[]: concrete, owned action items. For each:
-       title    = imperative action ("Update the CRM pipeline").
-       assignee = the person responsible as named in the audio; if nobody is named, "Unassigned".
-       priority = high | medium | low, judged from urgency/impact cues.
-       deadline = ISO date (YYYY-MM-DD) ONLY if a concrete date is stated or unambiguously derivable; otherwise "". Never guess.
-       done     = false (unless the transcript says it was already completed).
-   - Extract tasks only from real commitments. Do not fabricate.
-
-D) chapters[] — VIDEO TIMELINE markers {startSec, title, body}.
+F) chapters[] — VIDEO TIMELINE markers {startSec, title, body}. PLAIN.
    - One per topic shift, startSec between 0 and ${videoDuration} (the REAL video duration).
    - These drive the segmented progress bar; align them with the refinedTranscript chapters.
 
 Rules:
 - All startSec/start values between 0 and ${videoDuration}, derived from the timestamps — never invented.
-- Return ONLY valid JSON, no markdown, no commentary.
+- Return ONLY the JSON object, no code fences, no commentary. Markdown is allowed INSIDE
+  string values as described, but the top-level output must be valid JSON.
 
 Transcript:
 ${transcriptWithTimestamps}`;
@@ -908,12 +964,17 @@ LANGUAGE & FORMATTING RULES (apply to every text field):
 - If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
 - Respond in the same language as the transcript.
 
-Rules for chapters:
+Rules for chapters (this is gold-panning — swirl away the water, keep the gold):
 - Break this section into 1-4 topical chapters in chronological order.
-- Each chapter has 2-4 clean prose paragraphs. Remove filler/stutters/false starts; keep meaning.
-- Attribute speakers inline when it matters ("Aziz:" style) but write flowing paragraphs, not raw cue lines.
+- paragraphs are Markdown prose. AGGRESSIVELY remove greetings, small talk, filler
+  ("umm", "yani", "aa"), stutters, false starts, repetitions, thinking-out-loud, and
+  off-topic tangents. Keep ONLY sentences that carry real meaning about the topic:
+  decisions, facts, numbers, arguments, questions, commitments. **Bold** the key points.
+- Rewrite into polished, readable minutes — flowing prose, not raw cue lines. A long
+  stretch of small talk should collapse to one short sentence (or be dropped).
+- Attribute speakers inline only when it changes the meaning ("Aziz:" style).
 - startSec must come from the actual timestamps and stay within [${chunk.startTime}, ${chunk.endTime}].
-- Return ONLY valid JSON, no markdown, no commentary.
+- Return ONLY the JSON object, no code fences. Markdown is allowed inside string values.
 
 Transcript section:
 ${transcriptWithTimestamps}`;
@@ -929,13 +990,19 @@ ${transcriptWithTimestamps}`;
 							typeof ch.title === "string" &&
 							Array.isArray(ch.paragraphs),
 					)
-					.map((ch: { startSec: number; title: string; paragraphs: string[] }) => ({
-						startSec: ch.startSec,
-						title: ch.title,
-						paragraphs: ch.paragraphs.filter(
-							(p: unknown): p is string => typeof p === "string",
-						),
-					}))
+					.map(
+						(ch: {
+							startSec: number;
+							title: string;
+							paragraphs: string[];
+						}) => ({
+							startSec: ch.startSec,
+							title: ch.title,
+							paragraphs: ch.paragraphs.filter(
+								(p: unknown): p is string => typeof p === "string",
+							),
+						}),
+					)
 			: [];
 
 		const paragraphCount = chapters.reduce(
@@ -1057,16 +1124,27 @@ LANGUAGE & FORMATTING RULES (apply to every text field you output):
 - If a word was unclear in the source, keep [noaniq]. Never invent facts, names, numbers, or dates.
 - Respond in the same language as the section analyses.
 
+Some fields accept Markdown and are rendered richly (like a Notion doc): use **bold**
+for key terms/decisions/names/numbers, *italic* for emphasis, "- " bullet lists, nested
+bullets, and "### " subheadings where noted. Keep Markdown out of fields marked PLAIN.
+
 For this pass produce these fields:
-- title: short meeting title.
-- summary: 2-4 sentence executive summary.
+- title: PLAIN short meeting title.
+- summary: PLAIN 2-4 sentence executive summary.
 - chapters: top-level timeline markers (legacy field — array of {title, start}) covering the whole video.
-- aiSummary.overview: 2-4 sentence executive summary.
-- aiSummary.topics[]: each major theme as {title, body}. Body = 1-3 sentences with concrete points,
-  decisions, numbers, names. 3-8 topics typical.
-- aiSummary.nextSteps[]: short follow-up phrases ("Share roadmap by Friday").
-- aiSummary.tasks[]: concrete, owned action items. For each:
-    title    = imperative action.
+- aiSummary.overview: a rich Markdown document. First line = one-sentence **bold TL;DR**.
+  Then "### Asosiy qarorlar" (Key decisions) as a bullet list; "### Muhim nuqtalar"
+  (Highlights) as a bullet list; "### Ochiq masalalar" (Open questions/risks) as a bullet
+  list. Bold the decisions/numbers. Omit any section that has no real content.
+- aiSummary.topics[]: each major theme as {title, body}. PLAIN title. body = 1-2 tight
+  sentences (bold/italic allowed, no lists) with concrete points, decisions, numbers, names.
+  3-8 topics typical.
+- aiSummary.nextSteps[]: PLAIN one-line follow-ups ("Share roadmap by Friday").
+- aiSummary.tasks[]: concrete, owned action items. Group them by CONTEXT — pick the ONE axis
+  (by person, by workstream/category, or by stage) that makes them most useful and use it for
+  every task's "category". For each:
+    title    = PLAIN imperative action.
+    category = the group label on your chosen axis (a person, a workstream, or a stage).
     assignee = the person responsible if named; otherwise "Unassigned".
     priority = high | medium | low.
     deadline = YYYY-MM-DD only if stated/derivable; otherwise "".
@@ -1075,7 +1153,8 @@ For this pass produce these fields:
 - aiSummary.refinedTranscript.intro: {participants[], duration (human phrase), purpose (1-2 sentences)}.
 - aiSummary.refinedTranscript.chapters: leave as [] in THIS pass — a separate pass produces them.
 
-Return ONLY valid JSON, no markdown, no commentary.
+Return ONLY the JSON object, no code fences, no commentary. Markdown is allowed INSIDE
+string values as described; the top-level output must be valid JSON.
 
 Section analyses:
 ${sectionDetails}
@@ -1101,7 +1180,9 @@ ${allKeyPoints.length > 0 ? `All key points identified:\n${allKeyPoints.map((p, 
 	})();
 
 	if (!parsedFinal) {
-		throw new Error("[CAP-AI] long-path final summary pass failed to parse JSON");
+		throw new Error(
+			"[CAP-AI] long-path final summary pass failed to parse JSON",
+		);
 	}
 
 	// ---------- PIPELINE B: per-chunk refined transcript chapters ----------
