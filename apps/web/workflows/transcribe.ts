@@ -630,7 +630,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-2.5-flash",
+			model: "gemini-3-flash-preview",
 			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
@@ -724,7 +724,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-2.5-flash",
+			model: "gemini-3-flash-preview",
 			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
@@ -799,7 +799,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-2.5-flash",
+			model: "gemini-3-flash-preview",
 			audioInput: true,
 			// A chunk that truncated still consumed tokens — record it failed.
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),

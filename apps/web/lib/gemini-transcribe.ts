@@ -37,7 +37,7 @@ async function fetchWithTimeout(
 	}
 }
 
-const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
 // No pricier fallback model by default. Escalating to gemini-2.5-pro on
 // transient errors multiplied cost ~6x (pro output is 4x flash) exactly when
 // the API was already rate-limiting us. Opt back in via GEMINI_FALLBACK_MODEL.
