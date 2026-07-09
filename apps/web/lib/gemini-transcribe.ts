@@ -37,7 +37,8 @@ async function fetchWithTimeout(
 	}
 }
 
-const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
+const GEMINI_PRIMARY_MODEL =
+	process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
 // No pricier fallback model by default. Escalating to gemini-2.5-pro on
 // transient errors multiplied cost ~6x (pro output is 4x flash) exactly when
 // the API was already rate-limiting us. Opt back in via GEMINI_FALLBACK_MODEL.
@@ -85,12 +86,21 @@ async function fetchGeminiWithRetry(
 	apiKey: string,
 	endpoint: string,
 	init: RequestInit & { timeoutMs?: number },
-	onAttempt?: (attempt: number, total: number, reason: "initial" | "retry" | "fallback") => void,
+	onAttempt?: (
+		attempt: number,
+		total: number,
+		reason: "initial" | "retry" | "fallback",
+	) => void,
 ): Promise<GenResponseData> {
 	const models = GEMINI_FALLBACK_MODEL
 		? [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL]
 		: [GEMINI_PRIMARY_MODEL];
 	let lastError: Error | null = null;
+	// Google bills the input tokens of EVERY attempt, not just the one that
+	// succeeds. Accumulate usage across all attempts so the cost ledger reflects
+	// what was actually charged (the returned response carries only its own).
+	let billedInputTokens = 0;
+	let billedOutputTokens = 0;
 
 	for (const model of models) {
 		const maxAttempts =
@@ -108,7 +118,11 @@ async function fetchGeminiWithRetry(
 			// Notify caller of this attempt.
 			if (onAttempt) {
 				const isFallback = model !== GEMINI_PRIMARY_MODEL;
-				const reason = isFallback ? "fallback" : attempt === 0 ? "initial" : "retry";
+				const reason = isFallback
+					? "fallback"
+					: attempt === 0
+						? "initial"
+						: "retry";
 				onAttempt(attempt + 1, maxAttempts, reason);
 			}
 
@@ -128,11 +142,22 @@ async function fetchGeminiWithRetry(
 
 			const data = (await res.json()) as GenResponseData;
 
+			// Every attempt that reached the model is billed by Google.
+			billedInputTokens += data.usageMetadata?.promptTokenCount ?? 0;
+			billedOutputTokens += data.usageMetadata?.candidatesTokenCount ?? 0;
+
 			if (res.ok) {
 				if (model !== GEMINI_PRIMARY_MODEL) {
 					console.log(`[gemini-transcribe] Fallback to ${model} succeeded`);
 				}
-				return data;
+				// Report accumulated usage across all attempts, not just this one.
+				return {
+					...data,
+					usageMetadata: {
+						promptTokenCount: billedInputTokens,
+						candidatesTokenCount: billedOutputTokens,
+					},
+				};
 			}
 
 			const errorMsg = data.error?.message ?? String(res.status);
@@ -382,7 +407,11 @@ export interface TranscribeOptions {
 	 * `reason` is "initial" for the first try, "retry" for subsequent tries on
 	 * the primary model, and "fallback" when switching to the fallback model.
 	 */
-	onAttempt?: (attempt: number, total: number, reason: "initial" | "retry" | "fallback") => void;
+	onAttempt?: (
+		attempt: number,
+		total: number,
+		reason: "initial" | "retry" | "fallback",
+	) => void;
 }
 
 async function readAudio(
@@ -615,22 +644,25 @@ export async function transcribeWithGemini(
 		await pollUntilActive(fileName, apiKey);
 	}
 
-	const genData = await fetchGeminiWithRetry(apiKey, "generateContent", {
-		timeoutMs: 8 * 60_000,
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			contents: [
-				{
-					parts: [
-						{
-							fileData: {
-								mimeType,
-								fileUri,
+	const genData = await fetchGeminiWithRetry(
+		apiKey,
+		"generateContent",
+		{
+			timeoutMs: 8 * 60_000,
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				contents: [
+					{
+						parts: [
+							{
+								fileData: {
+									mimeType,
+									fileUri,
+								},
 							},
-						},
-						{
-							text: `You are a professional Uzbek meeting transcription editor.
+							{
+								text: `You are a professional Uzbek meeting transcription editor.
 
 Transcribe the attached online/offline meeting fully and accurately in Uzbek Latin.
 
@@ -691,15 +723,15 @@ Timestamp format:
 8. Output only the transcript. No intro, no explanation, no table, no numbering.
 
 IMPORTANT: Start your response with "WEBVTT" header and format each line as WebVTT cues with timestamps in HH:MM:SS.mmm --> HH:MM:SS.mmm format. The speaker labels, bold formatting, and content rules above still apply within each cue text.`,
-						},
-					],
+							},
+						],
+					},
+				],
+				generationConfig: {
+					temperature: 0.1,
+					maxOutputTokens: 65536,
 				},
-			],
-			generationConfig: {
-				temperature: 0.1,
-				maxOutputTokens: 65536,
-			},
-		}),
+			}),
 		},
 		options.onAttempt,
 	);
