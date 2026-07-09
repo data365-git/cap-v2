@@ -6,13 +6,20 @@ import Cookies from "js-cookie";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { useEffect, useId, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import { useEffect, useId, useState } from "react";
 
 const MotionLogoBadge = motion(LogoBadge);
 const MotionLink = motion(Link);
 const MotionButton = motion(Button);
 const MotionInput = motion(Input);
+
+// Prevent open redirects: only allow same-site relative paths in ?next=.
+function isSafeRelativePath(path: string) {
+	return (
+		path.startsWith("/") && !path.startsWith("//") && !path.includes("://")
+	);
+}
 
 export function LoginForm() {
 	const searchParams = useSearchParams();
@@ -47,8 +54,8 @@ export function LoginForm() {
 			});
 
 			if (res?.ok && !res?.error) {
-				window.location.href =
-					next && next.length > 0 ? next : "/dashboard";
+				const dest = next && next.length > 0 ? next : "/dashboard";
+				window.location.href = isSafeRelativePath(dest) ? dest : "/dashboard";
 				return;
 			}
 
@@ -123,9 +130,7 @@ export function LoginForm() {
 						}}
 					/>
 
-					{error && (
-						<p className="text-sm text-red-500 text-center">{error}</p>
-					)}
+					{error && <p className="text-sm text-red-500 text-center">{error}</p>}
 
 					<MotionButton
 						variant="dark"

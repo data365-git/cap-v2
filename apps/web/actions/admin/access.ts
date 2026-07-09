@@ -1,18 +1,18 @@
 "use server";
 
-import bcrypt from "bcryptjs";
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { nanoId } from "@cap/database/helpers";
 import {
 	invites,
-	users,
-	organizations,
 	organizationMembers,
+	organizations,
+	users,
 } from "@cap/database/schema";
-import { Organisation, User } from "@cap/web-domain";
-import { eq, desc, sql } from "drizzle-orm";
 import { buildEnv } from "@cap/env";
+import { Organisation, type User } from "@cap/web-domain";
+import bcrypt from "bcryptjs";
+import { desc, eq, sql } from "drizzle-orm";
 
 async function requireAdmin() {
 	const user = await getCurrentUser();
@@ -32,7 +32,9 @@ export async function getUsers() {
 			email: users.email,
 			isAdmin: users.isAdmin,
 			createdAt: users.created_at,
-			passwordHash: users.passwordHash,
+			accessDisabled: sql<boolean>`${users.passwordHash} IS NULL`.mapWith(
+				Boolean,
+			),
 		})
 		.from(users)
 		.orderBy(desc(users.created_at));
@@ -57,7 +59,10 @@ export async function createUser(
 		.limit(1);
 
 	if (existingUser) {
-		return { success: false as const, error: "A user with this email already exists." };
+		return {
+			success: false as const,
+			error: "A user with this email already exists.",
+		};
 	}
 
 	const passwordHash = await bcrypt.hash(password, 10);
@@ -65,11 +70,13 @@ export async function createUser(
 	const organizationId = Organisation.OrganisationId.make(nanoId());
 
 	// Create the default personal organization
-	await db().insert(organizations).values({
-		id: organizationId,
-		ownerId: userId,
-		name: `${name}'s Organization`,
-	});
+	await db()
+		.insert(organizations)
+		.values({
+			id: organizationId,
+			ownerId: userId,
+			name: `${name}'s Organization`,
+		});
 
 	// Create the user
 	await db().insert(users).values({
@@ -105,13 +112,15 @@ export async function generateInviteLink(
 	const expiresAt = new Date();
 	expiresAt.setDate(expiresAt.getDate() + days);
 
-	await db().insert(invites).values({
-		id: nanoId(),
-		token,
-		email: email?.trim().toLowerCase() || null,
-		createdByUserId: admin.id,
-		expiresAt,
-	});
+	await db()
+		.insert(invites)
+		.values({
+			id: nanoId(),
+			token,
+			email: email?.trim().toLowerCase() || null,
+			createdByUserId: admin.id,
+			expiresAt,
+		});
 
 	const inviteUrl = `${buildEnv.NEXT_PUBLIC_WEB_URL}/invite/${token}`;
 
@@ -147,7 +156,10 @@ export async function revokeUser(userId: string) {
 	const admin = await requireAdmin();
 
 	if (admin.id === userId) {
-		return { success: false as const, error: "You cannot revoke your own access." };
+		return {
+			success: false as const,
+			error: "You cannot revoke your own access.",
+		};
 	}
 
 	// Verify the target user exists
@@ -164,7 +176,10 @@ export async function revokeUser(userId: string) {
 	// Soft-disable by clearing passwordHash (prevents login) and bumping authSessionVersion (invalidates active sessions)
 	await db()
 		.update(users)
-		.set({ passwordHash: null, authSessionVersion: sql`${users.authSessionVersion} + 1` })
+		.set({
+			passwordHash: null,
+			authSessionVersion: sql`${users.authSessionVersion} + 1`,
+		})
 		.where(eq(users.id, userId as User.UserId));
 
 	return { success: true as const };
@@ -174,7 +189,10 @@ export async function resetUserPassword(userId: string, newPassword: string) {
 	await requireAdmin();
 
 	if (!newPassword || newPassword.length < 8) {
-		return { success: false as const, error: "Password must be at least 8 characters." };
+		return {
+			success: false as const,
+			error: "Password must be at least 8 characters.",
+		};
 	}
 
 	const [targetUser] = await db()
@@ -191,7 +209,10 @@ export async function resetUserPassword(userId: string, newPassword: string) {
 
 	await db()
 		.update(users)
-		.set({ passwordHash })
+		.set({
+			passwordHash,
+			authSessionVersion: sql`${users.authSessionVersion} + 1`,
+		})
 		.where(eq(users.id, userId as User.UserId));
 
 	return { success: true as const };
@@ -201,7 +222,10 @@ export async function toggleUserAdmin(userId: string) {
 	const admin = await requireAdmin();
 
 	if (admin.id === userId) {
-		return { success: false as const, error: "You cannot change your own admin status." };
+		return {
+			success: false as const,
+			error: "You cannot change your own admin status.",
+		};
 	}
 
 	const [targetUser] = await db()

@@ -6,7 +6,6 @@ import {
 	BucketAlreadyOwnedByYou,
 	CreateBucketCommand,
 	PutBucketCorsCommand,
-	PutBucketPolicyCommand,
 	S3Client,
 } from "@aws-sdk/client-s3";
 import { migrateDb } from "@cap/database/migrate";
@@ -113,25 +112,8 @@ async function createS3Bucket() {
 		.send(new CreateBucketCommand({ Bucket: serverEnv().CAP_AWS_BUCKET }))
 		.then(() => {
 			console.log("Created S3 bucket");
-			return s3Client.send(
-				new PutBucketPolicyCommand({
-					Bucket: serverEnv().CAP_AWS_BUCKET,
-					Policy: JSON.stringify({
-						Version: "2012-10-17",
-						Statement: [
-							{
-								Effect: "Allow",
-								Principal: "*",
-								Action: ["s3:GetObject"],
-								Resource: [`arn:aws:s3:::${serverEnv().CAP_AWS_BUCKET}/*`],
-							},
-						],
-					}),
-				}),
-			);
-		})
-		.then(() => {
-			console.log("Configured S3 buckeet");
+			// No public-read bucket policy: objects are served exclusively
+			// through app-controlled presigned URLs.
 			return applyS3BucketCors(s3Client);
 		})
 		.catch(async (e) => {

@@ -10,6 +10,7 @@ import { HttpApiError, HttpServerRequest } from "@effect/platform";
 import * as Dz from "drizzle-orm";
 import { type Cause, Effect, Layer, Option, Schema } from "effect";
 
+import { hashAuthApiKey } from "./authApiKeyHash.ts";
 import { Database } from "./Database.ts";
 
 export const getCurrentUser = Effect.gen(function* () {
@@ -68,7 +69,25 @@ export const HttpAuthMiddlewareLive = Layer.effect(
 
 				let user: Option.Option<typeof Db.users.$inferSelect>;
 
-				if (authHeader?.length === 36) {
+				if (authHeader?.startsWith("cak_")) {
+					// New-style hashed API keys: store only the HMAC of the token,
+					// never the token itself.
+					const id = yield* Effect.tryPromise(() => hashAuthApiKey(authHeader));
+					user = yield* database
+						.use((db) =>
+							db
+								.select()
+								.from(Db.users)
+								.leftJoin(
+									Db.authApiKeys,
+									Dz.eq(Db.users.id, Db.authApiKeys.userId),
+								)
+								.where(Dz.eq(Db.authApiKeys.id, id)),
+						)
+						.pipe(Effect.map(([entry]) => Option.fromNullable(entry?.users)));
+				} else if (authHeader?.length === 36) {
+					// Legacy plaintext-UUID keys (pre-hashing). Kept for backward
+					// compatibility until existing keys are re-issued.
 					user = yield* database
 						.use((db) =>
 							db
