@@ -9,8 +9,10 @@ interface MeetingCostPanelProps {
 	videoId: string;
 }
 
-// USD → UZS display rate (placeholder; wire to a real FX source if needed).
-const RATE = 12950;
+// USD → UZS display rate. Configurable via env so it can be updated without a
+// code change; falls back to a sane default. Wire to a live FX source if exact
+// rates ever matter (this is a display-only convenience figure).
+const RATE = Number(process.env.NEXT_PUBLIC_USD_UZS_RATE) || 12950;
 
 function formatUsd(cents: number): string {
 	const dollars = cents / 100;
@@ -74,7 +76,9 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 			<div className="cost-card">
 				<div className="cost-head">
 					<span className="cost-title">Xarajat</span>
-					<span className="cost-rate">1$ = {RATE.toLocaleString("en-US").replace(/,/g, " ")} so'm</span>
+					<span className="cost-rate">
+						1$ = {RATE.toLocaleString("en-US").replace(/,/g, " ")} so'm
+					</span>
 				</div>
 
 				{items.length > 0 && (
@@ -91,8 +95,12 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 											aria-label={`${op.successCount} muvaffaqiyatli, ${op.failedCount} muvaffaqiyatsiz urinish`}
 										>
 											{" "}
-											<span style={{ color: "#16a34a" }}>✓{op.successCount}</span>{" "}
-											<span style={{ color: "#dc2626" }}>✗{op.failedCount}</span>
+											<span style={{ color: "#16a34a" }}>
+												✓{op.successCount}
+											</span>{" "}
+											<span style={{ color: "#dc2626" }}>
+												✗{op.failedCount}
+											</span>
 										</span>
 									)}
 								</span>
@@ -110,13 +118,19 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 						className="cost-item cost-failed-line"
 						style={{ opacity: 0.7, fontSize: "0.85em" }}
 					>
-						<span className="cost-ic" style={{ color: "#dc2626" }}>✗</span>
+						<span className="cost-ic" style={{ color: "#dc2626" }}>
+							✗
+						</span>
 						<span className="cost-item-name" style={{ color: "#dc2626" }}>
 							Muvaffaqiyatsiz urinishlar
 						</span>
 						<span className="cost-vals">
-							<div className="cost-usd" style={{ color: "#dc2626" }}>{formatUsd(totalFailedCents)}</div>
-							<div className="cost-uzs" style={{ color: "#dc2626" }}>{formatUzs(totalFailedCents)}</div>
+							<div className="cost-usd" style={{ color: "#dc2626" }}>
+								{formatUsd(totalFailedCents)}
+							</div>
+							<div className="cost-uzs" style={{ color: "#dc2626" }}>
+								{formatUzs(totalFailedCents)}
+							</div>
 						</span>
 					</div>
 				)}
@@ -126,15 +140,24 @@ export function MeetingCostPanel({ videoId }: MeetingCostPanelProps) {
 						Jami
 						{totalFailedCents > 0 && (
 							<span
-								style={{ fontSize: "0.75em", fontWeight: 400, opacity: 0.6, marginLeft: 4 }}
+								style={{
+									fontSize: "0.75em",
+									fontWeight: 400,
+									opacity: 0.6,
+									marginLeft: 4,
+								}}
 							>
 								(muvaffaqiyatsizlar bilan)
 							</span>
 						)}
 					</span>
 					<span style={{ textAlign: "right" }}>
-						<div className="cost-total-usd">{formatUsd(data.totalUsdCents)}</div>
-						<div className="cost-total-uzs">{formatUzs(data.totalUsdCents)}</div>
+						<div className="cost-total-usd">
+							{formatUsd(data.totalUsdCents)}
+						</div>
+						<div className="cost-total-uzs">
+							{formatUzs(data.totalUsdCents)}
+						</div>
 					</span>
 				</div>
 			</div>
