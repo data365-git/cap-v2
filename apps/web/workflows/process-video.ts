@@ -27,6 +27,7 @@ import { decodeStorageVideo } from "@/lib/video-storage";
 import {
 	extractGifPreview,
 	extractThumbnail,
+	generateWaveform,
 	needsMp4Transcode,
 	probeVideo,
 	remuxMp4Faststart,
@@ -69,6 +70,11 @@ export async function processVideoWorkflow(
 
 		// 1. Probe + write duration/width/height back to the videos row.
 		const probe = await probeAndStoreMetadata(videoId, userId, rawFileKey);
+
+		// 1b. Generate waveform PNG for audio sources (non-fatal; on failure, just warn and continue).
+		if (isAudioSource) {
+			await ensureWaveform(videoId, userId, rawFileKey);
+		}
 
 		// 2. Ensure a Safari-friendly MP4 lives at <owner>/<id>/transcoded.mp4.
 		// Audio uploads have no video track — ffmpeg transcode is not needed.
@@ -157,6 +163,73 @@ async function probeAndStoreMetadata(
 	console.info(`[CAP-PROCESS] metadata written: video=${videoId}`);
 	void userId; // referenced only for log parity / call signature symmetry
 	return probe;
+}
+
+/**
+ * Step 1b — generate a waveform PNG visualization for audio sources.
+ * Non-fatal: wraps in try/catch and logs a warning on failure, never fails
+ * the workflow. Video sources skip this entirely.
+ */
+async function ensureWaveform(
+	videoId: string,
+	userId: string,
+	rawFileKey: string,
+): Promise<void> {
+	"use step";
+
+	try {
+		const video = await loadVideoRow(videoId);
+		const [bucket] = await Storage.getAccessForVideo(
+			decodeStorageVideo(video),
+		).pipe(runPromise);
+
+		const waveformKey = `${userId}/${videoId}/waveform.png`;
+
+		// Idempotency check — skip work if the output already landed.
+		const existing = await bucket.headObject(waveformKey).pipe(runPromise);
+		if (Option.isSome(existing) && (existing.value.ContentLength ?? 0) > 0) {
+			console.info(
+				`[CAP-PROCESS] waveform.png already present video=${videoId} bytes=${existing.value.ContentLength}`,
+			);
+			await markWaveformReady(videoId, video.metadata ?? {}, waveformKey);
+			return;
+		}
+
+		const sourceUrl = await getInternalSourceUrl(videoId, rawFileKey);
+
+		const { outputPath, cleanup } = await generateWaveform(sourceUrl);
+		try {
+			const body = await fs.readFile(outputPath);
+			await bucket
+				.putObject(waveformKey, body, { contentType: "image/png" })
+				.pipe(runPromise);
+			console.info(
+				`[CAP-PROCESS] waveform generated: video=${videoId} size=${body.length} key=${waveformKey}`,
+			);
+			await markWaveformReady(videoId, video.metadata ?? {}, waveformKey);
+		} finally {
+			await cleanup();
+		}
+	} catch (err) {
+		console.warn(
+			`[CAP-PROCESS] waveform generation failed video=${videoId} reason=${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
+		// Non-fatal — do not throw. The workflow continues.
+	}
+}
+
+async function markWaveformReady(
+	videoId: string,
+	currentMetadata: VideoMetadata,
+	waveformKey: string,
+): Promise<void> {
+	if (currentMetadata.waveformKey === waveformKey) return;
+	await db()
+		.update(videos)
+		.set({ metadata: { ...currentMetadata, waveformKey } })
+		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
 /**

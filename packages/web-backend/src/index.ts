@@ -1,5 +1,6 @@
 export * from "./Auth.ts";
 export * from "./Aws.ts";
+export * from "./authApiKeyHash.ts";
 export * from "./Database.ts";
 export { Folders } from "./Folders/index.ts";
 export { HttpLive } from "./Http/Live.ts";

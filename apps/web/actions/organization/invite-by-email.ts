@@ -2,13 +2,12 @@
 
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
-import { nanoId } from "@cap/database/helpers";
+import { nanoId, nanoIdToken } from "@cap/database/helpers";
 import {
 	organizationInvites,
 	organizationMembers,
 	users,
 } from "@cap/database/schema";
-import type { User } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -18,7 +17,7 @@ type InviteInput = {
 	role: "admin" | "member";
 };
 
-export async function inviteByEmail({ email, name, role }: InviteInput) {
+export async function inviteByEmail({ email, role }: InviteInput) {
 	const me = await getCurrentUser();
 	if (!me?.id) throw new Error("Unauthorized");
 
@@ -62,27 +61,31 @@ export async function inviteByEmail({ email, name, role }: InviteInput) {
 		.where(eq(users.email, normalized))
 		.limit(1);
 
-	const userId: User.UserId = existing?.id ?? (nanoId() as User.UserId);
+	// No account yet: create a pending, tokenized invite instead of a
+	// passwordless "ghost" user. The recipient joins via the invite link,
+	// which sets their password (see redeemInvite).
 	if (!existing) {
-		await db()
-			.insert(users)
-			.values({
-				id: userId,
-				email: normalized,
-				name: name ?? normalized.split("@")[0],
-				emailVerified: new Date(),
-				activeOrganizationId: orgId,
-				defaultOrgId: orgId,
-				inviteQuota: 1,
-			});
+		await db().insert(organizationInvites).values({
+			id: nanoId(),
+			token: nanoIdToken(),
+			organizationId: orgId,
+			invitedEmail: normalized,
+			invitedByUserId: me.id,
+			role,
+			status: "pending",
+		});
+
+		revalidatePath("/dashboard/settings/organization/members");
+		return { email: normalized };
 	}
 
+	// Existing account: add them to the org directly.
 	const [alreadyMember] = await db()
 		.select({ id: organizationMembers.id })
 		.from(organizationMembers)
 		.where(
 			and(
-				eq(organizationMembers.userId, userId),
+				eq(organizationMembers.userId, existing.id),
 				eq(organizationMembers.organizationId, orgId),
 			),
 		)
@@ -91,12 +94,12 @@ export async function inviteByEmail({ email, name, role }: InviteInput) {
 	if (!alreadyMember) {
 		await db().insert(organizationMembers).values({
 			id: nanoId(),
-			userId,
+			userId: existing.id,
 			organizationId: orgId,
 			role,
 		});
 	}
 
 	revalidatePath("/dashboard/settings/organization/members");
-	return { userId, email: normalized };
+	return { userId: existing.id, email: normalized };
 }

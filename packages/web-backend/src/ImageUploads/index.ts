@@ -1,8 +1,25 @@
-import { ImageUpload } from "@cap/web-domain";
+import { ImageUpload, InternalError } from "@cap/web-domain";
 import { Effect, Option } from "effect";
 
 import { Database, type DbClient } from "../Database";
 import { S3Buckets } from "../S3Buckets";
+
+const IMAGE_CONTENT_TYPES = {
+	"image/png": "png",
+	"image/jpeg": "jpg",
+	"image/webp": "webp",
+	"image/gif": "gif",
+	"image/avif": "avif",
+} as const;
+
+function getImageExtension(contentType: string) {
+	const normalized = contentType.toLowerCase().split(";")[0]?.trim();
+	if (!normalized) return null;
+
+	return (
+		IMAGE_CONTENT_TYPES[normalized as keyof typeof IMAGE_CONTENT_TYPES] ?? null
+	);
+}
 
 export class ImageUploads extends Effect.Service<ImageUploads>()(
 	"ImageUploads",
@@ -25,7 +42,15 @@ export class ImageUploads extends Effect.Service<ImageUploads>()(
 				}) {
 					yield* Option.match(args.payload, {
 						onSome: Effect.fn(function* (image) {
-							const fileExtension = image.fileName.split(".").pop() || "jpg";
+							const fileExtension = getImageExtension(image.contentType);
+							if (!fileExtension) {
+								yield* Effect.logWarning(
+									`Rejected image upload: unsupported content type ${image.contentType}`,
+								);
+								return yield* Effect.fail(
+									new InternalError({ type: "unknown" }),
+								);
+							}
 							const s3Key = ImageUpload.ImageKey.make(
 								`${args.keyPrefix}/${Date.now()}.${fileExtension}`,
 							);

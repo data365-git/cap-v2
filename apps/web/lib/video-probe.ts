@@ -300,6 +300,35 @@ function runFfmpeg(
 }
 
 /**
+ * Generate a waveform PNG visualization from an audio source at 1200x180px.
+ * Uses ffmpeg's showwavespic filter with purple color (#7C5BFF).
+ *
+ * Returns the file path on disk.
+ */
+export async function generateWaveform(
+	sourceUrl: string,
+): Promise<{ outputPath: string; cleanup: () => Promise<void> }> {
+	const ffmpeg = getFfmpegPath();
+	const outputPath = join(tmpdir(), `waveform-${randomUUID()}.png`);
+	const args = [
+		"-i",
+		sourceUrl,
+		"-filter_complex",
+		"showwavespic=s=1200x180:colors=#7C5BFF",
+		"-frames:v",
+		"1",
+		outputPath,
+	];
+	await runFfmpeg(ffmpeg, args, "generateWaveform", outputPath);
+	return {
+		outputPath,
+		cleanup: async () => {
+			await fs.unlink(outputPath).catch(() => {});
+		},
+	};
+}
+
+/**
  * Run `fn` up to `attempts` times with exponential backoff. Used to wrap
  * thumbnail / GIF generation so a single transient ffmpeg or S3 failure
  * doesn't permanently leave a video without a preview.

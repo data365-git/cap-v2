@@ -39,6 +39,14 @@ export interface PipelinePhase {
 	completedAt?: string; // ISO
 	/** transcribe/index: per-chunk wall-clock durations in ms (for median ETA) */
 	unitTimesMs?: number[];
+	/** Index of the chunk currently being processed (0-based) */
+	activeUnitIndex?: number;
+	/** ISO timestamp when the current chunk started processing */
+	activeUnitStartedAt?: string;
+	/** Human-readable label for what the current chunk is doing */
+	activeUnitLabel?: string;
+	/** Estimated seconds remaining for the current chunk */
+	activeUnitEtaSec?: number;
 }
 
 export interface PipelineProgress {
@@ -101,6 +109,12 @@ export interface VideoMetadata {
 	 * "pending" is the implicit default for old rows (treat undefined as pending).
 	 */
 	thumbnailStatus?: "pending" | "ready" | "failed";
+	/**
+	 * S3/R2 key for the waveform PNG generated from audio sources at upload time.
+	 * Audio-only uploads get a `showwavespic` visualization at 1200x180px.
+	 * Persisted during process-video workflow; undefined for video sources.
+	 */
+	waveformKey?: string;
 	/**
 	 * Live progress for the transcription → AI generation pipeline.
 	 * Written by the transcribe + generate-ai workflows; read-modify-write into

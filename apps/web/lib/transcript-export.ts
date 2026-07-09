@@ -59,7 +59,10 @@ function getLocaleDate(): string {
 }
 
 /**
- * Export as plain text: Title · Duration · Date, then chapters with paragraphs.
+ * Export as plain text: Title · Duration · Date, then the full verbatim
+ * transcript (every cue, with timestamps). The refined/summarized version is
+ * available via toMarkdownSummary — the default download must be the complete
+ * transcript so paste-into-ChatGPT gets all 2.5h, not a 21-chapter summary.
  */
 export function toPlainText(input: ExportInput): string {
   const duration = input.durationSec !== null ? formatDuration(input.durationSec) : "Unknown";
@@ -69,23 +72,46 @@ export function toPlainText(input: ExportInput): string {
   lines.push(`${input.title} · ${duration} · ${date}`);
   lines.push("");
 
-  if (input.refinedTranscript?.chapters && input.refinedTranscript.chapters.length > 0) {
-    for (const chapter of input.refinedTranscript.chapters) {
-      lines.push(chapter.title.toUpperCase());
-      lines.push("");
-      for (const paragraph of chapter.paragraphs) {
-        lines.push(paragraph);
+  // Group consecutive cues by speaker for readability; keep every cue.
+  let currentSpeaker = "";
+  for (const cue of input.vttCues) {
+    const text = (cue.text || "").replace(/<v\s+([^>]+)>/, (_m, who) => {
+      if (who !== currentSpeaker) {
+        currentSpeaker = who;
+        return `\n${who}: `;
       }
-      lines.push("");
-    }
-  } else {
-    // Fallback: one paragraph per VTT cue
-    for (const cue of input.vttCues) {
-      lines.push(cue.text);
-      lines.push("");
-    }
+      return "";
+    }).replace(/<\/v>/g, "").trim();
+    if (!text) continue;
+    const ts = formatDuration(cue.startSec);
+    lines.push(`[${ts}] ${text}`);
   }
 
+  return lines.join("\n");
+}
+
+/**
+ * Export only the AI-refined summary (much shorter — 1–2 paragraphs per
+ * chapter). Returns null if no refined transcript exists yet.
+ */
+export function toMarkdownSummary(input: ExportInput): string | null {
+  if (!input.refinedTranscript?.chapters?.length) return null;
+  const lines: string[] = [];
+  lines.push(`# ${input.title} — summary`);
+  lines.push("");
+  if (input.refinedTranscript.intro) {
+    const i = input.refinedTranscript.intro;
+    if (i.participants?.length) lines.push(`**Participants:** ${i.participants.join(", ")}`);
+    if (i.duration) lines.push(`**Duration:** ${i.duration}`);
+    if (i.purpose) lines.push(`**Purpose:** ${i.purpose}`);
+    lines.push("");
+  }
+  for (const c of input.refinedTranscript.chapters) {
+    lines.push(`## [${formatDuration(c.startSec)}] ${c.title}`);
+    lines.push("");
+    for (const p of c.paragraphs) lines.push(p);
+    lines.push("");
+  }
   return lines.join("\n");
 }
 
@@ -115,23 +141,41 @@ export function toMarkdown(input: ExportInput): string {
     lines.push("");
   }
 
-  // Chapters
-  if (input.refinedTranscript?.chapters && input.refinedTranscript.chapters.length > 0) {
-    for (const chapter of input.refinedTranscript.chapters) {
-      const timestamp = formatDuration(chapter.startSec);
-      lines.push(`## [${timestamp}] ${chapter.title}`);
-      lines.push("");
-      for (const paragraph of chapter.paragraphs) {
-        lines.push(paragraph);
+  // Full verbatim transcript, grouped under timeline chapter headers when
+  // available so it stays navigable. Every cue is included — the .md export
+  // must be the COMPLETE transcript, not the AI summary. For the summary
+  // version, see toMarkdownSummary().
+  const chapters = input.refinedTranscript?.chapters?.length
+    ? input.refinedTranscript.chapters
+    : input.aiSummary?.chapters?.length
+      ? input.aiSummary.chapters.map((c) => ({ startSec: c.startSec, title: c.title }))
+      : [];
+
+  const renderCue = (cue: { startSec: number; text: string }) => {
+    const text = (cue.text || "")
+      .replace(/<v\s+([^>]+)>/, (_m, who) => `**${who}:** `)
+      .replace(/<\/v>/g, "")
+      .trim();
+    return `**[${formatDuration(cue.startSec)}]** ${text}`;
+  };
+
+  if (chapters.length > 0) {
+    let ci = 0;
+    for (const cue of input.vttCues) {
+      while (ci < chapters.length && cue.startSec >= chapters[ci]!.startSec) {
+        lines.push("");
+        lines.push(`## [${formatDuration(chapters[ci]!.startSec)}] ${chapters[ci]!.title}`);
+        lines.push("");
+        ci++;
       }
+      lines.push(renderCue(cue));
       lines.push("");
     }
   } else {
-    // Fallback: single transcript section with cue texts
     lines.push("## Transcript");
     lines.push("");
     for (const cue of input.vttCues) {
-      lines.push(cue.text);
+      lines.push(renderCue(cue));
       lines.push("");
     }
   }
