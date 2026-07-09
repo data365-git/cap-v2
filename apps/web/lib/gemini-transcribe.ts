@@ -26,11 +26,13 @@ async function fetchWithTimeout(
 	}
 }
 
-const GEMINI_PRIMARY_MODEL =
-	process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
-const GEMINI_FALLBACK_MODEL =
-	process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-pro";
-const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "4");
+const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+// No pricier fallback model by default. Escalating to gemini-2.5-pro on
+// transient errors multiplied cost ~6x (pro output is 4x flash) exactly when
+// the API was already rate-limiting us. Opt back in via GEMINI_FALLBACK_MODEL.
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL ?? "";
+// Cap total attempts at 3 (was 5). Input tokens are re-billed on every attempt.
+const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "2");
 const BACKOFF_BASE_MS = [2000, 5000, 12000, 30000];
 
 function isTransientGeminiError(status: number, msg: string): boolean {
@@ -62,7 +64,9 @@ async function fetchGeminiWithRetry(
 	endpoint: string,
 	init: RequestInit & { timeoutMs?: number },
 ): Promise<GenResponseData> {
-	const models = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
+	const models = GEMINI_FALLBACK_MODEL
+		? [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL]
+		: [GEMINI_PRIMARY_MODEL];
 	let lastError: Error | null = null;
 
 	for (const model of models) {
@@ -96,9 +100,7 @@ async function fetchGeminiWithRetry(
 
 			if (res.ok) {
 				if (model !== GEMINI_PRIMARY_MODEL) {
-					console.log(
-						`[gemini-transcribe] Fallback to ${model} succeeded`,
-					);
+					console.log(`[gemini-transcribe] Fallback to ${model} succeeded`);
 				}
 				return data;
 			}
@@ -113,9 +115,7 @@ async function fetchGeminiWithRetry(
 				console.warn(
 					`[gemini-transcribe] Transient error from ${model} (attempt ${attempt + 1}/${maxAttempts}): ${errorMsg}`,
 				);
-				lastError = new Error(
-					`Gemini generateContent failed: ${errorMsg}`,
-				);
+				lastError = new Error(`Gemini generateContent failed: ${errorMsg}`);
 				continue;
 			}
 
@@ -130,8 +130,7 @@ async function fetchGeminiWithRetry(
 	}
 
 	throw (
-		lastError ??
-		new Error("Gemini generateContent failed after all retries")
+		lastError ?? new Error("Gemini generateContent failed after all retries")
 	);
 }
 
@@ -198,7 +197,9 @@ function parseVttTimestamp(ts: string): number | null {
 	const m2 = ts.match(/^(\d+):(\d{2})[.,](\d{1,3})$/);
 	if (m2) {
 		const [, m, s, ms] = m2;
-		return Number(m) * 60 + Number(s) + Number((ms ?? "0").padEnd(3, "0")) / 1000;
+		return (
+			Number(m) * 60 + Number(s) + Number((ms ?? "0").padEnd(3, "0")) / 1000
+		);
 	}
 	return null;
 }
@@ -214,9 +215,7 @@ export function parseVttCues(vtt: string): VttCue[] {
 
 	while (i < lines.length) {
 		const line = lines[i] ?? "";
-		const arrowMatch = line.match(
-			/^\s*([\d:.,]+)\s*-->\s*([\d:.,]+)/,
-		);
+		const arrowMatch = line.match(/^\s*([\d:.,]+)\s*-->\s*([\d:.,]+)/);
 		if (!arrowMatch) {
 			i++;
 			continue;
@@ -548,7 +547,11 @@ export async function transcribeWithGemini(
 				"[gemini-transcribe] No Content-Length from audio URL — falling back to buffered upload",
 			);
 			const { bytes: audioBytes } = await readAudio(audioUrl, options);
-			const uploadResult = await uploadAudioBuffer(audioBytes, mimeType, apiKey);
+			const uploadResult = await uploadAudioBuffer(
+				audioBytes,
+				mimeType,
+				apiKey,
+			);
 			fileUri = uploadResult.fileUri;
 			fileName = uploadResult.fileName;
 			uploadedState = uploadResult.state;
@@ -566,25 +569,22 @@ export async function transcribeWithGemini(
 		await pollUntilActive(fileName, apiKey);
 	}
 
-	const genData = await fetchGeminiWithRetry(
-		apiKey,
-		"generateContent",
-		{
-			timeoutMs: 8 * 60_000,
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				contents: [
-					{
-						parts: [
-							{
-								fileData: {
-									mimeType,
-									fileUri,
-								},
+	const genData = await fetchGeminiWithRetry(apiKey, "generateContent", {
+		timeoutMs: 8 * 60_000,
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			contents: [
+				{
+					parts: [
+						{
+							fileData: {
+								mimeType,
+								fileUri,
 							},
-							{
-								text: `You are a professional Uzbek meeting transcription editor.
+						},
+						{
+							text: `You are a professional Uzbek meeting transcription editor.
 
 Transcribe the attached online/offline meeting fully and accurately in Uzbek Latin.
 
@@ -645,17 +645,16 @@ Timestamp format:
 8. Output only the transcript. No intro, no explanation, no table, no numbering.
 
 IMPORTANT: Start your response with "WEBVTT" header and format each line as WebVTT cues with timestamps in HH:MM:SS.mmm --> HH:MM:SS.mmm format. The speaker labels, bold formatting, and content rules above still apply within each cue text.`,
-							},
-						],
-					},
-				],
-				generationConfig: {
-					temperature: 0.1,
-					maxOutputTokens: 65536,
+						},
+					],
 				},
-			}),
-		},
-	);
+			],
+			generationConfig: {
+				temperature: 0.1,
+				maxOutputTokens: 65536,
+			},
+		}),
+	});
 
 	const rawText = genData.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 	const finishReason = genData.candidates?.[0]?.finishReason ?? "UNKNOWN";
@@ -674,8 +673,7 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 
 	const parsedCues = parseVttCues(baseVtt);
 	const shifted = shiftCues(parsedCues, startOffsetSec);
-	const transcriptVtt =
-		startOffsetSec === 0 ? baseVtt : cuesToVtt(shifted);
+	const transcriptVtt = startOffsetSec === 0 ? baseVtt : cuesToVtt(shifted);
 
 	return {
 		transcriptVtt,

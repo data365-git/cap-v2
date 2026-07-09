@@ -1,9 +1,68 @@
 import { db } from "@cap/database";
 import { nanoId } from "@cap/database/helpers";
-import { type AiOperation, aiUsageEvents } from "@cap/database/schema";
+import {
+	type AiOperation,
+	aiUsageEvents,
+	organizations,
+	users,
+} from "@cap/database/schema";
 import { priceForMicros } from "@cap/utils";
 import type { Organisation, User, Video } from "@cap/web-domain";
 import { and, eq, sql } from "drizzle-orm";
+
+interface AiBudgetSettings {
+	monthlyUsdCents?: number;
+	alertAtPct?: number;
+	enabled?: boolean;
+}
+
+/** A configured monthly budget → cap in microdollars, or null when unset/disabled. */
+function budgetToCapMicros(
+	b: AiBudgetSettings | null | undefined,
+): number | null {
+	if (
+		b &&
+		b.enabled !== false &&
+		typeof b.monthlyUsdCents === "number" &&
+		b.monthlyUsdCents > 0
+	) {
+		return b.monthlyUsdCents * 10_000; // cents → microdollars
+	}
+	return null;
+}
+
+/**
+ * Resolve the effective monthly budget cap from stored settings when a caller
+ * doesn't pass one explicitly. Org budget takes precedence over the owner's
+ * personal budget (mirrors the AI chat route). Without this, transcription and
+ * embedding spend was never capped — the guard only recorded it.
+ */
+async function resolveBudgetCaps(
+	orgId: string,
+	userId: string,
+): Promise<{ orgCapMicros: number | null; userCapMicros: number | null }> {
+	if (orgId) {
+		const [org] = await db()
+			.select({ settings: organizations.settings })
+			.from(organizations)
+			.where(sql`${organizations.id} = ${orgId}`)
+			.limit(1);
+		const cap = budgetToCapMicros(
+			(org?.settings as { aiBudget?: AiBudgetSettings } | null)?.aiBudget,
+		);
+		if (cap != null) return { orgCapMicros: cap, userCapMicros: null };
+	}
+
+	const [user] = await db()
+		.select({ preferences: users.preferences })
+		.from(users)
+		.where(sql`${users.id} = ${userId}`)
+		.limit(1);
+	const cap = budgetToCapMicros(
+		(user?.preferences as { aiBudget?: AiBudgetSettings } | null)?.aiBudget,
+	);
+	return { orgCapMicros: null, userCapMicros: cap };
+}
 
 export class BudgetExceededError extends Error {
 	constructor(
@@ -48,6 +107,8 @@ interface CostGuardOptions<T> {
 	videoId?: string;
 	operation: AiOperation;
 	model: string;
+	/** Bill input tokens at the audio rate (transcription sends audio input). */
+	audioInput?: boolean;
 	budgetCapUserMicros?: number | null;
 	budgetCapOrgMicros?: number | null;
 	/**
@@ -96,33 +157,38 @@ export async function withCostGuard<T>(
 ): Promise<T & { inputTokens: number; outputTokens: number }> {
 	const billingMonth = currentBillingMonth();
 
-	if (options.budgetCapUserMicros != null && options.budgetCapUserMicros > 0) {
+	// Use explicit caps when provided; otherwise fall back to the org/user's
+	// configured monthly AI budget so every guarded operation is enforced.
+	let capUserMicros = options.budgetCapUserMicros ?? null;
+	let capOrgMicros = options.budgetCapOrgMicros ?? null;
+	if (
+		options.budgetCapUserMicros == null &&
+		options.budgetCapOrgMicros == null
+	) {
+		const resolved = await resolveBudgetCaps(options.orgId, options.userId);
+		capUserMicros = resolved.userCapMicros;
+		capOrgMicros = resolved.orgCapMicros;
+	}
+
+	if (capUserMicros != null && capUserMicros > 0) {
 		const userSpend = await getMonthlySpendMicros(
 			"userId",
 			options.userId,
 			billingMonth,
 		);
-		if (userSpend >= options.budgetCapUserMicros) {
-			throw new BudgetExceededError(
-				"user",
-				userSpend,
-				options.budgetCapUserMicros,
-			);
+		if (userSpend >= capUserMicros) {
+			throw new BudgetExceededError("user", userSpend, capUserMicros);
 		}
 	}
 
-	if (options.budgetCapOrgMicros != null && options.budgetCapOrgMicros > 0) {
+	if (capOrgMicros != null && capOrgMicros > 0) {
 		const orgSpend = await getMonthlySpendMicros(
 			"orgId",
 			options.orgId,
 			billingMonth,
 		);
-		if (orgSpend >= options.budgetCapOrgMicros) {
-			throw new BudgetExceededError(
-				"org",
-				orgSpend,
-				options.budgetCapOrgMicros,
-			);
+		if (orgSpend >= capOrgMicros) {
+			throw new BudgetExceededError("org", orgSpend, capOrgMicros);
 		}
 	}
 
@@ -151,7 +217,14 @@ export async function withCostGuard<T>(
 		outputTokens = partial.outputTokens;
 	}
 
-	const costUsdMicros = priceForMicros(options.model, inputTokens, outputTokens);
+	const costUsdMicros = priceForMicros(
+		options.model,
+		inputTokens,
+		outputTokens,
+		{
+			audio: options.audioInput,
+		},
+	);
 
 	await db()
 		.insert(aiUsageEvents)
