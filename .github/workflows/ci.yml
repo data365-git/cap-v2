@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# This repo carries pre-existing type/lint debt and some failing tests, all
+# hidden today (next.config `ignoreBuildErrors`, no CI). Rather than block every
+# PR until that's cleaned up, these gates RATCHET: a PR fails only if it makes a
+# metric WORSE than the committed baseline. When you fix errors, lower the number
+# in .github/ci-baselines/ to lock the improvement in. Goal: debt only ever
+# goes down, and no PR silently adds new errors.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck (no regression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Count type errors vs baseline
+        run: |
+          pnpm --dir apps/web exec next typegen >/dev/null 2>&1 || true
+          set +o pipefail
+          COUNT=$(pnpm tsc -b 2>&1 \
+            | grep -oE '^[a-zA-Z0-9_./-]+\.tsx?\([0-9]+,[0-9]+\): error TS[0-9]+' \
+            | sort -u | wc -l | tr -d ' ')
+          set -o pipefail
+          BASE=$(cat .github/ci-baselines/typecheck.txt)
+          echo "Type errors: $COUNT (baseline: $BASE)"
+          if [ "$COUNT" -gt "$BASE" ]; then
+            echo "::error::This PR adds type errors ($COUNT > $BASE). Fix them, or if intentional, they must be justified."
+            exit 1
+          fi
+          if [ "$COUNT" -lt "$BASE" ]; then
+            echo "::notice::Fewer type errors ($COUNT < $BASE). Lower .github/ci-baselines/typecheck.txt to $COUNT to ratchet the gate tighter."
+          fi
+
+  lint:
+    name: Lint (no regression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Count lint errors vs baseline
+        run: |
+          set +o pipefail
+          OUT=$(pnpm exec biome lint 2>&1)
+          COUNT=$(printf '%s' "$OUT" | grep -oE 'Found [0-9]+ error' | grep -oE '[0-9]+' | tail -1)
+          set -o pipefail
+          COUNT=${COUNT:-0}
+          BASE=$(cat .github/ci-baselines/lint.txt)
+          echo "Lint errors: $COUNT (baseline: $BASE)"
+          if [ "$COUNT" -gt "$BASE" ]; then
+            echo "::error::This PR adds lint errors ($COUNT > $BASE). Run 'pnpm format' / 'pnpm lint' locally."
+            exit 1
+          fi
+          if [ "$COUNT" -lt "$BASE" ]; then
+            echo "::notice::Fewer lint errors ($COUNT < $BASE). Lower .github/ci-baselines/lint.txt to $COUNT to ratchet."
+          fi
+
+  test:
+    name: Unit tests (informational)
+    runs-on: ubuntu-latest
+    # Non-blocking: the suite currently has env-dependent failures. This surfaces
+    # the pass/fail count on every PR without gating merges. Make it `required`
+    # once the suite is green in CI.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cap/web run test
