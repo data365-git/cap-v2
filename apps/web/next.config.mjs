@@ -34,9 +34,6 @@ const nextConfig = {
 		"@cap/database",
 		"next-mdx-remote",
 	],
-	typescript: {
-		ignoreBuildErrors: true,
-	},
 	experimental: {
 		optimizePackageImports: [
 			"@cap/ui",

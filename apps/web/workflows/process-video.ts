@@ -18,12 +18,11 @@ import { db } from "@cap/database";
 import { videos, videoUploads } from "@cap/database/schema";
 import type { VideoMetadata } from "@cap/database/types";
 import { Storage } from "@cap/web-backend";
-import { Video } from "@cap/web-domain";
+import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
-import { Option } from "effect";
+import { Effect, Option } from "effect";
 import { FatalError } from "workflow";
 import { runPromise } from "@/lib/server";
-import { decodeStorageVideo } from "@/lib/video-storage";
 import {
 	extractGifPreview,
 	extractThumbnail,
@@ -35,6 +34,7 @@ import {
 	type VideoProbeResult,
 	withRetry,
 } from "@/lib/video-probe";
+import { decodeStorageVideo } from "@/lib/video-storage";
 
 interface ProcessVideoWorkflowPayload {
 	videoId: string;
@@ -101,9 +101,7 @@ export async function processVideoWorkflow(
 			success: true,
 			message: "Video processing complete",
 			metadata:
-				probe.durationSec != null &&
-				probe.width != null &&
-				probe.height != null
+				probe.durationSec != null && probe.width != null && probe.height != null
 					? {
 							duration: probe.durationSec,
 							width: probe.width,
@@ -186,7 +184,9 @@ async function ensureWaveform(
 		const waveformKey = `${userId}/${videoId}/waveform.png`;
 
 		// Idempotency check — skip work if the output already landed.
-		const existing = await bucket.headObject(waveformKey).pipe(runPromise);
+		const existing = await bucket
+			.headObject(waveformKey)
+			.pipe(Effect.option, runPromise);
 		if (Option.isSome(existing) && (existing.value.ContentLength ?? 0) > 0) {
 			console.info(
 				`[CAP-PROCESS] waveform.png already present video=${videoId} bytes=${existing.value.ContentLength}`,
@@ -255,7 +255,9 @@ async function ensureMp4Variant(
 	const transcodedKey = `${userId}/${videoId}/transcoded.mp4`;
 
 	// Idempotency check — skip work if the output already landed.
-	const existing = await bucket.headObject(transcodedKey).pipe(runPromise);
+	const existing = await bucket
+		.headObject(transcodedKey)
+		.pipe(Effect.option, runPromise);
 	if (Option.isSome(existing) && (existing.value.ContentLength ?? 0) > 0) {
 		console.info(
 			`[CAP-PROCESS] transcoded.mp4 already present video=${videoId} bytes=${existing.value.ContentLength}`,
@@ -339,14 +341,18 @@ async function ensurePreviewAssets(
 	const sourceUrl = await getInternalSourceUrl(
 		videoId,
 		`${userId}/${videoId}/transcoded.mp4`,
-	).catch(() => getInternalSourceUrl(videoId, `${userId}/${videoId}/result.webm`));
+	).catch(() =>
+		getInternalSourceUrl(videoId, `${userId}/${videoId}/result.webm`),
+	);
 
 	let thumbnailOk = false;
 	let gifOk = false;
 
 	// Thumbnail — idempotent + retried.
 	try {
-		const head = await bucket.headObject(thumbnailKey).pipe(runPromise);
+		const head = await bucket
+			.headObject(thumbnailKey)
+			.pipe(Effect.option, runPromise);
 		if (Option.isSome(head) && (head.value.ContentLength ?? 0) > 0) {
 			thumbnailOk = true;
 		} else {
@@ -376,7 +382,9 @@ async function ensurePreviewAssets(
 
 	// GIF preview — idempotent + retried.
 	try {
-		const head = await bucket.headObject(gifKey).pipe(runPromise);
+		const head = await bucket
+			.headObject(gifKey)
+			.pipe(Effect.option, runPromise);
 		if (Option.isSome(head) && (head.value.ContentLength ?? 0) > 0) {
 			gifOk = true;
 		} else {

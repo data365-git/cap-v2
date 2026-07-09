@@ -164,7 +164,8 @@ export async function POST(request: NextRequest) {
 
 	let budgetCap: number | null = null;
 	let budgetScope: "org" | "user" | null = null;
-	let budgetScopeCol = aiUsageEvents.userId;
+	let budgetScopeCol: typeof aiUsageEvents.userId | typeof aiUsageEvents.orgId =
+		aiUsageEvents.userId;
 	let budgetScopeId: string = video.ownerId;
 
 	if (video.orgId) {
