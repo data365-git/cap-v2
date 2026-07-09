@@ -410,9 +410,8 @@ async function extractAudio(
 			`[CAP-AUDIO] source=webAudio — skipping ffmpeg extraction, using raw upload video=${videoId}`,
 		);
 		const audioUrl = await resolveVideoSourceUrl(videoId, userId, video);
-		const durationSec = video.duration != null && video.duration > 0
-			? video.duration
-			: null;
+		const durationSec =
+			video.duration != null && video.duration > 0 ? video.duration : null;
 		return { audioUrl, durationSec };
 	}
 
@@ -612,7 +611,11 @@ async function transcribeAudio(
 	// duration is ≤ 90 min we skip ffmpeg/chunking entirely and pass the raw URL
 	// directly to transcribeWithGemini for a single Files API upload + one
 	// generateContent call. No per-chunk progress — just active until done.
-	if (isAudioSource && knownDuration !== null && knownDuration <= AUDIO_SINGLE_SHOT_MAX_SEC) {
+	if (
+		isAudioSource &&
+		knownDuration !== null &&
+		knownDuration <= AUDIO_SINGLE_SHOT_MAX_SEC
+	) {
 		const startedAt = new Date().toISOString();
 		const chunkStart = Date.now();
 		await patchPipelinePhase(context.videoId, "transcribe", {
@@ -628,6 +631,7 @@ async function transcribeAudio(
 			videoId: context.videoId,
 			operation: "transcription",
 			model: "gemini-2.5-flash",
+			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
 				const res = await transcribeWithGemini(audioUrl, {
@@ -699,7 +703,10 @@ async function transcribeAudio(
 
 	// For the video path's existing single-call threshold (≤ 12 min): keep it.
 	// We only reach here if NOT (isAudioSource && knownDuration <= 90 min).
-	const shouldChunk = isAudioSource || knownDuration == null || knownDuration > CHUNK_THRESHOLD_SEC;
+	const shouldChunk =
+		isAudioSource ||
+		knownDuration == null ||
+		knownDuration > CHUNK_THRESHOLD_SEC;
 
 	if (!shouldChunk) {
 		// Video source ≤ 12 min → single call (original behaviour).
@@ -718,6 +725,7 @@ async function transcribeAudio(
 			videoId: context.videoId,
 			operation: "transcription",
 			model: "gemini-2.5-flash",
+			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
 				const res = await transcribeWithGemini(audioUrl, {
@@ -759,7 +767,9 @@ async function transcribeAudio(
 	}
 
 	// ─── Determine chunk window: 3 min for audio (T12), 5 min for video ───────
-	const chunkWindowSec = isAudioSource ? AUDIO_CHUNK_WINDOW_SEC : CHUNK_WINDOW_SEC;
+	const chunkWindowSec = isAudioSource
+		? AUDIO_CHUNK_WINDOW_SEC
+		: CHUNK_WINDOW_SEC;
 
 	// Throttle guard for retry/fallback metadata patches (at most once per 800ms).
 	let lastAttemptPatchMs = 0;
@@ -790,6 +800,7 @@ async function transcribeAudio(
 			videoId: context.videoId,
 			operation: "transcription",
 			model: "gemini-2.5-flash",
+			audioInput: true,
 			// A chunk that truncated still consumed tokens — record it failed.
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
@@ -892,18 +903,21 @@ async function transcribeAudio(
 				.from(videos)
 				.where(eq(videos.id, context.videoId as Video.VideoId));
 			const existingMeta = (metaRow?.metadata as VideoMetadata) || {};
-			const savedChunks: Record<string, string> = existingMeta.completedChunks ?? {};
+			const savedChunks: Record<string, string> =
+				existingMeta.completedChunks ?? {};
 
 			// Pre-fill perChunkResults from saved chunks (ordered by index).
-			const orderedResults: Array<{ cues: VttCue[]; startOffsetSec: number } | null> =
-				slices.map((_, i) => {
-					const saved = savedChunks[String(i)];
-					if (saved) {
-						const cues = parseVttCues(saved);
-						return { cues, startOffsetSec: 0 };
-					}
-					return null;
-				});
+			const orderedResults: Array<{
+				cues: VttCue[];
+				startOffsetSec: number;
+			} | null> = slices.map((_, i) => {
+				const saved = savedChunks[String(i)];
+				if (saved) {
+					const cues = parseVttCues(saved);
+					return { cues, startOffsetSec: 0 };
+				}
+				return null;
+			});
 
 			const completedCount = orderedResults.filter(Boolean).length;
 			if (completedCount > 0) {
@@ -931,7 +945,9 @@ async function transcribeAudio(
 
 			for (let b = 0; b < pendingIndices.length; b += AUDIO_PARALLEL_POOL) {
 				const batchIndices = pendingIndices.slice(b, b + AUDIO_PARALLEL_POOL);
-				const batchSlices = batchIndices.map((i) => slices[i]).filter((s): s is AudioSlice => !!s);
+				const batchSlices = batchIndices
+					.map((i) => slices[i])
+					.filter((s): s is AudioSlice => !!s);
 
 				// Mark the first pending index of this batch as the active unit.
 				const firstBatchIdx = batchIndices[0] ?? b;
@@ -977,12 +993,15 @@ async function transcribeAudio(
 				}
 
 				// Write completed chunks to metadata for retry resilience.
-				await patchVideoMetadata(context.videoId, { completedChunks: { ...savedChunks } });
+				await patchVideoMetadata(context.videoId, {
+					completedChunks: { ...savedChunks },
+				});
 
 				doneCount = orderedResults.filter(Boolean).length;
 				const isLastBatch = b + AUDIO_PARALLEL_POOL >= pendingIndices.length;
 				await patchPipelinePhase(context.videoId, "transcribe", {
-					status: isLastBatch && doneCount === slices.length ? "done" : "active",
+					status:
+						isLastBatch && doneCount === slices.length ? "done" : "active",
 					done: doneCount,
 					total: slices.length,
 					unitTimesMs: [...unitTimesMs],
@@ -1019,7 +1038,9 @@ async function transcribeAudio(
 						unitTimesMs.push(Date.now() - t0);
 						if (!result.isComplete) allComplete = false;
 
-						await patchVideoMetadata(context.videoId, { completedChunks: { ...savedChunks } });
+						await patchVideoMetadata(context.videoId, {
+							completedChunks: { ...savedChunks },
+						});
 						doneCount = orderedResults.filter(Boolean).length;
 						await patchPipelinePhase(context.videoId, "transcribe", {
 							status: "active",
