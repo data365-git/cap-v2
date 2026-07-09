@@ -9,10 +9,13 @@ import {
 } from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
 import { priceForMicros } from "@cap/utils";
-import { type Organisation, type User, Video } from "@cap/web-domain";
+import { provideOptionalAuth, VideosPolicy } from "@cap/web-backend";
+import { type Organisation, Policy, type User, Video } from "@cap/web-domain";
 import { and, eq, sql } from "drizzle-orm";
+import { Effect } from "effect";
 import type { NextRequest } from "next/server";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
+import { runPromise } from "@/lib/server";
 import { retrieveTopK } from "@/lib/transcript-retrieve";
 
 interface AiBudgetSettings {
@@ -22,6 +25,35 @@ interface AiBudgetSettings {
 }
 
 export const dynamic = "force-dynamic";
+
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 20;
+const RATE_LIMIT_MAX_ENTRIES = 10_000;
+const MAX_MESSAGES = 20;
+const requestCounts = new Map<string, { count: number; resetAt: number }>();
+let rateLimitRequestCounter = 0;
+
+function isRateLimited(key: string) {
+	const now = Date.now();
+	rateLimitRequestCounter++;
+	if (rateLimitRequestCounter % 100 === 0) {
+		for (const [k, v] of requestCounts) {
+			if (now > v.resetAt) requestCounts.delete(k);
+		}
+		if (requestCounts.size > RATE_LIMIT_MAX_ENTRIES) {
+			requestCounts.clear();
+		}
+	}
+
+	const entry = requestCounts.get(key);
+	if (!entry || now > entry.resetAt) {
+		requestCounts.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+		return false;
+	}
+
+	entry.count++;
+	return entry.count > RATE_LIMIT_MAX_REQUESTS;
+}
 
 function msToTimestamp(ms: number): string {
 	const totalSeconds = Math.floor(ms / 1000);
@@ -58,6 +90,7 @@ export async function POST(request: NextRequest) {
 		role: "user" | "assistant";
 		content: string;
 	}>;
+	const boundedMessages = typedMessages.slice(-MAX_MESSAGES);
 
 	const lastUserMessage = [...typedMessages]
 		.reverse()
@@ -66,6 +99,37 @@ export async function POST(request: NextRequest) {
 	if (!lastUserMessage) {
 		return new Response(JSON.stringify({ error: "No user message found" }), {
 			status: 400,
+		});
+	}
+
+	const ip =
+		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+		request.headers.get("x-real-ip") ||
+		"unknown";
+	if (isRateLimited(`${videoId}:${ip}`)) {
+		return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
+			status: 429,
+		});
+	}
+
+	// Require view access before doing any paid work (RAG embed + Gemini stream).
+	// Public videos pass via the public policy; private videos require auth.
+	const canView = await Effect.gen(function* () {
+		const videosPolicy = yield* VideosPolicy;
+		return yield* Effect.succeed(true).pipe(
+			Policy.withPublicPolicy(
+				videosPolicy.canView(Video.VideoId.make(videoId)),
+			),
+		);
+	}).pipe(
+		Effect.catchAll(() => Effect.succeed(false)),
+		provideOptionalAuth,
+		runPromise,
+	);
+
+	if (!canView) {
+		return new Response(JSON.stringify({ error: "Forbidden" }), {
+			status: 403,
 		});
 	}
 
@@ -264,7 +328,7 @@ export async function POST(request: NextRequest) {
 							},
 						],
 					},
-					...typedMessages.map((m) => ({
+					...boundedMessages.map((m) => ({
 						role: m.role === "user" ? "user" : "model",
 						parts: [{ text: m.content }],
 					})),

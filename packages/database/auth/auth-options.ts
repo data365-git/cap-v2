@@ -1,7 +1,7 @@
 import { serverEnv } from "@cap/env";
 import { User } from "@cap/web-domain";
-import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession as _getServerSession } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
@@ -10,13 +10,10 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import type { Provider } from "next-auth/providers/index";
 import { db } from "../index.ts";
-import {
-	organizationInvites,
-	users,
-} from "../schema.ts";
-import { DrizzleAdapter } from "./drizzle-adapter.ts";
-import { createUserFromOrgInvite } from "./create-user-from-invite.ts";
+import { organizationInvites, users } from "../schema.ts";
 import { isEmailAllowed } from "./allowed-check.ts";
+import { createUserFromOrgInvite } from "./create-user-from-invite.ts";
+import { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 export const maxDuration = 120;
 
@@ -55,7 +52,7 @@ export const authOptions = (): NextAuthOptions => {
 			_adapter = DrizzleAdapter(db());
 			return _adapter;
 		},
-		debug: true,
+		debug: process.env.NODE_ENV !== "production",
 		session: {
 			strategy: "jwt",
 		},

@@ -93,10 +93,7 @@ function UsersSection() {
 	});
 
 	const resetMutation = useMutation({
-		mutationFn: ({
-			userId,
-			password,
-		}: { userId: string; password: string }) =>
+		mutationFn: ({ userId, password }: { userId: string; password: string }) =>
 			resetUserPassword(userId, password),
 		onSuccess: (result) => {
 			if (result.success) {
@@ -114,7 +111,11 @@ function UsersSection() {
 		mutationFn: (userId: string) => toggleUserAdmin(userId),
 		onSuccess: (result) => {
 			if (result.success) {
-				toast.success(result.isAdmin ? "User promoted to admin" : "Admin privileges removed");
+				toast.success(
+					result.isAdmin
+						? "User promoted to admin"
+						: "Admin privileges removed",
+				);
 				queryClient.invalidateQueries({ queryKey: ["admin-users"] });
 			} else {
 				toast.error(result.error);
@@ -155,7 +156,9 @@ function UsersSection() {
 									<th className="px-5 py-2 text-left font-medium text-gray-11">
 										Role
 									</th>
-									<th className="px-5 py-2 text-left font-medium text-gray-11">Status</th>
+									<th className="px-5 py-2 text-left font-medium text-gray-11">
+										Status
+									</th>
 									<th className="px-5 py-2 text-left font-medium text-gray-11">
 										Created
 									</th>
@@ -170,9 +173,7 @@ function UsersSection() {
 										key={u.id}
 										className="border-b border-gray-3 last:border-0"
 									>
-										<td className="px-5 py-3 text-gray-12">
-											{u.name || "—"}
-										</td>
+										<td className="px-5 py-3 text-gray-12">{u.name || "—"}</td>
 										<td className="px-5 py-3 text-gray-11">{u.email}</td>
 										<td className="px-5 py-3">
 											{u.isAdmin ? (
@@ -185,7 +186,7 @@ function UsersSection() {
 											)}
 										</td>
 										<td className="px-5 py-3">
-											{u.passwordHash === null ? (
+											{u.accessDisabled ? (
 												<span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
 													Disabled
 												</span>
@@ -208,8 +209,14 @@ function UsersSection() {
 													onClick={() => toggleAdminMutation.mutate(u.id)}
 													disabled={toggleAdminMutation.isPending}
 												>
-													{u.isAdmin ? <ShieldOff className="size-3" /> : <Shield className="size-3" />}
-													<span className="hidden sm:inline ml-1">{u.isAdmin ? "Remove Admin" : "Make Admin"}</span>
+													{u.isAdmin ? (
+														<ShieldOff className="size-3" />
+													) : (
+														<Shield className="size-3" />
+													)}
+													<span className="hidden sm:inline ml-1">
+														{u.isAdmin ? "Remove Admin" : "Make Admin"}
+													</span>
 												</Button>
 												<Button
 													variant="gray"
@@ -325,7 +332,8 @@ function UsersSection() {
 								size="sm"
 								type="button"
 								onClick={() => {
-									const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
+									const chars =
+										"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
 									let result = "";
 									const array = new Uint8Array(16);
 									crypto.getRandomValues(array);
@@ -354,9 +362,7 @@ function UsersSection() {
 						<Button
 							variant="dark"
 							size="sm"
-							disabled={
-								resetMutation.isPending || newPassword.length < 8
-							}
+							disabled={resetMutation.isPending || newPassword.length < 8}
 							spinner={resetMutation.isPending}
 							onClick={() => {
 								if (resetDialogUser) {
@@ -384,7 +390,8 @@ function CreateUserSection() {
 	const [createdPassword, setCreatedPassword] = useState<string | null>(null);
 
 	const generatePassword = () => {
-		const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
+		const chars =
+			"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
 		let result = "";
 		const array = new Uint8Array(16);
 		crypto.getRandomValues(array);
@@ -519,8 +526,7 @@ function InviteLinksSection() {
 	});
 
 	const generateMutation = useMutation({
-		mutationFn: () =>
-			generateInviteLink(inviteEmail.trim() || undefined),
+		mutationFn: () => generateInviteLink(inviteEmail.trim() || undefined),
 		onSuccess: (result) => {
 			if (result.success) {
 				setGeneratedUrl(result.inviteUrl);
@@ -546,8 +552,7 @@ function InviteLinksSection() {
 			pending:
 				"bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
 			used: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-			expired:
-				"bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+			expired: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 		};
 		return (
 			<span
@@ -650,9 +655,7 @@ function InviteLinksSection() {
 										<td className="px-5 py-3 text-gray-11">
 											{inv.email || "Open invite"}
 										</td>
-										<td className="px-5 py-3">
-											{statusBadge(inv.status)}
-										</td>
+										<td className="px-5 py-3">{statusBadge(inv.status)}</td>
 										<td className="px-5 py-3 text-gray-11 text-xs">
 											{inv.expiresAt
 												? new Date(inv.expiresAt).toLocaleDateString()
@@ -679,7 +682,9 @@ function InviteLinksSection() {
 														disabled={revokeMutation.isPending}
 													>
 														<Trash2 className="size-3" />
-														<span className="hidden sm:inline ml-1">Revoke</span>
+														<span className="hidden sm:inline ml-1">
+															Revoke
+														</span>
 													</Button>
 												</div>
 											)}

@@ -776,7 +776,7 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
 }));
 
 export const authApiKeys = mysqlTable("auth_api_keys", {
-	id: varchar("id", { length: 36 }).notNull().primaryKey(),
+	id: varchar("id", { length: 64 }).notNull().primaryKey(),
 	userId: nanoId("userId").notNull().$type<User.UserId>(),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -1609,9 +1609,7 @@ export const invites = mysqlTable(
 		id: nanoId("id").notNull().primaryKey(),
 		token: varchar("token", { length: 255 }).unique().notNull(),
 		email: varchar("email", { length: 255 }),
-		createdByUserId: nanoId("createdByUserId")
-			.notNull()
-			.$type<User.UserId>(),
+		createdByUserId: nanoId("createdByUserId").notNull().$type<User.UserId>(),
 		usedByUserId: nanoIdNullable("usedByUserId").$type<User.UserId>(),
 		expiresAt: timestamp("expiresAt").notNull(),
 		createdAt: timestamp("createdAt").notNull().defaultNow(),

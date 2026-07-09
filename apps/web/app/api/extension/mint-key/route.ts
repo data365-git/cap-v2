@@ -1,8 +1,16 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { authApiKeys } from "@cap/database/schema";
-import { desc, eq } from "drizzle-orm";
+import { hashAuthApiKey } from "@cap/web-backend";
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+
+function createAuthApiKeyToken() {
+	const bytes = crypto.getRandomValues(new Uint8Array(32));
+	return `cak_${Array.from(bytes)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("")}`;
+}
 
 export async function POST() {
 	const user = await getCurrentUser();
@@ -10,22 +18,15 @@ export async function POST() {
 		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 	}
 
-	const existing = await db()
-		.select({ id: authApiKeys.id })
-		.from(authApiKeys)
-		.where(eq(authApiKeys.userId, user.id))
-		.orderBy(desc(authApiKeys.createdAt))
-		.limit(1);
+	// Only the HMAC of the token is stored, so an existing key can never be
+	// re-shown. Minting always issues a fresh token and replaces any prior one.
+	const token = createAuthApiKeyToken();
+	const id = await hashAuthApiKey(token);
 
-	if (existing.length > 0) {
-		return NextResponse.json({
-			token: existing[0].id,
-			email: user.email,
-		});
-	}
+	await db().transaction(async (tx) => {
+		await tx.delete(authApiKeys).where(eq(authApiKeys.userId, user.id));
+		await tx.insert(authApiKeys).values({ id, userId: user.id });
+	});
 
-	const id = crypto.randomUUID();
-	await db().insert(authApiKeys).values({ id, userId: user.id });
-
-	return NextResponse.json({ token: id, email: user.email });
+	return NextResponse.json({ token, email: user.email });
 }
