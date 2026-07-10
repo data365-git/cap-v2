@@ -643,7 +643,28 @@ function chunkTranscriptWithTimestamps(
 	return chunks;
 }
 
-const GEMINI_SUMMARY_MODEL = "gemini-3-flash-preview";
+const GEMINI_SUMMARY_MODEL =
+	process.env.GEMINI_SUMMARY_MODEL ?? "gemini-3-flash-preview";
+// Preview models (e.g. gemini-3-flash-preview) intermittently return HTTP 503
+// "high demand" — observed failing 5/5 times during an outage while the stable
+// model answered first try. Fall back to a stable model so summary generation
+// keeps working when the preview is overloaded. Set empty to disable.
+const GEMINI_SUMMARY_FALLBACK_MODEL =
+	process.env.GEMINI_SUMMARY_FALLBACK_MODEL ?? "gemini-2.5-flash";
+const GEMINI_SUMMARY_MAX_RETRIES = Number(
+	process.env.GEMINI_SUMMARY_MAX_RETRIES ?? "2",
+);
+const SUMMARY_BACKOFF_MS = [2000, 5000, 12000];
+
+function isTransientAiError(status: number, msg: string): boolean {
+	if (status === 429 || status === 503) return true;
+	const lower = msg.toLowerCase();
+	return (
+		lower.includes("high demand") ||
+		lower.includes("overloaded") ||
+		lower.includes("unavailable")
+	);
+}
 
 interface AiApiResult {
 	content: string;
@@ -686,56 +707,104 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 		return { content: "{}", model: "unknown", inputTokens: 0, outputTokens: 0 };
 	}
 
-	const res = await aiFetchWithTimeout(
-		`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_SUMMARY_MODEL}:generateContent?key=${apiKey}`,
-		{
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				contents: [{ parts: [{ text: prompt }] }],
-				generationConfig: {
-					temperature: 0.2,
-					// The summary JSON bundles overview + topics + tasks + chapters +
-					// the whole refined transcript. At 8192 this truncated on real
-					// meetings, producing invalid JSON that failed to parse ("no
-					// parseable summary" → the "Xato yuz berdi" error). Give it room.
-					maxOutputTokens: 65536,
-				},
-			}),
-			timeoutMs: 5 * 60_000,
-		},
+	const models =
+		GEMINI_SUMMARY_FALLBACK_MODEL &&
+		GEMINI_SUMMARY_FALLBACK_MODEL !== GEMINI_SUMMARY_MODEL
+			? [GEMINI_SUMMARY_MODEL, GEMINI_SUMMARY_FALLBACK_MODEL]
+			: [GEMINI_SUMMARY_MODEL];
+
+	let lastError = "";
+
+	for (const model of models) {
+		const maxAttempts =
+			model === GEMINI_SUMMARY_MODEL ? GEMINI_SUMMARY_MAX_RETRIES + 1 : 1;
+
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			if (attempt > 0) {
+				await new Promise<void>((r) =>
+					setTimeout(
+						r,
+						SUMMARY_BACKOFF_MS[
+							Math.min(attempt - 1, SUMMARY_BACKOFF_MS.length - 1)
+						] ?? 12_000,
+					),
+				);
+			}
+
+			let res: Response;
+			try {
+				res = await aiFetchWithTimeout(
+					`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							contents: [{ parts: [{ text: prompt }] }],
+							generationConfig: {
+								temperature: 0.2,
+								// The summary JSON bundles overview + topics + tasks + chapters
+								// + the whole refined transcript; 8192 truncated on real
+								// meetings (invalid JSON → "no parseable summary"). Give it room.
+								maxOutputTokens: 65536,
+							},
+						}),
+						timeoutMs: 5 * 60_000,
+					},
+				);
+			} catch (err) {
+				lastError = (err as Error).message ?? "fetch error";
+				console.warn(`[generate-ai] ${model} fetch error: ${lastError}`);
+				continue;
+			}
+
+			const data = (await res.json()) as {
+				candidates?: Array<{
+					content: { parts: Array<{ text?: string }> };
+					finishReason?: string;
+				}>;
+				usageMetadata?: {
+					promptTokenCount?: number;
+					candidatesTokenCount?: number;
+				};
+				error?: { message: string };
+			};
+
+			if (res.ok) {
+				if (data.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+					console.warn(
+						"[generate-ai] Gemini response hit MAX_TOKENS — JSON may be truncated.",
+					);
+				}
+				if (model !== GEMINI_SUMMARY_MODEL) {
+					console.log(`[generate-ai] fell back to ${model} for summary`);
+				}
+				return {
+					content: data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}",
+					model,
+					inputTokens: data.usageMetadata?.promptTokenCount ?? 0,
+					outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+				};
+			}
+
+			lastError = data.error?.message ?? String(res.status);
+
+			if (res.status === 401 || res.status === 403) {
+				throw new Error(`Gemini auth error: ${lastError}`);
+			}
+			if (isTransientAiError(res.status, lastError)) {
+				console.warn(
+					`[generate-ai] transient error from ${model} (attempt ${attempt + 1}/${maxAttempts}): ${lastError}`,
+				);
+				continue;
+			}
+			// Non-transient error: stop retrying this model, try the fallback.
+			break;
+		}
+	}
+
+	throw new Error(
+		`Gemini generateContent failed after retries/fallback: ${lastError}`,
 	);
-
-	const data = (await res.json()) as {
-		candidates?: Array<{
-			content: { parts: Array<{ text?: string }> };
-			finishReason?: string;
-		}>;
-		usageMetadata?: {
-			promptTokenCount?: number;
-			candidatesTokenCount?: number;
-		};
-		error?: { message: string };
-	};
-
-	if (!res.ok) {
-		throw new Error(
-			`Gemini generateContent failed: ${data.error?.message ?? res.status}`,
-		);
-	}
-
-	const finishReason = data.candidates?.[0]?.finishReason;
-	if (finishReason === "MAX_TOKENS") {
-		console.warn(
-			"[generate-ai] Gemini response hit MAX_TOKENS — JSON may be truncated. Consider splitting the transcript further.",
-		);
-	}
-
-	const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-	const inputTokens = data.usageMetadata?.promptTokenCount ?? 0;
-	const outputTokens = data.usageMetadata?.candidatesTokenCount ?? 0;
-
-	return { content, model: GEMINI_SUMMARY_MODEL, inputTokens, outputTokens };
 }
 
 function cleanJsonResponse(content: string): string {
