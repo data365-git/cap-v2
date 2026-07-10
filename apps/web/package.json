@@ -14,7 +14,8 @@
 		"test:watch": "vitest",
 		"test:coverage": "vitest run --coverage",
 		"test:ui": "vitest --ui",
-		"seed:demo": "dotenv -e ../../.env -- ts-node --esm scripts/seed-demo-video.ts"
+		"seed:demo": "dotenv -e ../../.env -- ts-node --esm scripts/seed-demo-video.ts",
+		"test:e2e": "playwright test"
 	},
 	"dependencies": {
 		"@aws-sdk/client-cloudfront": "^3.565.0",
@@ -153,6 +154,7 @@
 		"zod": "^3.25.76"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.61.0",
 		"@smithy/types": "^4.3.1",
 		"@types/canvas-confetti": "^1.9.0",
 		"@types/file-saver": "^2.0.7",
