@@ -1,5 +1,5 @@
-import { getCurrentUser } from "@cap/database/auth/session";
 import { db } from "@cap/database";
+import { getCurrentUser } from "@cap/database/auth/session";
 import { authApiKeys } from "@cap/database/schema";
 import { desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
@@ -34,14 +34,13 @@ export default async function ExtensionCallbackPage(props: {
 		.orderBy(desc(authApiKeys.createdAt))
 		.limit(1);
 
-	const token =
-		existing.length > 0
-			? existing[0].id
-			: await (async () => {
-					const id = crypto.randomUUID();
-					await db().insert(authApiKeys).values({ id, userId: user.id });
-					return id;
-				})();
+	const token = existing[0]
+		? existing[0].id
+		: await (async () => {
+				const id = crypto.randomUUID();
+				await db().insert(authApiKeys).values({ id, userId: user.id });
+				return id;
+			})();
 
 	return (
 		<div className="flex justify-center items-center min-h-screen bg-gray-2">

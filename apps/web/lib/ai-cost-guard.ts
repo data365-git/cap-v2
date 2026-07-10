@@ -96,7 +96,9 @@ async function getMonthlySpendMicros(
 			total: sql<number>`COALESCE(SUM(${aiUsageEvents.costUsdMicros}), 0)`,
 		})
 		.from(aiUsageEvents)
-		.where(and(eq(col, id), eq(aiUsageEvents.billingMonth, billingMonth)));
+		.where(
+			and(sql`${col} = ${id}`, eq(aiUsageEvents.billingMonth, billingMonth)),
+		);
 
 	return Number(result?.total ?? 0);
 }

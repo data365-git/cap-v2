@@ -2,6 +2,7 @@ import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videos } from "@cap/database/schema";
 import type { VideoMetadata } from "@cap/database/types";
+import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
 	const videoQuery = await db()
 		.select()
 		.from(videos)
-		.where(eq(videos.id, videoId))
+		.where(eq(videos.id, videoId as Video.VideoId))
 		.limit(1);
 
 	if (videoQuery.length === 0 || !videoQuery[0]) {
@@ -51,12 +52,16 @@ export async function POST(request: Request) {
 		return Response.json({ error: "Task index out of range" }, { status: 400 });
 	}
 
-	tasks[taskIndex].done = done;
+	const task = tasks[taskIndex];
+	if (!task) {
+		return Response.json({ error: "Task index out of range" }, { status: 400 });
+	}
+	task.done = done;
 
 	await db()
 		.update(videos)
 		.set({ metadata })
-		.where(eq(videos.id, videoId));
+		.where(eq(videos.id, videoId as Video.VideoId));
 
 	revalidatePath(`/s/${videoId}`);
 

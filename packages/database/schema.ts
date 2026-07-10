@@ -13,6 +13,7 @@ import type {
 } from "@cap/web-domain";
 import { sql } from "drizzle-orm";
 import {
+	type AnyMySqlColumn,
 	bigint,
 	boolean,
 	customType,
@@ -95,7 +96,7 @@ export const users = mysqlTable(
 		}),
 		preferences: json("preferences")
 			.$type<{
-				notifications: {
+				notifications?: {
 					pauseComments: boolean;
 					pauseReplies: boolean;
 					pauseViews: boolean;
@@ -104,6 +105,11 @@ export const users = mysqlTable(
 				};
 				trackedEvents?: {
 					user_signed_up?: boolean;
+				};
+				aiBudget?: {
+					monthlyUsdCents?: number;
+					alertAtPct?: number;
+					enabled?: boolean;
 				};
 			} | null>()
 			.default(null),
@@ -213,6 +219,11 @@ export const organizations = mysqlTable(
 			enforceQuota?: boolean;
 			aiGenerationLanguage?: AiGenerationLanguage;
 			defaultPlaybackSpeed?: number;
+			aiBudget?: {
+				monthlyUsdCents?: number;
+				alertAtPct?: number;
+				enabled?: boolean;
+			};
 		}>(),
 		iconUrl: varchar("iconUrl", {
 			length: 1024,
@@ -492,7 +503,7 @@ export const comments = mysqlTable(
 		updatedAt: timestamp("updatedAt").notNull().defaultNow().onUpdateNow(),
 		parentCommentId: nanoIdNullable("parentCommentId")
 			.$type<Comment.CommentId>()
-			.references(() => comments.id, { onDelete: "cascade" }),
+			.references((): AnyMySqlColumn => comments.id, { onDelete: "cascade" }),
 	},
 	(table) => ({
 		videoTypeCreatedIndex: index("video_type_created_idx").on(

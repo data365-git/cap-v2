@@ -148,14 +148,16 @@ export async function createNotification(
 
 			const notificationId = nanoId();
 
-			await db().insert(notifications).values({
-				id: notificationId,
-				orgId: recipientUser.activeOrganizationId,
-				recipientId,
-				type,
-				data,
-				videoId: notification.videoId,
-			});
+			await db()
+				.insert(notifications)
+				.values({
+					id: notificationId,
+					orgId: recipientUser.activeOrganizationId,
+					recipientId,
+					type,
+					data,
+					videoId: Video.VideoId.make(notification.videoId),
+				});
 
 			revalidatePath("/dashboard");
 			return { success: true, notificationId };
@@ -188,7 +190,7 @@ export async function createNotification(
 					and(
 						eq(notifications.type, "view"),
 						eq(notifications.recipientId, videoResult.ownerId),
-						eq(notifications.videoId, notification.videoId),
+						eq(notifications.videoId, Video.VideoId.make(notification.videoId)),
 						sql`JSON_EXTRACT(${notifications.data}, '$.authorId') = ${notification.authorId}`,
 					),
 				)
@@ -224,20 +226,22 @@ export async function createNotification(
 			return;
 		}
 
-		await db().insert(notifications).values({
-			id: notificationId,
-			orgId: videoResult.activeOrganizationId,
-			recipientId: videoResult.ownerId,
-			type,
-			data,
-			videoId: notification.videoId,
-		});
+		await db()
+			.insert(notifications)
+			.values({
+				id: notificationId,
+				orgId: videoResult.activeOrganizationId,
+				recipientId: videoResult.ownerId,
+				type,
+				data,
+				videoId: Video.VideoId.make(notification.videoId),
+			});
 
 		revalidatePath("/dashboard");
 
 		if (type === "comment") {
 			await sendNewCommentEmail({
-				videoId: notification.videoId,
+				videoId: Video.VideoId.make(notification.videoId),
 				recipientId: videoResult.ownerId,
 				authorId: notification.authorId,
 				comment: notification.comment,
@@ -383,7 +387,7 @@ export async function createAnonymousViewNotification({
 					eq(notifications.type, "anon_view"),
 					eq(notifications.recipientId, videoWithOwner.ownerId),
 					gte(notifications.createdAt, rateWindowStart),
-					eq(notifications.videoId, videoId),
+					eq(notifications.videoId, Video.VideoId.make(videoId)),
 				),
 			)
 			.limit(1);
@@ -397,7 +401,7 @@ export async function createAnonymousViewNotification({
 			recipientId: videoWithOwner.ownerId,
 			type: "anon_view",
 			data: { videoId, anonName, location },
-			videoId,
+			videoId: Video.VideoId.make(videoId),
 			dedupKey,
 		});
 		revalidatePath("/dashboard");

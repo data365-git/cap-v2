@@ -82,7 +82,7 @@ export class VideosRepo extends Effect.Service<VideosRepo>()("VideosRepo", {
 									width: Option.getOrNull(data.width ?? Option.none()),
 									height: Option.getOrNull(data.height ?? Option.none()),
 									duration: Option.getOrNull(data.duration ?? Option.none()),
-								},
+								} as typeof Db.videos.$inferInsert,
 							]),
 						];
 

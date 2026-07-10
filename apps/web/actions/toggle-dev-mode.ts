@@ -31,7 +31,7 @@ export async function toggleDevMode(): Promise<
 			preferences: {
 				...current,
 				devModeEnabled: next,
-			} as typeof users.$inferSelect.preferences,
+			} as unknown as typeof users.$inferSelect.preferences,
 		})
 		.where(eq(users.id, user.id));
 

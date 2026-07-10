@@ -34,7 +34,7 @@ export async function setLanguage(locale: string): Promise<{ success: true }> {
 				preferences: {
 					...current,
 					locale,
-				} as typeof users.$inferSelect.preferences,
+				} as unknown as typeof users.$inferSelect.preferences,
 			})
 			.where(eq(users.id, user.id));
 	}

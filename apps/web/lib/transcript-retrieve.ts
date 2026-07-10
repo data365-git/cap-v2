@@ -1,5 +1,6 @@
 import { db } from "@cap/database";
 import { transcriptChunks } from "@cap/database/schema";
+import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 
 interface RetrievedChunk {
@@ -40,7 +41,7 @@ export async function retrieveTopK(
 			embedding: transcriptChunks.embedding,
 		})
 		.from(transcriptChunks)
-		.where(eq(transcriptChunks.videoId, videoId));
+		.where(eq(transcriptChunks.videoId, videoId as Video.VideoId));
 
 	const scored = chunks
 		.filter((c) => c.embedding !== null)
