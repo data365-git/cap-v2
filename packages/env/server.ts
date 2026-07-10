@@ -91,6 +91,12 @@ function createServerEnv() {
 				.string()
 				.optional()
 				.describe("Comma-separated list of permitted signup domains"),
+			CRON_SECRET: z
+				.string()
+				.optional()
+				.describe(
+					"Bearer token required to invoke /api/cron/* endpoints. When unset, cron endpoints fail safe (no-op).",
+				),
 
 			/// AI providers
 			GEMINI_API_KEY: z

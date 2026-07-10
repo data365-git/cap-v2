@@ -142,6 +142,13 @@ export interface VideoMetadata {
 	 * Cleared when transcription completes successfully.
 	 */
 	completedChunks?: Record<string, string>;
+	/**
+	 * How many times the stale-job recovery cron has re-triggered this video's
+	 * transcription / AI generation workflow. Acts as a hard anti-loop cap so a
+	 * permanently-broken video can never be re-triggered forever (and rack up
+	 * cost). See app/api/cron/recover-stale-ai-jobs/route.ts.
+	 */
+	recoveryAttempts?: number;
 }
 
 export type VideoEditRange = {
