@@ -556,7 +556,12 @@ function medianMs(values: number[]): number {
 		: ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
 }
 
-const CHUNK_THRESHOLD_SEC = 12 * 60; // chunk audio longer than 12 minutes
+// Only chunk genuinely long recordings. Chunking splits the audio and re-shifts
+// per-chunk timestamps, which is fragile (a hallucinated cue on the last chunk
+// produced 75:xx timestamps on a 36-min video). Modern Gemini handles up to
+// ~90 min of audio in a single call, matching the audio single-shot path, so a
+// typical meeting transcribes in one shot with correct timestamps.
+const CHUNK_THRESHOLD_SEC = 90 * 60; // chunk only beyond 90 minutes
 const CHUNK_WINDOW_SEC = 5 * 60; // 5-minute windows for video (lower per-call token pressure)
 const AUDIO_CHUNK_WINDOW_SEC = 3 * 60; // 3-minute windows for audio (T12 — reduces MAX_TOKENS)
 const CHUNK_OVERLAP_SEC = 5; // 5-second overlap to avoid mid-word cuts
@@ -811,7 +816,9 @@ async function transcribeAudio(
 					startOffsetSec: slice.startOffsetSec,
 					onAttempt: (_attempt, _total, reason) => {
 						if (reason === "retry") {
-							void patchAttemptLabel(`Qayta urinish ${_attempt}/${_total} — Gemini band`);
+							void patchAttemptLabel(
+								`Qayta urinish ${_attempt}/${_total} — Gemini band`,
+							);
 						} else if (reason === "fallback") {
 							void patchAttemptLabel("Zaxira modelga o'tildi");
 						}
@@ -951,14 +958,17 @@ async function transcribeAudio(
 
 				// Mark the first pending index of this batch as the active unit.
 				const firstBatchIdx = batchIndices[0] ?? b;
-				const batchMedianEtaSec = unitTimesMs.length > 0
-					? Math.round(medianMs(unitTimesMs) / 1000)
-					: undefined;
+				const batchMedianEtaSec =
+					unitTimesMs.length > 0
+						? Math.round(medianMs(unitTimesMs) / 1000)
+						: undefined;
 				await patchPipelinePhase(context.videoId, "transcribe", {
 					activeUnitIndex: firstBatchIdx,
 					activeUnitStartedAt: new Date().toISOString(),
 					activeUnitLabel: `Gemini'ga yuborilmoqda… (${batchIndices.length} parallel)`,
-					...(batchMedianEtaSec !== undefined ? { activeUnitEtaSec: batchMedianEtaSec } : {}),
+					...(batchMedianEtaSec !== undefined
+						? { activeUnitEtaSec: batchMedianEtaSec }
+						: {}),
 				});
 
 				const batchResults = await Promise.allSettled(
@@ -1097,9 +1107,10 @@ async function transcribeAudio(
 				const chunkStart = Date.now();
 
 				// Compute median ETA for this chunk from previous chunks' timings.
-				const medianEtaSec = unitTimesMs.length > 0
-					? Math.round(medianMs(unitTimesMs) / 1000)
-					: undefined;
+				const medianEtaSec =
+					unitTimesMs.length > 0
+						? Math.round(medianMs(unitTimesMs) / 1000)
+						: undefined;
 
 				// Mark the active chunk in metadata before starting the Gemini call.
 				await patchPipelinePhase(context.videoId, "transcribe", {
@@ -1108,7 +1119,9 @@ async function transcribeAudio(
 					activeUnitIndex: i,
 					activeUnitStartedAt: new Date().toISOString(),
 					activeUnitLabel: "Gemini'ga yuborilmoqda…",
-					...(medianEtaSec !== undefined ? { activeUnitEtaSec: medianEtaSec } : {}),
+					...(medianEtaSec !== undefined
+						? { activeUnitEtaSec: medianEtaSec }
+						: {}),
 				});
 
 				const result = await transcribeChunk(slice, chunkLabel, 0);
@@ -1141,7 +1154,7 @@ async function transcribeAudio(
 		await fs.unlink(localAudioPath).catch(() => {});
 	}
 
-	const merged = mergeVtt(perChunkResults);
+	const merged = mergeVtt(perChunkResults, effectiveDuration);
 
 	console.info(
 		`[CAP-TRANSCRIBE] merged transcript: ${slices.length} chunks, ${totalCueCount} total cues, ${effectiveDuration} total duration sec, allComplete=${allComplete}`,

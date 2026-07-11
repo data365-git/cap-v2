@@ -327,15 +327,43 @@ export function shiftCues(cues: VttCue[], offsetSec: number): VttCue[] {
 	}));
 }
 
+/**
+ * Drop hallucinated / corrupt cues and clamp the rest to [0, durationSec].
+ * Gemini occasionally emits timestamps beyond the actual audio length (observed:
+ * a 36-min video producing cues at 75:xx). Without this, shiftCues propagates
+ * those into the merged transcript. A small tolerance absorbs rounding.
+ */
+export function clampCuesToDuration(
+	cues: VttCue[],
+	durationSec: number,
+): VttCue[] {
+	if (!(durationSec > 0)) return cues;
+	const maxSec = durationSec + 2;
+	return cues
+		.filter((c) => c.startSec < maxSec && c.endSec >= c.startSec)
+		.map((c) => ({
+			...c,
+			startSec: Math.max(0, Math.min(c.startSec, durationSec)),
+			endSec: Math.max(
+				Math.min(c.startSec, durationSec),
+				Math.min(c.endSec, durationSec),
+			),
+		}));
+}
+
 export function mergeVtt(
 	perChunkResults: Array<{ cues: VttCue[]; startOffsetSec: number }>,
+	maxDurationSec?: number,
 ): { vtt: string; cues: VttCue[] } {
 	const all: VttCue[] = [];
 	for (const r of perChunkResults) {
 		all.push(...shiftCues(r.cues, r.startOffsetSec));
 	}
 	all.sort((a, b) => a.startSec - b.startSec);
-	return { vtt: cuesToVtt(all), cues: all };
+	// Final safety net: drop anything that still lands past the real duration.
+	const bounded =
+		maxDurationSec != null ? clampCuesToDuration(all, maxDurationSec) : all;
+	return { vtt: cuesToVtt(bounded), cues: bounded };
 }
 
 function plainTextToWebVTT(text: string, durationSec: number): string {
@@ -751,9 +779,15 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 		? rawText.trimStart()
 		: plainTextToWebVTT(rawText, audioDurationSec);
 
-	const parsedCues = parseVttCues(baseVtt);
+	// Clamp to this call's audio length BEFORE shifting — a cue past the chunk's
+	// own duration is a hallucination; shifting it would balloon it beyond the
+	// video (e.g. 41:00 in a 90s chunk offset by 34:55 → 75:55).
+	const parsedCues = clampCuesToDuration(
+		parseVttCues(baseVtt),
+		audioDurationSec,
+	);
 	const shifted = shiftCues(parsedCues, startOffsetSec);
-	const transcriptVtt = startOffsetSec === 0 ? baseVtt : cuesToVtt(shifted);
+	const transcriptVtt = cuesToVtt(shifted);
 
 	return {
 		transcriptVtt,
