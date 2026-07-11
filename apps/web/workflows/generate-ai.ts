@@ -111,7 +111,15 @@ function parseAiSummary(raw: unknown): AiSummary | null {
 	return result.data;
 }
 
-const MAX_CHARS_PER_CHUNK = 24000;
+// The 1M-token context easily holds any meeting transcript (a 3-hour meeting is
+// ~100k chars ≈ 25k tokens, ~2.5% of context), so input is never the reason to
+// split. The real limit is the 65,536-token OUTPUT cap: the summary + whole
+// refined transcript scale with length. At ~100k chars (~3 hours) the output
+// still fits comfortably, so anything shorter is summarized in ONE pass —
+// better quality (full cross-section context) and fewer/cheaper calls than the
+// old 24k (~45 min) threshold. Beyond ~3 hours we fall back to the section-then-
+// merge path to avoid truncating the output.
+const MAX_CHARS_PER_CHUNK = 100000;
 const GENERATED_TITLE_PATTERN =
 	/^(Cap (Recording|Upload) - .+|Untitled|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|.+ \((Display|Window|Area|Camera)\) \d{4}-\d{2}-\d{2} \d{2}:\d{2} [AP]M)$/;
 
