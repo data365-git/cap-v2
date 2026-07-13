@@ -11,9 +11,16 @@ type GenerateAiResult = {
 	message: string;
 };
 
+/**
+ * @param force Regenerate even when AI metadata already exists. Required after a
+ * re-transcription: the summary/tasks/chapters were derived from the *previous*
+ * transcript, so leaving them in place serves stale — possibly wrong — output.
+ * An in-flight run (PROCESSING/QUEUED) is never interrupted, force or not.
+ */
 export async function startAiGeneration(
 	videoId: Video.VideoId,
 	userId: string,
+	force = false,
 ): Promise<GenerateAiResult> {
 	if (!serverEnv().GEMINI_API_KEY) {
 		return {
@@ -60,6 +67,7 @@ export async function startAiGeneration(
 	}
 
 	if (
+		!force &&
 		metadata.aiGenerationStatus === "COMPLETE" &&
 		metadata.summary &&
 		metadata.chapters

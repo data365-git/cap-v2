@@ -23,8 +23,7 @@ export async function POST(
 			return Response.json({ error: "Video ID is required" }, { status: 400 });
 		}
 
-		const force =
-			new URL(request.url).searchParams.get("force") === "1";
+		const force = new URL(request.url).searchParams.get("force") === "1";
 
 		const videoQuery = await db()
 			.select()
@@ -75,10 +74,7 @@ export async function POST(
 			retryReason = "force";
 		} else if (statusAllowsRetry) {
 			retryReason = "error-or-skipped";
-		} else if (
-			metadata.aiGenerationStatus === "COMPLETE" &&
-			isEmptyContent
-		) {
+		} else if (metadata.aiGenerationStatus === "COMPLETE" && isEmptyContent) {
 			retryReason = "empty-content";
 		}
 
@@ -93,9 +89,7 @@ export async function POST(
 			);
 		}
 
-		console.info(
-			`[CAP-RETRY] retry-ai video=${videoId} reason=${retryReason}`,
-		);
+		console.info(`[CAP-RETRY] retry-ai video=${videoId} reason=${retryReason}`);
 
 		const videoOwnerQuery = await db()
 			.select({
@@ -120,7 +114,7 @@ export async function POST(
 			);
 		}
 
-		const result = await startAiGeneration(videoId, video.ownerId);
+		const result = await startAiGeneration(videoId, video.ownerId, force);
 
 		if (!result.success) {
 			return Response.json({ error: result.message }, { status: 500 });
