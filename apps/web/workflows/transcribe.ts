@@ -44,6 +44,11 @@ import {
 import { startAiGeneration } from "@/lib/generate-ai";
 import { runPromise } from "@/lib/server";
 import { chunkTranscript } from "@/lib/transcript-chunk";
+import {
+	AUDIO_SINGLE_SHOT_MAX_SEC,
+	CHUNK_THRESHOLD_SEC,
+	shouldChunkForTranscription,
+} from "@/lib/transcription-chunking";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
 interface TranscribeWorkflowPayload {
@@ -556,20 +561,16 @@ function medianMs(values: number[]): number {
 		: ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
 }
 
-// Only chunk genuinely long recordings. Chunking splits the audio and re-shifts
-// per-chunk timestamps, which is fragile (a hallucinated cue on the last chunk
-// produced 75:xx timestamps on a 36-min video). Modern Gemini handles up to
-// ~90 min of audio in a single call, matching the audio single-shot path, so a
-// typical meeting transcribes in one shot with correct timestamps.
-const CHUNK_THRESHOLD_SEC = 90 * 60; // chunk only beyond 90 minutes
+// CHUNK_THRESHOLD_SEC / AUDIO_SINGLE_SHOT_MAX_SEC / shouldChunkForTranscription
+// live in lib/transcription-chunking.ts — see that file for why 12 minutes.
+// clampCuesToDuration remains the per-chunk guard that drops the occasional
+// hallucinated out-of-range cue.
 const CHUNK_WINDOW_SEC = 5 * 60; // 5-minute windows for video (lower per-call token pressure)
 const AUDIO_CHUNK_WINDOW_SEC = 3 * 60; // 3-minute windows for audio (T12 — reduces MAX_TOKENS)
 const CHUNK_OVERLAP_SEC = 5; // 5-second overlap to avoid mid-word cuts
 // When the real duration is unknown we still must not send the whole file to
 // Gemini. Assume a long recording so the chunker engages by default.
 const UNKNOWN_DURATION_ASSUMED_SEC = 60 * 60;
-// T11: audio ≤ this duration → single-shot (no chunking, one Gemini call)
-const AUDIO_SINGLE_SHOT_MAX_SEC = 90 * 60; // 90 minutes
 // T12: parallel pool size for audio chunked path (3 avoids Gemini RPM limits)
 const AUDIO_PARALLEL_POOL = 3;
 
@@ -619,7 +620,10 @@ async function transcribeAudio(
 	if (
 		isAudioSource &&
 		knownDuration !== null &&
-		knownDuration <= AUDIO_SINGLE_SHOT_MAX_SEC
+		!shouldChunkForTranscription({
+			isAudioSource,
+			knownDurationSec: knownDuration,
+		})
 	) {
 		const startedAt = new Date().toISOString();
 		const chunkStart = Date.now();
@@ -706,12 +710,14 @@ async function transcribeAudio(
 		);
 	}
 
-	// For the video path's existing single-call threshold (≤ 12 min): keep it.
-	// We only reach here if NOT (isAudioSource && knownDuration <= 90 min).
+	// Audio sources that reach here already failed the single-shot check above,
+	// so they always chunk. Video sources chunk beyond CHUNK_THRESHOLD_SEC.
 	const shouldChunk =
 		isAudioSource ||
-		knownDuration == null ||
-		knownDuration > CHUNK_THRESHOLD_SEC;
+		shouldChunkForTranscription({
+			isAudioSource,
+			knownDurationSec: knownDuration,
+		});
 
 	if (!shouldChunk) {
 		// Video source ≤ 12 min → single call (original behaviour).

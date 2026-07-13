@@ -1,0 +1,70 @@
+import { describe, expect, it } from "vitest";
+import { shouldChunkForTranscription } from "@/lib/transcription-chunking";
+
+/**
+ * Regression guard for the 36-minute truncation bug.
+ *
+ * Raising the single-shot ceiling to 90 min let a 36-min meeting go to Gemini
+ * in one call. The model returned the full text but compressed the cue
+ * timestamps into ~27 min, so clamping to the real duration silently threw away
+ * the last ~10 minutes of the meeting. Anything past ~12 min must be chunked.
+ */
+describe("shouldChunkForTranscription", () => {
+	const MIN = 60;
+
+	it("single-shots a short video", () => {
+		expect(
+			shouldChunkForTranscription({
+				isAudioSource: false,
+				knownDurationSec: 5 * MIN,
+			}),
+		).toBe(false);
+	});
+
+	it("chunks a 36-minute video (the regression)", () => {
+		expect(
+			shouldChunkForTranscription({
+				isAudioSource: false,
+				knownDurationSec: 36 * MIN + 32,
+			}),
+		).toBe(true);
+	});
+
+	it("chunks any video longer than 12 minutes", () => {
+		for (const minutes of [13, 20, 45, 90, 180]) {
+			expect(
+				shouldChunkForTranscription({
+					isAudioSource: false,
+					knownDurationSec: minutes * MIN,
+				}),
+			).toBe(true);
+		}
+	});
+
+	it("chunks a long webAudio source too — the drift is the model's, not the source's", () => {
+		expect(
+			shouldChunkForTranscription({
+				isAudioSource: true,
+				knownDurationSec: 36 * MIN,
+			}),
+		).toBe(true);
+	});
+
+	it("single-shots a short webAudio source", () => {
+		expect(
+			shouldChunkForTranscription({
+				isAudioSource: true,
+				knownDurationSec: 8 * MIN,
+			}),
+		).toBe(false);
+	});
+
+	it("chunks when the duration is unknown rather than guessing short", () => {
+		expect(
+			shouldChunkForTranscription({
+				isAudioSource: false,
+				knownDurationSec: null,
+			}),
+		).toBe(true);
+	});
+});
