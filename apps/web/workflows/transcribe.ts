@@ -1291,6 +1291,13 @@ async function chunkEmbedAndStore(
 			embeddingModel: EMBED_MODEL,
 		}));
 
+		// Replace, don't append: a re-transcription (retry / force) would otherwise
+		// leave the previous run's chunks behind, doubling the RAG context and
+		// mixing stale (possibly wrong-timestamp) text into AI chat retrieval.
+		await db()
+			.delete(transcriptChunks)
+			.where(eq(transcriptChunks.videoId, videoId as Video.VideoId));
+
 		await db().insert(transcriptChunks).values(rows);
 
 		await patchPipelinePhase(videoId, "index", {
