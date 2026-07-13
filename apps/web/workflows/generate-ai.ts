@@ -24,6 +24,11 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { FatalError } from "workflow";
 import { z } from "zod";
+import {
+	billedInputTokens,
+	billedOutputTokens,
+	type GeminiUsageMetadata,
+} from "@/lib/gemini-usage";
 import { runPromise } from "@/lib/server";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
@@ -770,10 +775,7 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 					content: { parts: Array<{ text?: string }> };
 					finishReason?: string;
 				}>;
-				usageMetadata?: {
-					promptTokenCount?: number;
-					candidatesTokenCount?: number;
-				};
+				usageMetadata?: GeminiUsageMetadata;
 				error?: { message: string };
 			};
 
@@ -789,8 +791,11 @@ async function callAiApi(prompt: string): Promise<AiApiResult> {
 				return {
 					content: data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}",
 					model,
-					inputTokens: data.usageMetadata?.promptTokenCount ?? 0,
-					outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+					inputTokens: billedInputTokens(data.usageMetadata),
+					// Thinking stays enabled here — summarising, grouping tasks and
+					// distilling the transcript are genuine reasoning — but it is billed
+					// at the output rate, so it must be counted as output.
+					outputTokens: billedOutputTokens(data.usageMetadata),
 				};
 			}
 
