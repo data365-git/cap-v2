@@ -1,3 +1,9 @@
+import {
+	type GeminiUsageMetadata,
+	billedInputTokens as readInputTokens,
+	billedOutputTokens as readOutputTokens,
+} from "@/lib/gemini-usage";
+
 /**
  * Error thrown when Gemini API quota is exceeded. This short-circuits the
  * retry/fallback loop — no retries or fallback to Pro model.
@@ -75,10 +81,7 @@ interface GenResponseData {
 		content: { parts: Array<{ text?: string }> };
 		finishReason?: string;
 	}>;
-	usageMetadata?: {
-		promptTokenCount?: number;
-		candidatesTokenCount?: number;
-	};
+	usageMetadata?: GeminiUsageMetadata;
 	error?: { message: string };
 }
 
@@ -143,19 +146,23 @@ async function fetchGeminiWithRetry(
 			const data = (await res.json()) as GenResponseData;
 
 			// Every attempt that reached the model is billed by Google.
-			billedInputTokens += data.usageMetadata?.promptTokenCount ?? 0;
-			billedOutputTokens += data.usageMetadata?.candidatesTokenCount ?? 0;
+			billedInputTokens += readInputTokens(data.usageMetadata);
+			billedOutputTokens += readOutputTokens(data.usageMetadata);
 
 			if (res.ok) {
 				if (model !== GEMINI_PRIMARY_MODEL) {
 					console.log(`[gemini-transcribe] Fallback to ${model} succeeded`);
 				}
 				// Report accumulated usage across all attempts, not just this one.
+				// billedOutputTokens already folds thinking into the total, so it is
+				// reported as the whole output count with thoughts explicitly zeroed —
+				// otherwise a downstream billedOutputTokens() would add thinking twice.
 				return {
 					...data,
 					usageMetadata: {
 						promptTokenCount: billedInputTokens,
 						candidatesTokenCount: billedOutputTokens,
+						thoughtsTokenCount: 0,
 					},
 				};
 			}
@@ -758,6 +765,12 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 				generationConfig: {
 					temperature: 0.1,
 					maxOutputTokens: 65536,
+					// Transcription is transduction, not reasoning — there is nothing for
+					// the model to think *about*. Gemini 3 thinks by default, and those
+					// tokens are drawn from maxOutputTokens: a 5-minute chunk hit the
+					// 65,536 cap on thinking alone and had to be re-split. Budget 0 both
+					// removes that failure mode and stops us paying output rates for it.
+					thinkingConfig: { thinkingBudget: 0 },
 				},
 			}),
 		},
@@ -767,8 +780,8 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 	const rawText = genData.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 	const finishReason = genData.candidates?.[0]?.finishReason ?? "UNKNOWN";
 	const isComplete = finishReason !== "MAX_TOKENS";
-	const inputTokens = genData.usageMetadata?.promptTokenCount ?? 0;
-	const outputTokens = genData.usageMetadata?.candidatesTokenCount ?? 0;
+	const inputTokens = readInputTokens(genData.usageMetadata);
+	const outputTokens = readOutputTokens(genData.usageMetadata);
 
 	fetch(
 		`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`,

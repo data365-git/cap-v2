@@ -9,6 +9,10 @@ import {
 import { priceForMicros } from "@cap/utils";
 import type { Organisation, User, Video } from "@cap/web-domain";
 import { and, eq, sql } from "drizzle-orm";
+import {
+	billedOutputTokens,
+	type GeminiUsageMetadata,
+} from "@/lib/gemini-usage";
 
 interface AiBudgetSettings {
 	monthlyUsdCents?: number;
@@ -142,15 +146,14 @@ function tokensFromError(error: unknown): {
 	const e = error as {
 		inputTokens?: number;
 		outputTokens?: number;
-		usageMetadata?: {
-			promptTokenCount?: number;
-			candidatesTokenCount?: number;
-		};
+		usageMetadata?: GeminiUsageMetadata;
 	} | null;
 	const inputTokens =
 		Number(e?.inputTokens ?? e?.usageMetadata?.promptTokenCount ?? 0) || 0;
+	// Thinking is billed as output. Counting only candidatesTokenCount silently
+	// under-reports the spend a failed call already cost us.
 	const outputTokens =
-		Number(e?.outputTokens ?? e?.usageMetadata?.candidatesTokenCount ?? 0) || 0;
+		Number(e?.outputTokens ?? billedOutputTokens(e?.usageMetadata)) || 0;
 	return { inputTokens, outputTokens };
 }
 

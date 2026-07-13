@@ -393,6 +393,8 @@ export async function POST(request: NextRequest) {
 								usageMetadata?: {
 									promptTokenCount?: number;
 									candidatesTokenCount?: number;
+									/** Thinking tokens. Billed at the output rate, reported separately. */
+									thoughtsTokenCount?: number;
 								};
 							};
 							const token =
@@ -403,8 +405,12 @@ export async function POST(request: NextRequest) {
 							if (parsed.usageMetadata) {
 								chatInputTokens =
 									parsed.usageMetadata.promptTokenCount ?? chatInputTokens;
-								chatOutputTokens =
-									parsed.usageMetadata.candidatesTokenCount ?? chatOutputTokens;
+								// Thinking is billed as output, so it must be counted as output.
+								const candidates = parsed.usageMetadata.candidatesTokenCount;
+								const thoughts = parsed.usageMetadata.thoughtsTokenCount;
+								if (candidates != null || thoughts != null) {
+									chatOutputTokens = (candidates ?? 0) + (thoughts ?? 0);
+								}
 							}
 						} catch {
 							// malformed SSE chunk — skip
