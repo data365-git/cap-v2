@@ -1,9 +1,38 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
+
+/**
+ * Hard wall-clock cap on any single ffmpeg invocation. Without this a stalled
+ * ffmpeg never settles its promise, so the (fire-and-forget) transcription
+ * workflow hangs forever and the video is stranded in PROCESSING with no error
+ * — observed on a 36-min video that froze at 84% of audio extraction. Killing
+ * it surfaces a real failure the user can retry.
+ */
+const FFMPEG_TIMEOUT_MS = Number(
+	process.env.FFMPEG_TIMEOUT_MS ?? 15 * 60 * 1000,
+);
+
+function armFfmpegTimeout(
+	proc: ChildProcess,
+	label: string,
+	reject: (err: Error) => void,
+): void {
+	const timer = setTimeout(() => {
+		proc.kill("SIGKILL");
+		reject(
+			new Error(
+				`ffmpeg ${label} timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)}s`,
+			),
+		);
+	}, FFMPEG_TIMEOUT_MS);
+	const clear = () => clearTimeout(timer);
+	proc.on("close", clear);
+	proc.on("error", clear);
+}
 
 let cachedFfmpegPath: string | null = null;
 
@@ -121,10 +150,7 @@ async function detectAudioInput(
 const PASSTHROUGH_AUDIO_EXTS = new Set(["mp3", "m4a", "aac"]);
 const REENCODE_AUDIO_EXTS = new Set(["wav", "ogg", "opus", "flac"]);
 
-function isAudioInput(
-	ext: string | null,
-	contentType: string | null,
-): boolean {
+function isAudioInput(ext: string | null, contentType: string | null): boolean {
 	if (contentType?.startsWith("audio/")) return true;
 	if (!ext) return false;
 	return PASSTHROUGH_AUDIO_EXTS.has(ext) || REENCODE_AUDIO_EXTS.has(ext);
@@ -178,7 +204,12 @@ async function reencodeAudioToMp3(
 		typeof options.onProgress === "function";
 
 	await new Promise<void>((resolveRun, rejectRun) => {
-		const proc = spawn(ffmpeg, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawn(ffmpeg, ffmpegArgs, {
+			// stdout is NOT drained here (output goes to a file). Piping it lets
+			// ffmpeg block forever once the 64KB pipe buffer fills. Ignore it.
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		armFfmpegTimeout(proc, "reencode", rejectRun);
 		let stderr = "";
 		let lastEmit = 0;
 		let lastPct = -1;
@@ -295,7 +326,12 @@ export async function extractAudioFromUrl(
 		typeof options.onProgress === "function";
 
 	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpeg, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawn(ffmpeg, ffmpegArgs, {
+			// stdout is NOT drained here (output goes to a file). Piping it lets
+			// ffmpeg block forever once the 64KB pipe buffer fills. Ignore it.
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		armFfmpegTimeout(proc, "extract", reject);
 
 		let stderr = "";
 		let lastEmit = 0; // throttle: wall-clock ms of last onProgress call
@@ -312,7 +348,10 @@ export async function extractAudioFromUrl(
 			if (elapsedSec == null) return;
 			const pct = Math.max(
 				0,
-				Math.min(100, Math.round((elapsedSec / (totalDuration as number)) * 100)),
+				Math.min(
+					100,
+					Math.round((elapsedSec / (totalDuration as number)) * 100),
+				),
 			);
 			if (pct <= lastPct) return; // keep monotonic
 			lastPct = pct;
@@ -362,7 +401,11 @@ export async function extractAudioToBuffer(videoUrl: string): Promise<Buffer> {
 	];
 
 	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpeg, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawn(ffmpeg, ffmpegArgs, {
+			// stdout IS drained below (the encoded output is piped through it).
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		armFfmpegTimeout(proc, "transcode", reject);
 
 		const chunks: Buffer[] = [];
 		let stderr = "";
@@ -443,8 +486,10 @@ export async function chunkAudio(
 
 		await new Promise<void>((resolveSlice, rejectSlice) => {
 			const proc = spawn(ffmpeg, ffmpegArgs, {
-				stdio: ["pipe", "pipe", "pipe"],
+				// stdout is not drained here; piping it can block ffmpeg forever.
+				stdio: ["ignore", "ignore", "pipe"],
 			});
+			armFfmpegTimeout(proc, "chunk", rejectSlice);
 			let stderr = "";
 			proc.stderr?.on("data", (data: Buffer) => {
 				stderr += data.toString();
@@ -500,7 +545,11 @@ export async function convertWavToMp3(wavBuffer: Buffer): Promise<Buffer> {
 	];
 
 	return new Promise((resolve, reject) => {
-		const proc = spawn(ffmpeg, ffmpegArgs, { stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawn(ffmpeg, ffmpegArgs, {
+			// stdout IS drained below (the encoded output is piped through it).
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		armFfmpegTimeout(proc, "probe-duration", reject);
 
 		const chunks: Buffer[] = [];
 		let stderr = "";
@@ -546,7 +595,9 @@ function parseDurationFromStderr(stderr: string): number | null {
 	return Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(cs) / 100;
 }
 
-export async function checkHasAudioTrack(videoUrl: string): Promise<VideoProbeResult> {
+export async function checkHasAudioTrack(
+	videoUrl: string,
+): Promise<VideoProbeResult> {
 	let ffmpeg: string;
 	try {
 		ffmpeg = getFfmpegPath();
@@ -561,8 +612,10 @@ export async function checkHasAudioTrack(videoUrl: string): Promise<VideoProbeRe
 
 	return new Promise((resolve, reject) => {
 		const proc = spawn(ffmpeg, ffmpegArgs, {
-			stdio: ["pipe", "pipe", "pipe"],
+			// stdout is not drained here; piping it can block ffmpeg forever.
+			stdio: ["ignore", "ignore", "pipe"],
 		});
+		armFfmpegTimeout(proc, "probe-audio", reject);
 
 		let stderr = "";
 
