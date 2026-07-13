@@ -36,6 +36,7 @@ import {
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
 import {
 	cuesToVtt,
+	GEMINI_PRIMARY_MODEL,
 	mergeVtt,
 	parseVttCues,
 	transcribeWithGemini,
@@ -639,7 +640,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-3-flash-preview",
+			model: GEMINI_PRIMARY_MODEL,
 			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
@@ -735,7 +736,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-3-flash-preview",
+			model: GEMINI_PRIMARY_MODEL,
 			audioInput: true,
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),
 			fn: async () => {
@@ -810,7 +811,7 @@ async function transcribeAudio(
 			userId: context.userId,
 			videoId: context.videoId,
 			operation: "transcription",
-			model: "gemini-3-flash-preview",
+			model: GEMINI_PRIMARY_MODEL,
 			audioInput: true,
 			// A chunk that truncated still consumed tokens — record it failed.
 			determineStatus: (r) => (r.isComplete ? "success" : "failed"),

@@ -43,8 +43,21 @@ async function fetchWithTimeout(
 	}
 }
 
-const GEMINI_PRIMARY_MODEL =
-	process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
+/**
+ * Transcription model. 2.5-flash, NOT 3-flash-preview — measured on a 300s slice
+ * of a real Uzbek meeting, same prompt, thinking off:
+ *
+ *                      coverage    cues   longest cue
+ *   3-flash-preview    242s/300s     33      49.0s     <- drops 19% of the audio
+ *   2.5-flash          300s/300s     79      14.2s
+ *
+ * 3-flash-preview collapses speech into huge cues and silently loses the tail —
+ * the same timestamp compression that truncated a 36-min meeting to 26:50. That
+ * is a transcription-quality defect, not a context-length one, and it reproduces
+ * on a 5-minute chunk. 2.5-flash is also cheaper on output ($2.50 vs $3.00 /M).
+ */
+export const GEMINI_PRIMARY_MODEL =
+	process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 // No pricier fallback model by default. Escalating to gemini-2.5-pro on
 // transient errors multiplied cost ~6x (pro output is 4x flash) exactly when
 // the API was already rate-limiting us. Opt back in via GEMINI_FALLBACK_MODEL.
@@ -755,7 +768,17 @@ Timestamp format:
 - Do not transliterate Russian words into Latin.
 - Bold every foreign word or phrase.
 
-8. Output only the transcript. No intro, no explanation, no table, no numbering.
+RUSSIAN MUST BE IN CYRILLIC SCRIPT — this is mandatory, not a preference.
+Write **полностью**, never **polnostyu**. Write **подробный**, never **podrobniy**.
+Write **аудит**, never **audit**. Whenever you hear a Russian word, output it in
+Cyrillic letters and wrap it in **bold**.
+
+8. Identify REAL speaker names. The speakers address each other by name during
+the meeting — listen for those names and use them as the voice tag, e.g.
+<v Shohrux> and <v Bunyodbek>. Only fall back to <v Speaker 1> when no name is
+ever spoken aloud.
+
+9. Output only the transcript. No intro, no explanation, no table, no numbering.
 
 IMPORTANT: Start your response with "WEBVTT" header and format each line as WebVTT cues with timestamps in HH:MM:SS.mmm --> HH:MM:SS.mmm format. The speaker labels, bold formatting, and content rules above still apply within each cue text.`,
 							},
