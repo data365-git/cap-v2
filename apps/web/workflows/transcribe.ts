@@ -1359,7 +1359,11 @@ async function queueAiGeneration(
 ): Promise<void> {
 	"use step";
 
-	await startAiGeneration(videoId as Video.VideoId, userId);
+	// force: we only reach here having just written a fresh transcript. On a
+	// re-transcription the video still carries aiGenerationStatus=COMPLETE from
+	// the previous run, and without force startAiGeneration would early-return —
+	// leaving the summary/tasks derived from the *old* transcript on screen.
+	await startAiGeneration(videoId as Video.VideoId, userId, true);
 }
 
 async function _markEnhancedAudioProcessing(videoId: string): Promise<void> {

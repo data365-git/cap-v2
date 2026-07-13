@@ -26,8 +26,7 @@ export async function POST(
 			return Response.json({ error: "Video ID is required" }, { status: 400 });
 		}
 
-		const force =
-			new URL(request.url).searchParams.get("force") === "1";
+		const force = new URL(request.url).searchParams.get("force") === "1";
 
 		// Verify user owns the video
 		const videoQuery = await db()
@@ -83,7 +82,10 @@ export async function POST(
 			const transcriptText = Option.isSome(vtt)
 				? vtt.value
 						.replace(/WEBVTT[\s\S]*?\n\n/, "")
-						.replace(/\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}/g, "")
+						.replace(
+							/\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}/g,
+							"",
+						)
 						.replace(/\s+/g, " ")
 						.trim()
 				: "";
@@ -96,8 +98,7 @@ export async function POST(
 		if (!retryReason) {
 			return Response.json(
 				{
-					error:
-						"Transcription is already complete. Pass ?force=1 to re-run.",
+					error: "Transcription is already complete. Pass ?force=1 to re-run.",
 					transcriptionStatus: video.transcriptionStatus,
 				},
 				{ status: 400 },
@@ -115,9 +116,12 @@ export async function POST(
 			.set({ transcriptionStatus: null })
 			.where(eq(videos.id, videoId));
 
-		// Pass aiGenerationEnabled=false: this only transcribes. Summary/Tasks/
-		// Refined are generated separately via their own Generate buttons.
-		transcribeVideo(videoId, video.ownerId, false).catch((error) => {
+		// Pass aiGenerationEnabled=true: a re-transcription replaces the transcript
+		// that Summary/Tasks/Refined were derived from, so leaving the old AI output
+		// in place shows analysis of a transcript that no longer exists. Chaining AI
+		// generation also lets the pipeline reach its final "AI tahlil" phase —
+		// previously it stalled one step short on every retry.
+		transcribeVideo(videoId, video.ownerId, true).catch((error) => {
 			console.error(
 				`[retry-transcription] Error transcribing video ${videoId}:`,
 				error,
