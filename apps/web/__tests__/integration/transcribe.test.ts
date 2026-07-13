@@ -2,29 +2,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@cap/env", () => ({
 	serverEnv: vi.fn(() => ({
-		DEEPGRAM_API_KEY: "test-deepgram-api-key",
+		GEMINI_API_KEY: "test-gemini-api-key",
 		DATABASE_URL: "mysql://test@localhost/test",
 	})),
 }));
 
-const mockStart = vi.hoisted(() => vi.fn());
 const schemaMocks = vi.hoisted(() => ({
 	videos: { id: "id", settings: "settings" },
 	organizations: { id: "id", settings: "settings" },
-	s3Buckets: { id: "id" },
 	videoUploads: { videoId: "videoId", phase: "phase" },
 }));
 
-vi.mock("workflow/api", () => ({
-	start: mockStart,
-}));
-
+// transcribeVideo no longer hands the job to `workflow/api`.start(); it invokes
+// the workflow function directly (fire-and-forget) and returns immediately.
+const mockWorkflow = vi.hoisted(() => vi.fn());
 vi.mock("@/workflows/transcribe", () => ({
-	transcribeVideoWorkflow: vi.fn(),
+	transcribeVideoWorkflow: mockWorkflow,
 }));
 
 let mockQueryResult: unknown[] = [];
 let mockUploadQueryResult: unknown[] = [];
+const mockUpdateSet = vi.fn();
 
 vi.mock("@cap/database", () => ({
 	db: () => ({
@@ -48,9 +46,12 @@ vi.mock("@cap/database", () => ({
 			},
 		}),
 		update: () => ({
-			set: () => ({
-				where: vi.fn().mockResolvedValue([]),
-			}),
+			set: (values: unknown) => {
+				mockUpdateSet(values);
+				return {
+					where: vi.fn().mockResolvedValue([]),
+				};
+			},
 		}),
 	}),
 }));
@@ -58,7 +59,6 @@ vi.mock("@cap/database", () => ({
 vi.mock("@cap/database/schema", () => ({
 	videos: schemaMocks.videos,
 	organizations: schemaMocks.organizations,
-	s3Buckets: schemaMocks.s3Buckets,
 	videoUploads: schemaMocks.videoUploads,
 }));
 
@@ -75,13 +75,14 @@ describe("transcribeVideo", () => {
 		vi.clearAllMocks();
 		mockQueryResult = [];
 		mockUploadQueryResult = [];
+		mockWorkflow.mockResolvedValue(undefined);
 	});
 
 	describe("input validation", () => {
-		it("requires DEEPGRAM_API_KEY environment variable", async () => {
+		it("requires GEMINI_API_KEY environment variable", async () => {
 			const { serverEnv } = await import("@cap/env");
 			vi.mocked(serverEnv).mockReturnValueOnce({
-				DEEPGRAM_API_KEY: undefined,
+				GEMINI_API_KEY: undefined,
 			} as ReturnType<typeof serverEnv>);
 
 			const result = await transcribeVideo(
@@ -129,9 +130,7 @@ describe("transcribeVideo", () => {
 		});
 
 		it("returns error when video result is malformed", async () => {
-			mockQueryResult = [
-				{ video: null, bucket: null, settings: null, orgSettings: null },
-			];
+			mockQueryResult = [{ video: null, settings: null, orgSettings: null }];
 
 			const result = await transcribeVideo(
 				"video-123" as Video.VideoId,
@@ -152,7 +151,6 @@ describe("transcribeVideo", () => {
 						transcriptionStatus: null,
 						settings: { disableTranscript: true },
 					},
-					bucket: null,
 					settings: { disableTranscript: true },
 					orgSettings: null,
 				},
@@ -165,7 +163,11 @@ describe("transcribeVideo", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.message).toContain("disabled");
-			expect(mockStart).not.toHaveBeenCalled();
+			// Disabled videos are persisted as SKIPPED so they are not retried.
+			expect(mockUpdateSet).toHaveBeenCalledWith({
+				transcriptionStatus: "SKIPPED",
+			});
+			expect(mockWorkflow).not.toHaveBeenCalled();
 		});
 
 		it("skips transcription when org settings disable it", async () => {
@@ -176,7 +178,6 @@ describe("transcribeVideo", () => {
 						transcriptionStatus: null,
 						settings: null,
 					},
-					bucket: null,
 					settings: null,
 					orgSettings: { disableTranscript: true },
 				},
@@ -189,6 +190,7 @@ describe("transcribeVideo", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.message).toContain("disabled");
+			expect(mockWorkflow).not.toHaveBeenCalled();
 		});
 
 		it("video settings take precedence over org settings", async () => {
@@ -199,12 +201,10 @@ describe("transcribeVideo", () => {
 						transcriptionStatus: null,
 						settings: { disableTranscript: false },
 					},
-					bucket: null,
 					settings: { disableTranscript: false },
 					orgSettings: { disableTranscript: true },
 				},
 			];
-			mockStart.mockResolvedValue({ id: "run-123" });
 
 			const result = await transcribeVideo(
 				"video-123" as Video.VideoId,
@@ -212,20 +212,51 @@ describe("transcribeVideo", () => {
 			);
 
 			expect(result.success).toBe(true);
-			expect(mockStart).toHaveBeenCalled();
+			expect(mockWorkflow).toHaveBeenCalled();
 		});
 	});
 
 	describe("existing transcription status", () => {
-		it("returns early when transcription is already complete", async () => {
+		for (const status of [
+			"COMPLETE",
+			"PROCESSING",
+			"SKIPPED",
+			"NO_AUDIO",
+		] as const) {
+			it(`returns early when transcription status is ${status}`, async () => {
+				mockQueryResult = [
+					{
+						video: {
+							id: "video-123",
+							transcriptionStatus: status,
+							settings: null,
+						},
+						settings: null,
+						orgSettings: null,
+					},
+				];
+
+				const result = await transcribeVideo(
+					"video-123" as Video.VideoId,
+					"user-456",
+				);
+
+				expect(result.success).toBe(true);
+				expect(result.message).toBe(
+					"Transcription already completed or in progress",
+				);
+				expect(mockWorkflow).not.toHaveBeenCalled();
+			});
+		}
+
+		it("proceeds when transcription previously ERRORed", async () => {
 			mockQueryResult = [
 				{
 					video: {
 						id: "video-123",
-						transcriptionStatus: "COMPLETE",
+						transcriptionStatus: "ERROR",
 						settings: null,
 					},
-					bucket: null,
 					settings: null,
 					orgSettings: null,
 				},
@@ -237,32 +268,7 @@ describe("transcribeVideo", () => {
 			);
 
 			expect(result.success).toBe(true);
-			expect(result.message).toContain("already completed");
-			expect(mockStart).not.toHaveBeenCalled();
-		});
-
-		it("returns early when transcription is in progress", async () => {
-			mockQueryResult = [
-				{
-					video: {
-						id: "video-123",
-						transcriptionStatus: "PROCESSING",
-						settings: null,
-					},
-					bucket: null,
-					settings: null,
-					orgSettings: null,
-				},
-			];
-
-			const result = await transcribeVideo(
-				"video-123" as Video.VideoId,
-				"user-456",
-			);
-
-			expect(result.success).toBe(true);
-			expect(result.message).toContain("in progress");
-			expect(mockStart).not.toHaveBeenCalled();
+			expect(mockWorkflow).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -275,12 +281,10 @@ describe("transcribeVideo", () => {
 						transcriptionStatus: null,
 						settings: null,
 					},
-					bucket: { id: "bucket-456" },
 					settings: null,
 					orgSettings: null,
 				},
 			];
-			mockStart.mockResolvedValue({ id: "workflow-run-123" });
 		});
 
 		it("does not trigger while upload is still active", async () => {
@@ -293,46 +297,44 @@ describe("transcribeVideo", () => {
 
 			expect(result.success).toBe(true);
 			expect(result.message).toBe("Video upload is still in progress");
-			expect(mockStart).not.toHaveBeenCalled();
+			expect(mockWorkflow).not.toHaveBeenCalled();
 		});
 
-		it("triggers workflow for valid video", async () => {
+		it("triggers the workflow for a valid video", async () => {
 			const result = await transcribeVideo(
 				"video-123" as Video.VideoId,
 				"user-456",
 			);
 
 			expect(result.success).toBe(true);
-			expect(result.message).toBe("Transcription workflow started");
-			expect(mockStart).toHaveBeenCalledTimes(1);
+			expect(result.message).toBe("Transcription started inline");
+			expect(mockWorkflow).toHaveBeenCalledTimes(1);
 		});
 
 		it("passes correct payload to workflow", async () => {
 			await transcribeVideo("video-123" as Video.VideoId, "user-456", true);
 
-			expect(mockStart).toHaveBeenCalledWith(transcribeVideoWorkflow, [
-				{
-					videoId: "video-123",
-					userId: "user-456",
-					aiGenerationEnabled: true,
-				},
-			]);
+			expect(transcribeVideoWorkflow).toHaveBeenCalledWith({
+				videoId: "video-123",
+				userId: "user-456",
+				aiGenerationEnabled: true,
+			});
 		});
 
 		it("defaults aiGenerationEnabled to false", async () => {
 			await transcribeVideo("video-123" as Video.VideoId, "user-456");
 
-			expect(mockStart).toHaveBeenCalledWith(transcribeVideoWorkflow, [
-				{
-					videoId: "video-123",
-					userId: "user-456",
-					aiGenerationEnabled: false,
-				},
-			]);
+			expect(transcribeVideoWorkflow).toHaveBeenCalledWith({
+				videoId: "video-123",
+				userId: "user-456",
+				aiGenerationEnabled: false,
+			});
 		});
 
-		it("handles workflow trigger failure gracefully", async () => {
-			mockStart.mockRejectedValue(new Error("Workflow service unavailable"));
+		it("handles a workflow trigger failure gracefully", async () => {
+			mockWorkflow.mockImplementation(() => {
+				throw new Error("Workflow service unavailable");
+			});
 
 			const result = await transcribeVideo(
 				"video-123" as Video.VideoId,
@@ -341,6 +343,22 @@ describe("transcribeVideo", () => {
 
 			expect(result.success).toBe(false);
 			expect(result.message).toBe("Failed to start transcription workflow");
+			// The video is reset so a retry can pick it up again.
+			expect(mockUpdateSet).toHaveBeenCalledWith({ transcriptionStatus: null });
+		});
+
+		it("does not fail the caller when the fire-and-forget workflow rejects later", async () => {
+			mockWorkflow.mockRejectedValue(new Error("Workflow crashed mid-run"));
+
+			const result = await transcribeVideo(
+				"video-123" as Video.VideoId,
+				"user-456",
+			);
+
+			// The workflow runs detached: the caller returns as soon as it is kicked
+			// off, and a later rejection is logged rather than surfaced here.
+			expect(result.success).toBe(true);
+			expect(result.message).toBe("Transcription started inline");
 		});
 	});
 });
