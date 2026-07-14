@@ -660,11 +660,11 @@ importers:
         specifier: ^20.10.0
         version: 20.17.43
       '@types/react':
-        specifier: ^19.1.13
-        version: 19.1.13
+        specifier: 19.2.14
+        version: 19.2.14
       '@types/react-dom':
-        specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.13)
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.14)
       dotenv-cli:
         specifier: latest
         version: 11.0.0
@@ -5660,11 +5660,6 @@ packages:
   '@types/range-parser@1.2.7':
     resolution: {integrity: sha512-hKormJbkJqzQGhziax5PItDUTMAM9uE2XXQmM37dyd4hVM+5aVl7oVxMVUiVQn2oCQFN/LKCZdvSM0pFRqbSmQ==}
 
-  '@types/react-dom@19.1.9':
-    resolution: {integrity: sha512-qXRuZaOsAdXKFyOhRBg6Lqqc0yay13vN7KrIg4L7N4aaHN68ma9OK3NE1BoDFgFOTfM7zg+3/8+2n8rLUH3OKQ==}
-    peerDependencies:
-      '@types/react': ^19.0.0
-
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
     peerDependencies:
@@ -5672,9 +5667,6 @@ packages:
 
   '@types/react-responsive-masonry@2.6.0':
     resolution: {integrity: sha512-MF2ql1CjzOoL9fLWp6L3ABoyzBUP/YV71wyb3Fx+cViYNj7+tq3gDCllZHbLg1LQfGOQOEGbV2P7TOcUeGiR6w==}
-
-  '@types/react@19.1.13':
-    resolution: {integrity: sha512-hHkbU/eoO3EG5/MZkuFSKmYqPbSVk5byPFa3e7y/8TybHiLMACgI8seVYlicwk7H5K/rI2px9xrQp/C+AUDTiQ==}
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
@@ -17079,10 +17071,6 @@ snapshots:
 
   '@types/range-parser@1.2.7': {}
 
-  '@types/react-dom@19.1.9(@types/react@19.1.13)':
-    dependencies:
-      '@types/react': 19.1.13
-
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
       '@types/react': 19.2.14
@@ -17090,10 +17078,6 @@ snapshots:
   '@types/react-responsive-masonry@2.6.0':
     dependencies:
       '@types/react': 19.2.14
-
-  '@types/react@19.1.13':
-    dependencies:
-      csstype: 3.2.3
 
   '@types/react@19.2.14':
     dependencies:

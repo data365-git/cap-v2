@@ -8,6 +8,7 @@ import {
 	users,
 } from "@cap/database/schema";
 import { buildEnv } from "@cap/env";
+import { hashAuthApiKey } from "@cap/web-backend";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
@@ -72,7 +73,18 @@ async function getAuth(c: Context) {
 
 	let user: Awaited<ReturnType<typeof getCurrentUser>> | undefined;
 
-	if (authHeader?.length === 36) {
+	if (authHeader?.startsWith("cak_")) {
+		// New-style keys: only the HMAC is stored, so look up by hash.
+		const id = await hashAuthApiKey(authHeader);
+		const res = await db()
+			.select()
+			.from(users)
+			.leftJoin(authApiKeys, eq(users.id, authApiKeys.userId))
+			.where(eq(authApiKeys.id, id));
+		user = res[0]?.users;
+	} else if (authHeader?.length === 36) {
+		// Legacy plaintext UUID keys minted before the switch to hashing. Kept so
+		// existing desktop/extension installs keep working; new keys are all cak_.
 		const res = await db()
 			.select()
 			.from(users)

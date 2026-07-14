@@ -258,6 +258,20 @@ const makeS3Access = (s3: S3BucketAccess) => ({
 				"Key" | "Bucket" | "UploadId"
 			>,
 		) => mapStorageError(s3.multipart.abort(key, uploadId, args)),
+		// Browsers can only read the ETag of an uploaded part when the bucket's CORS
+		// config exposes that header. When it doesn't, the client sends placeholder
+		// ETags and the completion route resolves the real ones server-side via
+		// ListParts. This existed on S3BucketAccess but was never surfaced here, so
+		// that path called undefined and threw instead of completing the upload.
+		listParts: (key: string, uploadId: string) =>
+			mapStorageError(s3.multipart.listParts(key, uploadId)).pipe(
+				Effect.map((result) => ({
+					Parts: result.Parts?.map((part) => ({
+						PartNumber: part.PartNumber,
+						ETag: part.ETag,
+					})),
+				})),
+			),
 	},
 	createUploadTarget: (key: string, input: UploadTargetInput) =>
 		Effect.gen(function* () {
@@ -662,6 +676,14 @@ const makeGoogleDriveAccess = ({
 				mapStorageError(repo.deleteObjectByKey(integrationId, key)).pipe(
 					Effect.as({}),
 				),
+			// Google Drive resumable uploads have no per-part ETags, so there is
+			// nothing to enumerate. Returning empty leaves the caller's client-supplied
+			// ETags untouched, which is correct here — and keeps the method defined so
+			// the placeholder-resolution path can't crash on this backend either.
+			listParts: (_key: string, _uploadId: string) =>
+				Effect.succeed<{
+					Parts?: { PartNumber?: number; ETag?: string }[];
+				}>({ Parts: [] }),
 		},
 		createUploadTarget: (key: string, input: UploadTargetInput) =>
 			createGoogleDriveResumableUpload(

@@ -3,6 +3,7 @@ import { decodeSessionToken } from "@cap/database/auth/auth-options";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { authApiKeys } from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
+import { createAuthApiKeyToken, hashAuthApiKey } from "@cap/web-backend";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -185,10 +186,16 @@ app.get(
 				expires: String(decodedToken.exp),
 			};
 		} else {
-			const id = crypto.randomUUID();
-			await db().insert(authApiKeys).values({ id, userId: user.id });
+			// Mint a cak_ token and persist ONLY its HMAC. Previously this stored
+			// crypto.randomUUID() and handed the same value back as the bearer token,
+			// so every desktop API key sat in the database in plaintext — anyone with
+			// read access to authApiKeys could authenticate as any desktop user.
+			const token = createAuthApiKeyToken();
+			await db()
+				.insert(authApiKeys)
+				.values({ id: await hashAuthApiKey(token), userId: user.id });
 
-			data = { type: "api_key", api_key: id };
+			data = { type: "api_key", api_key: token };
 		}
 
 		const params = new URLSearchParams({ ...data, user_id: user.id });

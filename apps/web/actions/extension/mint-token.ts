@@ -3,15 +3,8 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { authApiKeys } from "@cap/database/schema";
-import { hashAuthApiKey } from "@cap/web-backend";
+import { createAuthApiKeyToken, hashAuthApiKey } from "@cap/web-backend";
 import { eq, sql } from "drizzle-orm";
-
-function createAuthApiKeyToken() {
-	const bytes = crypto.getRandomValues(new Uint8Array(32));
-	return `cak_${Array.from(bytes)
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("")}`;
-}
 
 export async function mintExtensionToken() {
 	const user = await getCurrentUser();
