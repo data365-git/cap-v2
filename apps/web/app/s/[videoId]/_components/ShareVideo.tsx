@@ -700,8 +700,11 @@ export const ShareVideo = forwardRef<
 					(data.metadata?.aiSummary?.refinedTranscript?.chapters?.length ?? 0) >
 						0 ||
 					data.transcriptionStatus === "COMPLETE" ||
+					// NOTE: transcription has no QUEUED state — unlike aiGenerationStatus,
+					// its enum is PROCESSING|COMPLETE|ERROR|SKIPPED|NO_AUDIO and the
+					// not-yet-started/queued case is encoded as `null` (which must keep the
+					// tabs hidden). PROCESSING is the only in-flight transcription state.
 					data.transcriptionStatus === "PROCESSING" ||
-					data.transcriptionStatus === "QUEUED" ||
 					aiGenerationStatus === "PROCESSING" ||
 					aiGenerationStatus === "QUEUED") && (
 					<div className="mt-4">

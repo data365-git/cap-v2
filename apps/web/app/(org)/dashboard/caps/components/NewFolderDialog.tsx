@@ -91,7 +91,13 @@ export const NewFolderDialog: React.FC<Props> = ({
 	function handleSubmit() {
 		const name = (inputRef.current?.value ?? folderName).trim();
 		if (!name || createFolder.isPending) return;
-		createFolder.mutate({ name, color: selectedColor });
+		// No colour picked => fall back to the neutral default rather than
+		// silently refusing to submit.
+		createFolder.mutate({
+			name,
+			color: selectedColor ?? "normal",
+			public: publicEnabled,
+		});
 	}
 
 	return (
@@ -165,14 +171,7 @@ export const NewFolderDialog: React.FC<Props> = ({
 						Cancel
 					</Button>
 					<Button
-						onClick={() => {
-							if (selectedColor === null) return;
-							createFolder.mutate({
-								name: folderName,
-								color: selectedColor,
-								public: publicEnabled,
-							});
-						}}
+						onClick={handleSubmit}
 						size="sm"
 						spinner={createFolder.isPending}
 						variant="dark"

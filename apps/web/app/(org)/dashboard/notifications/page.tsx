@@ -116,7 +116,9 @@ export default async function NotificationsPage(props: {
 		);
 	})
 		.pipe(runPromise)
-		.then((results) => results.filter(Boolean));
+		.then((results) =>
+			results.filter((x): x is NonNullable<typeof x> => x !== null),
+		);
 
 	return (
 		<NotificationsClient

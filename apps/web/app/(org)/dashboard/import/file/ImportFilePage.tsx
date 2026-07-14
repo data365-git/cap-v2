@@ -1,7 +1,7 @@
 "use client";
 
 import { buildEnv } from "@cap/env";
-import type { Folder, Organisation } from "@cap/web-domain";
+import { Folder, type Organisation } from "@cap/web-domain";
 import { faArrowLeft, faUpload } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useStore } from "@tanstack/react-store";
@@ -31,7 +31,8 @@ export const ImportFilePage = ({
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
 	const inputRef = useRef<HTMLInputElement>(null);
-	const { uploadingStore, setUploadStatus, setAbortController } = useUploadingContext();
+	const { uploadingStore, setUploadStatus, setAbortController } =
+		useUploadingContext();
 	const isUploading = useStore(uploadingStore, (s) => !!s.uploadStatus);
 	const [upgradeModalOpen, setUpgradeModalOpen] = useState(
 		buildEnv.NEXT_PUBLIC_IS_CAP ? !user?.isPro : false,
@@ -65,7 +66,16 @@ export const ImportFilePage = ({
 					folderId ? `/dashboard/folder/${folderId}` : "/dashboard/caps",
 				);
 		},
-		[user, activeOrganization, setUploadStatus, setAbortController, router, folderId, context, uploadKind],
+		[
+			user,
+			activeOrganization,
+			setUploadStatus,
+			setAbortController,
+			router,
+			folderId,
+			context,
+			uploadKind,
+		],
 	);
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -462,7 +472,10 @@ async function uploadVideoForServerProcessing(
 				},
 			});
 		} catch (uploadError) {
-			if (uploadError instanceof DOMException && uploadError.name === "AbortError") {
+			if (
+				uploadError instanceof DOMException &&
+				uploadError.name === "AbortError"
+			) {
 				progressTracker.cleanup();
 				setAbortController(null);
 				setUploadStatus(undefined);
@@ -472,7 +485,8 @@ async function uploadVideoForServerProcessing(
 			if (!progressTracker.didFinishSending()) {
 				progressTracker.cleanup();
 				setAbortController(null);
-				const reason = uploadError instanceof Error ? uploadError.message : "Network error";
+				const reason =
+					uploadError instanceof Error ? uploadError.message : "Network error";
 				console.error(`[CAP-IMPORT] Upload failed — ${reason}`, uploadError);
 				throw uploadError;
 			}
@@ -500,13 +514,19 @@ async function uploadVideoForServerProcessing(
 			});
 		} catch (triggerError) {
 			console.error("[CAP-IMPORT] Processing trigger failed:", triggerError);
-			toast.error("Upload succeeded but processing failed to start. Please try again.");
+			toast.error(
+				"Upload succeeded but processing failed to start. Please try again.",
+			);
 			setUploadStatus(undefined);
 			setSpeedLabel(null);
 			return false;
 		}
 
-		setUploadStatus({ status: "processing", capId: uploadId, startedAt: Date.now() });
+		setUploadStatus({
+			status: "processing",
+			capId: uploadId,
+			startedAt: Date.now(),
+		});
 		setSpeedLabel(null);
 		toast.success(
 			"Video uploaded! Processing will continue in the background.",
@@ -519,8 +539,7 @@ async function uploadVideoForServerProcessing(
 			setSpeedLabel(null);
 			return false;
 		}
-		const reason =
-			err instanceof Error ? err.message : "Unknown error";
+		const reason = err instanceof Error ? err.message : "Unknown error";
 		console.error(`[CAP-IMPORT] Upload failed — ${reason}`, err);
 
 		if (err instanceof Error && err.message === "upgrade_required") {

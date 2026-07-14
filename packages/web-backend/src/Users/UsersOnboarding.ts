@@ -27,6 +27,13 @@ export class UsersOnboarding extends Effect.Service<UsersOnboarding>()(
 							.from(Db.users)
 							.where(Dz.eq(Db.users.id, currentUser.id)),
 					);
+					// CurrentUser is authenticated, so the row must exist; a missing row is
+					// an invariant violation, not a recoverable error. Die (defect) rather
+					// than widen the typed error channel of every onboarding step.
+					if (!user)
+						return yield* Effect.dieMessage(
+							`Onboarding: authenticated user ${currentUser.id} not found`,
+						);
 
 					const firstName = data.firstName.trim();
 					const lastName = data.lastName?.trim() ?? "";
@@ -83,6 +90,13 @@ export class UsersOnboarding extends Effect.Service<UsersOnboarding>()(
 								.from(Db.users)
 								.where(Dz.eq(Db.users.id, currentUser.id)),
 						);
+						// CurrentUser is authenticated, so the row must exist; a missing row is
+						// an invariant violation, not a recoverable error. Die (defect) rather
+						// than widen the typed error channel of every onboarding step.
+						if (!user)
+							return yield* Effect.dieMessage(
+								`Onboarding: authenticated user ${currentUser.id} not found`,
+							);
 
 						const organizationName =
 							data.organizationName.trim() || data.organizationName;
@@ -215,6 +229,13 @@ export class UsersOnboarding extends Effect.Service<UsersOnboarding>()(
 							.from(Db.users)
 							.where(Dz.eq(Db.users.id, currentUser.id)),
 					);
+					// CurrentUser is authenticated, so the row must exist; a missing row is
+					// an invariant violation, not a recoverable error. Die (defect) rather
+					// than widen the typed error channel of every onboarding step.
+					if (!user)
+						return yield* Effect.dieMessage(
+							`Onboarding: authenticated user ${currentUser.id} not found`,
+						);
 
 					yield* db.use((db) =>
 						db
@@ -238,6 +259,13 @@ export class UsersOnboarding extends Effect.Service<UsersOnboarding>()(
 							.from(Db.users)
 							.where(Dz.eq(Db.users.id, currentUser.id)),
 					);
+					// CurrentUser is authenticated, so the row must exist; a missing row is
+					// an invariant violation, not a recoverable error. Die (defect) rather
+					// than widen the typed error channel of every onboarding step.
+					if (!user)
+						return yield* Effect.dieMessage(
+							`Onboarding: authenticated user ${currentUser.id} not found`,
+						);
 
 					yield* db.use((db) =>
 						db
@@ -261,6 +289,13 @@ export class UsersOnboarding extends Effect.Service<UsersOnboarding>()(
 							.from(Db.users)
 							.where(Dz.eq(Db.users.id, currentUser.id)),
 					);
+					// CurrentUser is authenticated, so the row must exist; a missing row is
+					// an invariant violation, not a recoverable error. Die (defect) rather
+					// than widen the typed error channel of every onboarding step.
+					if (!user)
+						return yield* Effect.dieMessage(
+							`Onboarding: authenticated user ${currentUser.id} not found`,
+						);
 
 					const shouldUsePlaceholder = !user.onboardingSteps?.welcome;
 					const userName = shouldUsePlaceholder ? "Your name" : user.name;

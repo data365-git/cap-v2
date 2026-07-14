@@ -160,6 +160,7 @@ export default async function EmbedVideoPage(
 					skipProcessing: videos.skipProcessing,
 					transcriptionStatus: videos.transcriptionStatus,
 					source: videos.source,
+					context: videos.context,
 					folderId: videos.folderId,
 					width: videos.width,
 					height: videos.height,
