@@ -87,13 +87,17 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 				for (let index = 0; index < videoExits.length; index++) {
 					const exit = videoExits[index];
 					if (!exit) continue;
+					// videoExits is built 1:1 from videoIds, so this is always in range;
+					// guarding keeps the branded VideoId honest instead of forging "".
+					const videoId = videoIds[index];
+					if (!videoId) continue;
 					if (Exit.isSuccess(exit)) {
 						const maybeVideo = exit.value;
 						if (Option.isSome(maybeVideo)) {
 							const [video] = maybeVideo.value;
 							successfulVideos.push({
 								index,
-								videoId: videoIds[index] ?? "",
+								videoId,
 								video,
 							});
 						}
@@ -186,12 +190,14 @@ export class Videos extends Effect.Service<Videos>()("Videos", {
 					}
 				}
 
-				return videoExits.map((exit, index) =>
-					Exit.map(exit, () => ({
-						count:
-							countsByPathname.get(buildPathname(videoIds[index] ?? "")) ?? 0,
-					})),
-				);
+				return videoExits.map((exit, index) => {
+					const videoId = videoIds[index];
+					return Exit.map(exit, () => ({
+						count: videoId
+							? (countsByPathname.get(buildPathname(videoId)) ?? 0)
+							: 0,
+					}));
+				});
 			},
 		);
 

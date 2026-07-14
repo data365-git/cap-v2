@@ -1,9 +1,9 @@
 "use client";
 
+import { Check, Copy, RefreshCw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Copy, Check, Square, RefreshCw } from "lucide-react";
 import {
 	LiquidGlassContainer,
 	type LiquidGlassHandle,
@@ -139,9 +139,7 @@ function MarkdownContent({
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm]}
 				components={{
-					p: ({ children }) => (
-						<p>{processChildren(children, onVideoJump)}</p>
-					),
+					p: ({ children }) => <p>{processChildren(children, onVideoJump)}</p>,
 					li: ({ children }) => (
 						<li>{processChildren(children, onVideoJump)}</li>
 					),
@@ -379,7 +377,10 @@ export function AIChatPopup({
 		if (!el) return;
 		const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 60;
 		if (isNearBottom) {
-			el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "auto" : "smooth" });
+			el.scrollTo({
+				top: el.scrollHeight,
+				behavior: isStreaming ? "auto" : "smooth",
+			});
 		}
 	}, [messages, isStreaming]);
 
@@ -615,8 +616,10 @@ export function AIChatPopup({
 			aria-label="AI assistant"
 			aria-hidden={!isOpen}
 			aria-modal={isOpen || undefined}
-			// biome-ignore lint/a11y/noNoninteractiveTabindex: inert removes focus from closed popup
-			{...(!isOpen ? { inert: "" } : {})}
+			// React 19 types `inert` as a real boolean prop (it was an unknown
+			// string-valued passthrough attribute under React 18); it is omitted
+			// from the DOM when false, so this keeps the closed popup unfocusable.
+			inert={!isOpen}
 		>
 			<div ref={glassHostRef} className="ai-glass-host" />
 			<LiquidGlassContainer ref={glassRef} hostRef={glassHostRef} />
@@ -656,7 +659,13 @@ export function AIChatPopup({
 				</button>
 			</div>
 
-			<div ref={bodyRef} className="ai-body" aria-live="polite" aria-atomic="false" aria-relevant="additions">
+			<div
+				ref={bodyRef}
+				className="ai-body"
+				aria-live="polite"
+				aria-atomic="false"
+				aria-relevant="additions"
+			>
 				{!hasMessages && (
 					<>
 						<div className="ai-welcome">
@@ -698,7 +707,9 @@ export function AIChatPopup({
 						<div className="bubble-wrap">
 							<div className="bubble">
 								{msg.role === "assistant" ? (
-									msg.content === "" && isStreaming && msg.id === messages[messages.length - 1]?.id ? (
+									msg.content === "" &&
+									isStreaming &&
+									msg.id === messages[messages.length - 1]?.id ? (
 										<span className="ai-caret" aria-hidden="true" />
 									) : (
 										<MarkdownContent
@@ -710,9 +721,7 @@ export function AIChatPopup({
 									msg.content
 								)}
 							</div>
-							{msg.stopped && (
-								<span className="ai-stopped-badge">stopped</span>
-							)}
+							{msg.stopped && <span className="ai-stopped-badge">stopped</span>}
 							{msg.error && (
 								<div className="ai-error-row">
 									<span className="ai-error-label">⚠ Error</span>

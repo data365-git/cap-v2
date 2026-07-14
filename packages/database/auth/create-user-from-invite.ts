@@ -1,4 +1,6 @@
+import { Organisation, type User } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
+import { nanoId } from "../helpers.ts";
 import { db } from "../index.ts";
 import {
 	invites,
@@ -7,9 +9,6 @@ import {
 	organizations,
 	users,
 } from "../schema.ts";
-import { nanoId } from "../helpers.ts";
-import { User } from "@cap/web-domain";
-import { Organisation } from "@cap/web-domain";
 
 export interface InviteUser {
 	id: User.UserId;
@@ -19,7 +18,18 @@ export interface InviteUser {
 }
 
 // Infer the drizzle transaction type so callers can pass tx for atomicity.
-type DrizzleTx = Parameters<Parameters<ReturnType<typeof db>["transaction"]>[0]>[0];
+type DrizzleTx = Parameters<
+	Parameters<ReturnType<typeof db>["transaction"]>[0]
+>[0];
+
+/**
+ * Local part of an email, used as the initial display name.
+ * `split` always yields at least one element, so the fallback is unreachable —
+ * it exists to satisfy `noUncheckedIndexedAccess`.
+ */
+function localPartOf(email: string): string {
+	return email.split("@")[0] ?? email;
+}
 
 /**
  * Idempotent: creates the user if missing, ensures org membership, marks invite consumed.
@@ -33,23 +43,29 @@ export async function createUserFromOrgInvite(
 	const d = tx ?? db();
 
 	let [existing] = await d
-		.select({ id: users.id, email: users.email, name: users.name, image: users.image })
+		.select({
+			id: users.id,
+			email: users.email,
+			name: users.name,
+			image: users.image,
+		})
 		.from(users)
 		.where(eq(users.email, email))
 		.limit(1);
 
 	if (!existing) {
 		const newId = nanoId() as User.UserId;
+		const derivedName = localPartOf(email);
 		await d.insert(users).values({
 			id: newId,
 			email,
-			name: email.split("@")[0],
+			name: derivedName,
 			emailVerified: new Date(),
 			activeOrganizationId: invite.organizationId,
 			defaultOrgId: invite.organizationId,
 			inviteQuota: 1,
 		});
-		existing = { id: newId, email, name: email.split("@")[0], image: null };
+		existing = { id: newId, email, name: derivedName, image: null };
 	}
 
 	const [alreadyMember] = await d
@@ -79,7 +95,12 @@ export async function createUserFromOrgInvite(
 			.where(eq(organizationInvites.id, invite.id));
 	}
 
-	return { id: existing.id, email: existing.email, name: existing.name, image: null };
+	return {
+		id: existing.id,
+		email: existing.email,
+		name: existing.name,
+		image: null,
+	};
 }
 
 /**
@@ -92,7 +113,12 @@ export async function createUserFromGenericInvite(
 ): Promise<InviteUser> {
 	// Find or create user
 	let [existing] = await db()
-		.select({ id: users.id, email: users.email, name: users.name, image: users.image })
+		.select({
+			id: users.id,
+			email: users.email,
+			name: users.name,
+			image: users.image,
+		})
 		.from(users)
 		.where(eq(users.email, email))
 		.limit(1);
@@ -100,17 +126,20 @@ export async function createUserFromGenericInvite(
 	if (!existing) {
 		const newId = nanoId() as User.UserId;
 		const orgId = Organisation.OrganisationId.make(nanoId());
+		const derivedName = localPartOf(email);
 
-		await db().insert(organizations).values({
-			id: orgId,
-			ownerId: newId,
-			name: `${email.split("@")[0]}'s Organization`,
-		});
+		await db()
+			.insert(organizations)
+			.values({
+				id: orgId,
+				ownerId: newId,
+				name: `${derivedName}'s Organization`,
+			});
 
 		await db().insert(users).values({
 			id: newId,
 			email,
-			name: email.split("@")[0],
+			name: derivedName,
 			emailVerified: new Date(),
 			activeOrganizationId: orgId,
 			defaultOrgId: orgId,
@@ -124,7 +153,7 @@ export async function createUserFromGenericInvite(
 			role: "owner",
 		});
 
-		existing = { id: newId, email, name: email.split("@")[0], image: null };
+		existing = { id: newId, email, name: derivedName, image: null };
 	}
 
 	// Mark invite used
@@ -135,5 +164,10 @@ export async function createUserFromGenericInvite(
 			.where(eq(invites.id, invite.id));
 	}
 
-	return { id: existing.id, email: existing.email, name: existing.name, image: null };
+	return {
+		id: existing.id,
+		email: existing.email,
+		name: existing.name,
+		image: null,
+	};
 }

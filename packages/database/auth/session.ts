@@ -1,3 +1,8 @@
+/// <reference path="../types/next-auth.d.ts" />
+// The Session.user augmentation (adds `id`/`isAdmin`) lives in a standalone .d.ts.
+// Consumer programs (e.g. `next build`, which type-checks this file under
+// apps/web's tsconfig) don't include that file via their own `include` globs, so
+// reference it explicitly here — otherwise `session.user.id` fails to resolve.
 import { User } from "@cap/web-domain";
 import { eq, type InferSelectModel } from "drizzle-orm";
 import { getServerSession } from "next-auth";

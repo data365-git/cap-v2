@@ -12,6 +12,11 @@
 		"noUncheckedIndexedAccess": true,
 		"module": "ESNext",
 		"moduleResolution": "bundler",
+		// `next build` type-checks the workspace packages it inlines via
+		// transpilePackages inside *this* program, and those packages import each
+		// other with explicit .ts extensions (allowed by packages/config/base.tsconfig.json).
+		// Safe here because noEmit is true; it relaxes no type checks.
+		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
 		"isolatedModules": true,
 		"strictNullChecks": true,

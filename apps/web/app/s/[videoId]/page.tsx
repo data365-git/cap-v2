@@ -406,6 +406,7 @@ export default async function ShareVideoPage(props: PageProps<"/s/[videoId]">) {
 					skipProcessing: videos.skipProcessing,
 					transcriptionStatus: videos.transcriptionStatus,
 					source: videos.source,
+					context: videos.context,
 					videoSettings: videos.settings,
 					width: videos.width,
 					height: videos.height,
