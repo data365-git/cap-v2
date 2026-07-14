@@ -191,6 +191,12 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 		videoData.aiGenerationLanguage,
 		videoData.video.duration ?? null,
 		videoId,
+		// The model has no clock. Without the meeting's own date it invented
+		// deadlines (a 2026 meeting produced "2024-06-15"), which the UI then
+		// presented to users as fact.
+		(videoData.video.createdAt ?? new Date())
+			.toISOString()
+			.slice(0, 10),
 	);
 
 	if (result._usage) {
@@ -390,6 +396,7 @@ async function generateWithAi(
 	language: AiGenerationLanguage,
 	videoDurationSec: number | null,
 	videoId: string,
+	meetingDate: string,
 ): Promise<AiResult> {
 	"use step";
 
@@ -425,6 +432,7 @@ async function generateWithAi(
 			transcript.segments,
 			videoDuration,
 			languageInstruction,
+			meetingDate,
 		);
 	} else {
 		result = await generateMultipleChunks(
@@ -432,6 +440,7 @@ async function generateWithAi(
 			transcript.segments,
 			videoDuration,
 			languageInstruction,
+			meetingDate,
 		);
 	}
 
@@ -830,7 +839,7 @@ function cleanJsonResponse(content: string): string {
 	return content;
 }
 
-const MASTER_SCHEMA_EXAMPLE = `{
+export const MASTER_SCHEMA_EXAMPLE = `{
   "title": "Weekly Team Sync",
   "summary": "The team discussed Q3 roadmap priorities and resolved the deployment blocker.",
   "chapters": [{"title": "Intro", "start": 0}],
@@ -838,7 +847,7 @@ const MASTER_SCHEMA_EXAMPLE = `{
     "overview": "**The team locked Q3 priorities and cleared the deployment blocker.**\\n\\n### Asosiy qarorlar\\n- **Ship the billing rewrite** before the **CRM** migration\\n- Freeze new features for two weeks to pay down bugs\\n\\n### Muhim nuqtalar\\n- Signups up **18%** month-over-month\\n- Deployment blocker was a stale cache config\\n\\n### Ochiq masalalar\\n- Who owns the data migration is still undecided",
     "topics": [{"title": "Q3 Roadmap", "body": "Aligned on **three priorities**; billing rewrite goes first."}],
     "nextSteps": ["Share updated roadmap doc by Friday"],
-    "tasks": [{"title": "Update the roadmap doc", "category": "Alice", "assignee": "Alice", "priority": "high", "deadline": "2024-07-05", "done": false}],
+    "tasks": [{"title": "Update the roadmap doc", "category": "Roadmap", "assignee": "Alice", "priority": "high", "deadline": "", "done": false}, {"title": "Find an owner for the data migration", "category": "Migration", "assignee": "Unassigned", "priority": "medium", "deadline": "", "done": false}],
     "chapters": [{"startSec": 0, "title": "Intro", "body": "Brief intro and agenda."}, {"startSec": 45, "title": "Q3 Roadmap", "body": "Discussion of top priorities."}],
     "refinedTranscript": {
       "intro": {
@@ -860,14 +869,20 @@ function formatTimestampsForPrompt(segments: VttSegment[]): string {
 		.join("\n");
 }
 
-function buildMasterPrompt(
+export function buildMasterPrompt(
 	videoDuration: number,
 	transcriptWithTimestamps: string,
 	languageInstruction: string,
+	meetingDate: string,
 ): string {
 	return `You are an expert meeting analyst. From the timestamped transcript below,
 produce ONE JSON object with this exact structure (keep property names exactly):
 ${MASTER_SCHEMA_EXAMPLE}
+
+This meeting took place on ${meetingDate}. Any relative date spoken in the audio
+("next Friday", "end of the month", "in two weeks") must be resolved against THAT
+date. You have no other knowledge of the current date — never assume one, and never
+emit a deadline whose year you did not derive from ${meetingDate} or hear spoken.
 
 ${languageInstruction}
 
@@ -903,15 +918,33 @@ C) nextSteps[] — PLAIN one-line follow-ups that are agreed but not owned by a 
    person ("Share roadmap by Friday"). Bold/italic allowed, no lists. Keep each to one line.
 
 D) tasks[] — concrete, OWNED action items. Extract only real commitments; never fabricate.
-   Group them by CONTEXT: look at the meeting and pick the ONE grouping axis that makes the
-   tasks most useful — by person (assignee), by workstream/category (e.g. "Backend", "Sales",
-   "Design"), or by stage/phase (e.g. "This week", "Before launch"). Use that SAME axis for
-   every task via the "category" field. For each task:
+
+   BE EXHAUSTIVE. Sweep the WHOLE transcript end to end and capture EVERY commitment,
+   not just the memorable ones. A commitment is anything someone said they would do,
+   send, check, prepare, decide, or follow up on — including ones stated in passing, and
+   including obligations that fall on the other party. A substantive meeting normally
+   yields 5-15 tasks; if you have found only two or three, you have missed some — go back
+   through the transcript and look again. (Do NOT pad with invented work to hit a number:
+   if a commitment was genuinely never made, it does not exist.)
+
+   Group them by CONTEXT: pick the ONE grouping axis that makes the tasks most useful —
+   by workstream/category ("Audit", "Sales", "Backend"), by stage/phase ("This week",
+   "Before launch"), or by person. Use that SAME axis for every task via "category".
+
+   The category must be a GROUPING, not a restatement of another field. If your category
+   is just the assignee's name repeated, you have chosen the wrong axis — a grouping that
+   duplicates "assignee" adds nothing. Prefer workstream or stage unless the meeting is
+   genuinely organised around who does what.
+
+   For each task:
        title    = PLAIN imperative action ("Update the CRM pipeline"). Bold/italic allowed, one line.
-       category = the group label on your chosen axis (a person's name, a workstream, or a stage).
+       category = the group label on your chosen axis. NOT a copy of assignee.
        assignee = the person responsible as named in the audio; if nobody is named, "Unassigned".
        priority = high | medium | low, judged from urgency/impact cues.
-       deadline = ISO date (YYYY-MM-DD) ONLY if a concrete date is stated or unambiguously derivable; otherwise "". Never guess.
+       deadline = ISO date (YYYY-MM-DD) ONLY if a concrete date was spoken, or is
+                  unambiguously derivable from the meeting date given above. Otherwise "".
+                  NEVER guess a date, and never invent a year. An empty deadline is
+                  always correct; a fabricated one is a lie the user will act on.
        done     = false (unless the transcript says it was already completed).
 
 E) refinedTranscript — the meeting distilled to only what matters. This is gold-panning:
@@ -950,12 +983,14 @@ async function generateSingleChunk(
 	segments: VttSegment[],
 	videoDuration: number,
 	languageInstruction: string,
+	meetingDate: string,
 ): Promise<AiResult> {
 	const transcriptWithTimestamps = formatTimestampsForPrompt(segments);
 	const prompt = buildMasterPrompt(
 		videoDuration,
 		transcriptWithTimestamps,
 		languageInstruction,
+		meetingDate,
 	);
 
 	const apiResult = await callAiApi(prompt);
@@ -1119,6 +1154,7 @@ async function generateMultipleChunks(
 	allSegments: VttSegment[],
 	videoDuration: number,
 	languageInstruction: string,
+	meetingDate: string,
 ): Promise<AiResult> {
 	const chunkSummaries: {
 		summary: string;
@@ -1196,6 +1232,11 @@ ${chunk.text}`;
 	const finalPrompt = `You are a professional Uzbek meeting analyst. From these section analyses of a longer meeting (total duration ${videoDuration} seconds), produce ONE JSON object with this exact structure (keep property names exactly):
 ${MASTER_SCHEMA_EXAMPLE}
 
+This meeting took place on ${meetingDate}. Resolve any relative date ("next Friday",
+"end of the month") against THAT date. You have no other knowledge of the current
+date — never assume one, and never emit a deadline whose year you did not derive
+from ${meetingDate} or hear spoken.
+
 ${languageInstruction}
 
 LANGUAGE & FORMATTING RULES (apply to every text field you output):
@@ -1222,14 +1263,21 @@ For this pass produce these fields:
   sentences (bold/italic allowed, no lists) with concrete points, decisions, numbers, names.
   3-8 topics typical.
 - aiSummary.nextSteps[]: PLAIN one-line follow-ups ("Share roadmap by Friday").
-- aiSummary.tasks[]: concrete, owned action items. Group them by CONTEXT — pick the ONE axis
-  (by person, by workstream/category, or by stage) that makes them most useful and use it for
-  every task's "category". For each:
+- aiSummary.tasks[]: concrete, owned action items. BE EXHAUSTIVE — sweep every section
+  analysis and capture EVERY commitment anyone made, including ones stated in passing and
+  obligations falling on the other party. A substantive meeting normally yields 5-15 tasks;
+  if you have only two or three, you have missed some. Never pad with invented work.
+  Group them by CONTEXT — pick the ONE axis (by workstream/category, by stage, or by person)
+  that makes them most useful and use it for every task's "category". The category must be a
+  GROUPING, not a restatement of "assignee": if your category is just the assignee's name
+  repeated, you picked the wrong axis. For each:
     title    = PLAIN imperative action.
-    category = the group label on your chosen axis (a person, a workstream, or a stage).
+    category = the group label on your chosen axis. NOT a copy of assignee.
     assignee = the person responsible if named; otherwise "Unassigned".
     priority = high | medium | low.
-    deadline = YYYY-MM-DD only if stated/derivable; otherwise "".
+    deadline = YYYY-MM-DD only if a date was spoken or is unambiguously derivable from the
+               meeting date above; otherwise "". NEVER guess a date or invent a year. An
+               empty deadline is always correct; a fabricated one is a lie the user acts on.
     done     = false (unless transcript says completed).
 - aiSummary.chapters[]: {startSec, title, body} timeline markers, startSec in [0, ${videoDuration}].
 - aiSummary.refinedTranscript.intro: {participants[], duration (human phrase), purpose (1-2 sentences)}.
