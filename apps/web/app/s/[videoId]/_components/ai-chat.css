@@ -30,9 +30,9 @@
 .ai-fab {
 	position: fixed;
 	right: 26px;
-	/* Lift above the fixed audio bottom bar when present (var is 0 otherwise), so
-	   the FAB never overlaps the player controls. */
-	bottom: calc(26px + var(--audio-bottom-bar-height, 0px));
+	/* Lift above the bottom mini-controller when present (var is 0 otherwise), so
+	   the FAB never overlaps it. */
+	bottom: calc(26px + var(--bottom-bar-height, 0px));
 	z-index: 2147483002;
 	width: 62px;
 	height: 62px;
@@ -189,7 +189,7 @@
 	position: fixed;
 	right: 26px;
 	/* Sits above the FAB, which itself sits above the audio bottom bar. */
-	bottom: calc(104px + var(--audio-bottom-bar-height, 0px));
+	bottom: calc(104px + var(--bottom-bar-height, 0px));
 	z-index: 2147483001;
 	width: 392px;
 	max-width: calc(100vw - 32px);

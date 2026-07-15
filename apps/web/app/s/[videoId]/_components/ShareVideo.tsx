@@ -25,6 +25,7 @@ import { CapAudioPlayer } from "./CapAudioPlayer";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
 import { GenerateStrip } from "./GenerateStrip";
+import { MiniPlayerController } from "./MiniPlayerController";
 import {
 	shouldDeferPlaybackSource,
 	shouldReloadPlaybackAfterUploadCompletes,
@@ -143,12 +144,7 @@ export const ShareVideo = forwardRef<
 		// toggle; an explicit "true" preference is respected.
 		const [isPinned, setIsPinnedState] = useState<boolean>(() => {
 			if (typeof window === "undefined") return false;
-			const stored = localStorage.getItem("videoPinned");
-			// Audio meetings run long and the player lives at the top of the page, so
-			// once you scroll into the transcript there is no way to pause. Default
-			// audio to pinned (a Spotify-style bottom bar) unless the user opted out.
-			if (stored === null && data.source?.type === "webAudio") return true;
-			return stored === "true";
+			return localStorage.getItem("videoPinned") === "true";
 		});
 
 		const setIsPinned = useCallback((pinned: boolean) => {
@@ -160,30 +156,14 @@ export const ShareVideo = forwardRef<
 
 		const wrapperRef = useRef<HTMLDivElement>(null);
 
-		const isWebAudioSource = data.source?.type === "webAudio";
-		// Audio + pinned renders as a fixed bottom bar (Spotify-style); video +
-		// pinned stays a sticky-top frame.
-		const audioBottomBar = isWebAudioSource && isPinned;
-
-		// Write --pinned-player-height CSS var via ResizeObserver when pinned. For
-		// the bottom bar we also (a) pad the page bottom by that height so content
-		// can scroll clear, and (b) publish --audio-bottom-bar-height so anything
-		// else fixed to the bottom (the AI chat FAB) can lift above the bar instead
-		// of overlapping it.
+		// Write --pinned-player-height CSS var via ResizeObserver when pinned, so
+		// scroll targets (transcript lines) clear the sticky-top player.
 		useEffect(() => {
-			const clear = () => {
+			if (!isPinned) {
 				document.documentElement.style.setProperty(
 					"--pinned-player-height",
 					"0px",
 				);
-				document.documentElement.style.setProperty(
-					"--audio-bottom-bar-height",
-					"0px",
-				);
-				document.body.style.paddingBottom = "";
-			};
-			if (!isPinned) {
-				clear();
 				return;
 			}
 			const el = wrapperRef.current;
@@ -195,15 +175,32 @@ export const ShareVideo = forwardRef<
 					"--pinned-player-height",
 					`${h}px`,
 				);
-				document.documentElement.style.setProperty(
-					"--audio-bottom-bar-height",
-					audioBottomBar ? `${h}px` : "0px",
-				);
-				document.body.style.paddingBottom = audioBottomBar ? `${h}px` : "";
 			});
 			ro.observe(el);
-			return clear;
-		}, [isPinned, audioBottomBar]);
+			return () => {
+				ro.disconnect();
+				document.documentElement.style.setProperty(
+					"--pinned-player-height",
+					"0px",
+				);
+			};
+		}, [isPinned]);
+
+		// Show the bottom mini-controller once the main player has scrolled fully
+		// out of view. When pinned (sticky-top) the player never leaves the
+		// viewport, so this naturally stays false and the mini bar doesn't appear.
+		const [playerOffscreen, setPlayerOffscreen] = useState(false);
+		useEffect(() => {
+			const el = wrapperRef.current;
+			if (!el) return;
+			const io = new IntersectionObserver(
+				([entry]) => setPlayerOffscreen(!!entry && !entry.isIntersecting),
+				{ threshold: 0 },
+			);
+			io.observe(el);
+			return () => io.disconnect();
+		}, []);
+
 		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(
 			null,
 		);
@@ -495,24 +492,15 @@ export const ShareVideo = forwardRef<
 			<>
 				<div
 					ref={wrapperRef}
-					className={audioBottomBar ? "cap-audio-bottom-bar" : undefined}
 					style={
-						audioBottomBar
+						isPinned
 							? {
-									position: "fixed",
-									left: 0,
-									right: 0,
-									bottom: 0,
-									zIndex: 40,
+									position: "sticky",
+									top: 12,
+									zIndex: 20,
+									maxHeight: "48vh",
 								}
-							: isPinned
-								? {
-										position: "sticky",
-										top: 12,
-										zIndex: 20,
-										maxHeight: "48vh",
-									}
-								: { position: "static" }
+							: { position: "static" }
 					}
 				>
 					{isWebAudio ? (
@@ -678,6 +666,14 @@ export const ShareVideo = forwardRef<
 					{/* end isWebAudio ternary */}
 				</div>
 				{/* end sticky wrapper */}
+
+				{/* Slim always-reachable controller — appears once the main player has
+				    scrolled out of view, for both audio and video. */}
+				<MiniPlayerController
+					videoRef={videoRef}
+					visible={playerOffscreen}
+					title={data.name}
+				/>
 
 				{!data.owner.isPro && (
 					<div className="absolute top-4 left-4 z-30">
