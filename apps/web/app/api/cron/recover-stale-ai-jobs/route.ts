@@ -98,8 +98,9 @@ async function handler(request: Request) {
 			} else {
 				// Stranded AI generation: startAiGeneration bails out early when the
 				// status is still QUEUED/PROCESSING, so clear it (and record the
-				// attempt) first, then re-fire via the same startAiGeneration helper
-				// used by retry-ai.
+				// attempt) first, then re-fire. force=true because a stranded job may
+				// carry stale summary/chapters — without it the workflow's own
+				// "already generated" guard throws and re-strands the job.
 				await db()
 					.update(videos)
 					.set({
@@ -111,7 +112,7 @@ async function handler(request: Request) {
 					})
 					.where(eq(videos.id, video.id));
 
-				await startAiGeneration(video.id, video.ownerId);
+				await startAiGeneration(video.id, video.ownerId, true);
 			}
 
 			recovered.push(video.id);
