@@ -166,12 +166,18 @@ export const ShareVideo = forwardRef<
 		const audioBottomBar = isWebAudioSource && isPinned;
 
 		// Write --pinned-player-height CSS var via ResizeObserver when pinned. For
-		// the bottom bar we also pad the page bottom by that height so the last of
-		// the content can scroll clear of the fixed bar.
+		// the bottom bar we also (a) pad the page bottom by that height so content
+		// can scroll clear, and (b) publish --audio-bottom-bar-height so anything
+		// else fixed to the bottom (the AI chat FAB) can lift above the bar instead
+		// of overlapping it.
 		useEffect(() => {
 			const clear = () => {
 				document.documentElement.style.setProperty(
 					"--pinned-player-height",
+					"0px",
+				);
+				document.documentElement.style.setProperty(
+					"--audio-bottom-bar-height",
 					"0px",
 				);
 				document.body.style.paddingBottom = "";
@@ -188,6 +194,10 @@ export const ShareVideo = forwardRef<
 				document.documentElement.style.setProperty(
 					"--pinned-player-height",
 					`${h}px`,
+				);
+				document.documentElement.style.setProperty(
+					"--audio-bottom-bar-height",
+					audioBottomBar ? `${h}px` : "0px",
 				);
 				document.body.style.paddingBottom = audioBottomBar ? `${h}px` : "";
 			});
