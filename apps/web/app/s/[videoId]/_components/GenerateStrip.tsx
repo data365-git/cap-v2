@@ -40,6 +40,14 @@ const PHASE_WEIGHTS: Record<string, number> = {
 };
 
 // ETA constants (seconds)
+// Poll pacing. Rather than a fixed "give up after 15 min" cap (which false-fails
+// on long recordings that split into dozens of chunks), we keep polling as long
+// as the pipeline is still advancing and only surface "refresh the page" after a
+// genuine stall — no progress for POLL_STALL_LIMIT consecutive 4s ticks. A high
+// absolute ceiling is kept purely as a runaway backstop.
+const POLL_STALL_LIMIT = 75; // 75 × 4s = 5 min of no progress → stalled
+const POLL_HARD_CAP = 2700; // 2700 × 4s = 3 h absolute ceiling
+
 const DEFAULT_CHUNK_SEC = 45;
 const ANALYZE_SEC = 25;
 const INDEX_SEC = 15;
@@ -196,6 +204,12 @@ export function GenerateStrip({
 		null,
 	);
 	const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Stall detection: a signature of the latest server progress + how many
+	// consecutive polls have seen no change. Reset whenever a poll is (re)started.
+	const pollStallRef = useRef<{ sig: string; count: number }>({
+		sig: "",
+		count: 0,
+	});
 
 	// Per-chunk elapsed time counter (ticks every 1s while activeUnitStartedAt is set)
 	const [chunkElapsedSec, setChunkElapsedSec] = useState(0);
@@ -435,12 +449,51 @@ export function GenerateStrip({
 		stopCountdown();
 	}, [stopCountdown]);
 
+	// Record whether the server's progress changed since the last poll. Advancing
+	// progress resets the stall counter; unchanged progress increments it.
+	const registerPollProgress = useCallback((status: unknown): void => {
+		const s = status as {
+			transcriptionStatus?: string | null;
+			aiGenerationStatus?: string | null;
+			pipelineProgress?: {
+				phases?: {
+					key: string;
+					status: string;
+					done: number;
+					total: number;
+				}[];
+			};
+		} | null;
+		const phases =
+			s?.pipelineProgress?.phases
+				?.map((p) => `${p.key}:${p.status}:${p.done}/${p.total}`)
+				.join("|") ?? "";
+		const sig = `${s?.transcriptionStatus ?? ""};${s?.aiGenerationStatus ?? ""};${phases}`;
+		if (sig !== pollStallRef.current.sig) {
+			pollStallRef.current = { sig, count: 0 };
+		} else {
+			pollStallRef.current.count += 1;
+		}
+	}, []);
+
+	// Give up watching only after a real stall (no progress for POLL_STALL_LIMIT
+	// ticks) or the absolute ceiling — never on a long-but-advancing job.
+	const pollExhausted = useCallback(
+		(attempt: number): boolean =>
+			pollStallRef.current.count >= POLL_STALL_LIMIT ||
+			attempt >= POLL_HARD_CAP,
+		[],
+	);
+
 	// Poll AI generation status
 	const pollAi = useCallback(
 		(attempt: number) => {
 			pollRef.current = setTimeout(async () => {
+				if (attempt === 0) pollStallRef.current = { sig: "", count: 0 };
+				let latestStatus: unknown = null;
 				try {
 					const status = await getVideoStatus(videoId as Video.VideoId);
+					latestStatus = status;
 					if (status && "aiGenerationStatus" in status) {
 						const aiStatus = status.aiGenerationStatus;
 						const pp = status.pipelineProgress;
@@ -481,12 +534,12 @@ export function GenerateStrip({
 						}
 					}
 				} catch {
-					// Ignore transient errors
+					// Ignore transient errors (don't count as a stall).
 				}
 
-				// 225 × 4s = 15 min — covers a long video's AI phase end-to-end without
-				// false-failing while the workflow is still progressing server-side.
-				if (attempt < 225) {
+				if (latestStatus) registerPollProgress(latestStatus);
+
+				if (!pollExhausted(attempt)) {
 					pollAi(attempt + 1);
 				} else {
 					stopCountdown();
@@ -495,7 +548,14 @@ export function GenerateStrip({
 				}
 			}, 4000);
 		},
-		[videoId, applyPipelineProgress, stopCountdown, router],
+		[
+			videoId,
+			applyPipelineProgress,
+			stopCountdown,
+			router,
+			registerPollProgress,
+			pollExhausted,
+		],
 	);
 
 	const startAiPhase = useCallback(async () => {
@@ -533,8 +593,11 @@ export function GenerateStrip({
 	const pollTranscript = useCallback(
 		(attempt: number) => {
 			pollRef.current = setTimeout(async () => {
+				if (attempt === 0) pollStallRef.current = { sig: "", count: 0 };
+				let latestStatus: unknown = null;
 				try {
 					const status = await getVideoStatus(videoId as Video.VideoId);
+					latestStatus = status;
 					if (status && "transcriptionStatus" in status) {
 						const ts = status.transcriptionStatus;
 						const pp = status.pipelineProgress;
@@ -576,12 +639,12 @@ export function GenerateStrip({
 						}
 					}
 				} catch {
-					// Ignore transient errors
+					// Ignore transient errors (don't count as a stall).
 				}
 
-				// 225 × 4s = 15 min — covers a chunked long video's transcription end-to-
-				// end without false-failing while chunks are still being processed.
-				if (attempt < 225) {
+				if (latestStatus) registerPollProgress(latestStatus);
+
+				if (!pollExhausted(attempt)) {
 					pollTranscript(attempt + 1);
 				} else {
 					stopCountdown();
@@ -590,7 +653,14 @@ export function GenerateStrip({
 				}
 			}, 4000);
 		},
-		[videoId, applyPipelineProgress, stopCountdown, startAiPhase],
+		[
+			videoId,
+			applyPipelineProgress,
+			stopCountdown,
+			startAiPhase,
+			registerPollProgress,
+			pollExhausted,
+		],
 	);
 
 	// Mount-resume: if a generation was already in flight on the server when this
