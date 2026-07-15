@@ -89,7 +89,7 @@ export async function startAiGeneration(
 			})
 			.where(eq(videos.id, videoId));
 
-		generateAiWorkflow({ videoId, userId }).catch((err) => {
+		generateAiWorkflow({ videoId, userId, force }).catch((err) => {
 			console.error(
 				`[startAiGeneration] Inline workflow failed for video ${videoId}:`,
 				err,

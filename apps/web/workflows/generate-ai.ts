@@ -35,6 +35,8 @@ import { decodeStorageVideo } from "@/lib/video-storage";
 interface GenerateAiWorkflowPayload {
 	videoId: string;
 	userId: string;
+	/** Regenerate even when AI metadata already exists (e.g. after a re-transcription). */
+	force?: boolean;
 }
 
 interface VideoData {
@@ -155,9 +157,9 @@ export function shouldReplaceVideoTitle({
 export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 	"use workflow";
 
-	const { videoId, userId } = payload;
+	const { videoId, userId, force = false } = payload;
 
-	const videoData = await validateAndSetProcessing(videoId);
+	const videoData = await validateAndSetProcessing(videoId, force);
 
 	const transcript = await fetchTranscript(videoId, userId, videoData.video);
 
@@ -294,7 +296,10 @@ async function patchPipelinePhase(
 		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
-async function validateAndSetProcessing(videoId: string): Promise<VideoData> {
+async function validateAndSetProcessing(
+	videoId: string,
+	force = false,
+): Promise<VideoData> {
 	"use step";
 
 	if (!serverEnv().GEMINI_API_KEY) {
@@ -318,7 +323,10 @@ async function validateAndSetProcessing(videoId: string): Promise<VideoData> {
 		throw new FatalError("Transcription not complete");
 	}
 
-	if (metadata.summary && metadata.chapters) {
+	// force bypasses this guard — a re-transcription intentionally regenerates the
+	// summary/chapters. Without threading force here, a forced regen set QUEUED,
+	// triggered this workflow, then died on this throw and stranded the job.
+	if (!force && metadata.summary && metadata.chapters) {
 		throw new FatalError("AI metadata already generated");
 	}
 
