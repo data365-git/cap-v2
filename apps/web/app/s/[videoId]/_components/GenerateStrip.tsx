@@ -116,13 +116,6 @@ function formatCountdown(sec: number): string {
 	return `${s}s`;
 }
 
-function formatPhaseEta(sec: number): string {
-	const m = Math.floor(sec / 60);
-	const s = Math.floor(sec % 60);
-	if (m > 0) return `~${m}m ${s}s`;
-	return `~${s}s`;
-}
-
 function computeRemainingConstants(
 	phases: PipelinePhase[],
 	excludeKey?: string,
@@ -667,32 +660,21 @@ export function GenerateStrip({
 		if (p.status !== "active") return null;
 		if (p.key === "transcribe") {
 			if (p.total > 0 && p.activeUnitIndex != null) {
-				// Per-chunk live label with elapsed + server ETA hint.
+				// Per-chunk live label with elapsed. No ETA here — the single overall
+				// countdown at the top of the strip is the one time estimate; a second
+				// per-chunk "qoldi" next to it just reads as a contradiction.
 				const label = p.activeUnitLabel ?? "Gemini'ga yuborilmoqda…";
-				const etaPart =
-					p.activeUnitEtaSec != null ? ` · ~${p.activeUnitEtaSec}s qoldi` : "";
-				return `Transkripsiya — qism ${p.activeUnitIndex + 1}/${p.total} · ${label} · ${chunkElapsedSec}s${etaPart}`;
+				return `Transkripsiya — qism ${p.activeUnitIndex + 1}/${p.total} · ${label} · ${chunkElapsedSec}s`;
 			}
 			if (p.total > 0) {
-				// Fallback: no activeUnitIndex — show phase-level ETA (old behaviour).
-				const unitMs = p.unitTimesMs ?? [];
-				const mdn = medianOf(
-					unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000],
-				);
-				const remaining = Math.max(0, p.total - p.done);
-				const phaseSec = (remaining * mdn) / 1000;
-				return `${p.label} — ${p.done}/${p.total} qism · ${formatPhaseEta(phaseSec)}`;
+				// Fallback: no activeUnitIndex — just show progress, no second ETA.
+				return `${p.label} — ${p.done}/${p.total} qism`;
 			}
 		}
 		if (p.key === "index") {
 			if (p.total > 0) {
-				const unitMs = p.unitTimesMs ?? [];
-				const mdn = medianOf(
-					unitMs.length > 0 ? unitMs : [DEFAULT_CHUNK_SEC * 1000],
-				);
-				const remaining = Math.max(0, p.total - p.done);
-				const phaseSec = (remaining * mdn) / 1000;
-				return `${p.label} — ${p.done}/${p.total} qism · ${formatPhaseEta(phaseSec)}`;
+				// Progress only — the overall countdown at the top owns the ETA.
+				return `${p.label} — ${p.done}/${p.total} qism`;
 			}
 		}
 		if (p.key === "audio") {
