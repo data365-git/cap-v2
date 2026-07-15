@@ -21,6 +21,43 @@ import { PreUploadTrimmer } from "@/components/PreUploadTrimmer";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import { uploadWithTarget } from "@/utils/upload-target";
 
+/**
+ * Confirm whether processing actually started, used to swallow a false failure
+ * when the trigger server action's response timed out but the work began. Polls
+ * the durable upload phase for a few seconds. Any confirmation that the row is
+ * processing / already transcribed counts as started; a recorded processingError
+ * counts as a real failure.
+ */
+async function didProcessingStart(videoId: string): Promise<boolean> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		try {
+			const res = await fetch(
+				`/api/video/transcribe/status?videoId=${encodeURIComponent(videoId)}`,
+				{ cache: "no-store" },
+			);
+			if (res.ok) {
+				const data = (await res.json()) as {
+					phase?: string | null;
+					processingError?: string | null;
+					transcriptionStatus?: string | null;
+				};
+				if (data.processingError) return false;
+				if (
+					data.phase === "processing" ||
+					(data.transcriptionStatus != null &&
+						data.transcriptionStatus !== "ERROR")
+				) {
+					return true;
+				}
+			}
+		} catch {
+			// network blip — keep polling
+		}
+		await new Promise((r) => setTimeout(r, 1500));
+	}
+	return false;
+}
+
 export const ImportFilePage = ({
 	folderId,
 	context = "instruction",
@@ -513,13 +550,25 @@ async function uploadVideoForServerProcessing(
 				bucketId: videoData.bucketId,
 			});
 		} catch (triggerError) {
-			console.error("[CAP-IMPORT] Processing trigger failed:", triggerError);
-			toast.error(
-				"Upload succeeded but processing failed to start. Please try again.",
+			// The trigger kicks off a workflow and can take long enough that the
+			// server action's response times out at the transport layer even though
+			// processing started fine server-side — which showed users a red "failed
+			// to start" on a video that was, in fact, already processing. Before
+			// trusting the error, confirm against the durable upload phase.
+			const startedAnyway = await didProcessingStart(uploadId);
+			if (!startedAnyway) {
+				console.error("[CAP-IMPORT] Processing trigger failed:", triggerError);
+				toast.error(
+					"Upload succeeded but processing failed to start. Please try again.",
+				);
+				setUploadStatus(undefined);
+				setSpeedLabel(null);
+				return false;
+			}
+			console.warn(
+				"[CAP-IMPORT] Trigger response failed but processing did start; continuing.",
+				triggerError,
 			);
-			setUploadStatus(undefined);
-			setSpeedLabel(null);
-			return false;
 		}
 
 		setUploadStatus({

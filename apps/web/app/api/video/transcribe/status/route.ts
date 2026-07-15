@@ -1,6 +1,6 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
-import { videos } from "@cap/database/schema";
+import { videos, videoUploads } from "@cap/database/schema";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -39,8 +39,24 @@ export async function GET(request: NextRequest) {
 		);
 	}
 
+	// Upload phase is set to "processing" the moment the pipeline is kicked off,
+	// before the (slow) workflow enqueue. It is the reliable "processing has
+	// actually started" signal — the client uses it to distinguish a genuine
+	// start failure from a server action whose response merely timed out.
+	const [upload] = await db()
+		.select({
+			phase: videoUploads.phase,
+			processingError: videoUploads.processingError,
+		})
+		.from(videoUploads)
+		.where(eq(videoUploads.videoId, videoId));
+
 	return Response.json(
-		{ transcriptionStatus: video[0].transcriptionStatus },
+		{
+			transcriptionStatus: video[0].transcriptionStatus,
+			phase: upload?.phase ?? null,
+			processingError: upload?.processingError ?? null,
+		},
 		{ status: 200 },
 	);
 }

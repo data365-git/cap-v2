@@ -501,8 +501,8 @@ export function CapAudioPlayer({
 							<button
 								type="button"
 								className="audio-ctrl"
-								title={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
-								aria-label={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
+								title={isPinned ? "Panelni ajratish" : "Pastda qotirish"}
+								aria-label={isPinned ? "Panelni ajratish" : "Pastda qotirish"}
 								onClick={onTogglePin}
 							>
 								{isPinned ? <PinOffIcon /> : <PinOnIcon />}

@@ -143,7 +143,12 @@ export const ShareVideo = forwardRef<
 		// toggle; an explicit "true" preference is respected.
 		const [isPinned, setIsPinnedState] = useState<boolean>(() => {
 			if (typeof window === "undefined") return false;
-			return localStorage.getItem("videoPinned") === "true";
+			const stored = localStorage.getItem("videoPinned");
+			// Audio meetings run long and the player lives at the top of the page, so
+			// once you scroll into the transcript there is no way to pause. Default
+			// audio to pinned (a Spotify-style bottom bar) unless the user opted out.
+			if (stored === null && data.source?.type === "webAudio") return true;
+			return stored === "true";
 		});
 
 		const setIsPinned = useCallback((pinned: boolean) => {
@@ -155,13 +160,24 @@ export const ShareVideo = forwardRef<
 
 		const wrapperRef = useRef<HTMLDivElement>(null);
 
-		// Write --pinned-player-height CSS var via ResizeObserver when pinned
+		const isWebAudioSource = data.source?.type === "webAudio";
+		// Audio + pinned renders as a fixed bottom bar (Spotify-style); video +
+		// pinned stays a sticky-top frame.
+		const audioBottomBar = isWebAudioSource && isPinned;
+
+		// Write --pinned-player-height CSS var via ResizeObserver when pinned. For
+		// the bottom bar we also pad the page bottom by that height so the last of
+		// the content can scroll clear of the fixed bar.
 		useEffect(() => {
-			if (!isPinned) {
+			const clear = () => {
 				document.documentElement.style.setProperty(
 					"--pinned-player-height",
 					"0px",
 				);
+				document.body.style.paddingBottom = "";
+			};
+			if (!isPinned) {
+				clear();
 				return;
 			}
 			const el = wrapperRef.current;
@@ -173,16 +189,11 @@ export const ShareVideo = forwardRef<
 					"--pinned-player-height",
 					`${h}px`,
 				);
+				document.body.style.paddingBottom = audioBottomBar ? `${h}px` : "";
 			});
 			ro.observe(el);
-			return () => {
-				ro.disconnect();
-				document.documentElement.style.setProperty(
-					"--pinned-player-height",
-					"0px",
-				);
-			};
-		}, [isPinned]);
+			return clear;
+		}, [isPinned, audioBottomBar]);
 		const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(
 			null,
 		);
@@ -474,15 +485,24 @@ export const ShareVideo = forwardRef<
 			<>
 				<div
 					ref={wrapperRef}
+					className={audioBottomBar ? "cap-audio-bottom-bar" : undefined}
 					style={
-						isPinned
+						audioBottomBar
 							? {
-									position: "sticky",
-									top: 12,
-									zIndex: 20,
-									maxHeight: "48vh",
+									position: "fixed",
+									left: 0,
+									right: 0,
+									bottom: 0,
+									zIndex: 40,
 								}
-							: { position: "static" }
+							: isPinned
+								? {
+										position: "sticky",
+										top: 12,
+										zIndex: 20,
+										maxHeight: "48vh",
+									}
+								: { position: "static" }
 					}
 				>
 					{isWebAudio ? (
