@@ -45,20 +45,18 @@ async function fetchWithTimeout(
 }
 
 /**
- * Transcription model. 2.5-flash, NOT 3-flash-preview — measured on a 300s slice
- * of a real Uzbek meeting, same prompt, thinking off:
+ * Transcription model — 3-flash-preview.
  *
- *                      coverage    cues   longest cue
- *   3-flash-preview    242s/300s     33      49.0s     <- drops 19% of the audio
- *   2.5-flash          300s/300s     79      14.2s
- *
- * 3-flash-preview collapses speech into huge cues and silently loses the tail —
- * the same timestamp compression that truncated a 36-min meeting to 26:50. That
- * is a transcription-quality defect, not a context-length one, and it reproduces
- * on a 5-minute chunk. 2.5-flash is also cheaper on output ($2.50 vs $3.00 /M).
+ * A 300s single-shot bake-off once favoured 2.5-flash (3-flash compressed
+ * timestamps and dropped ~19% of a 5-min slice). But that test was single-shot;
+ * we now chunk audio into ≤3-min windows, which BOUNDS 3-flash's timestamp drift
+ * to a single short chunk, so the coverage problem no longer applies. In return
+ * 3-flash follows the format instructions better — it keeps Russian in Cyrillic
+ * and recovers real speaker names, where 2.5-flash romanised Russian. Trade-off:
+ * 3-flash output is $3.00/M vs 2.5-flash $2.50/M. Overridable via GEMINI_MODEL.
  */
 export const GEMINI_PRIMARY_MODEL =
-	process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+	process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
 // No pricier fallback model by default. Escalating to gemini-2.5-pro on
 // transient errors multiplied cost ~6x (pro output is 4x flash) exactly when
 // the API was already rate-limiting us. Opt back in via GEMINI_FALLBACK_MODEL.
@@ -793,12 +791,17 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 				],
 				generationConfig: {
 					temperature: 0.1,
-					maxOutputTokens: 65536,
+					// A single chunk is ≤ a few minutes of speech — real transcript output
+					// is ~2-4k tokens. The only thing that ever needs more is a repetition
+					// loop (the "Ha. Ha. Ha…" failure), which bills every wasted token at
+					// the output rate. Capping at 16k lets any legit chunk through but
+					// stops a loop at 16k instead of 65k (≈4× less money burned per loop),
+					// and the MAX_TOKENS re-split still recovers the real content.
+					maxOutputTokens: 16384,
 					// Transcription is transduction, not reasoning — there is nothing for
-					// the model to think *about*. Gemini 3 thinks by default, and those
-					// tokens are drawn from maxOutputTokens: a 5-minute chunk hit the
-					// 65,536 cap on thinking alone and had to be re-split. Budget 0 both
-					// removes that failure mode and stops us paying output rates for it.
+					// the model to think *about*. Gemini thinks by default and those tokens
+					// are drawn from maxOutputTokens, so budget 0 both frees the cap for
+					// real output and stops us paying output rates for thinking.
 					thinkingConfig: { thinkingBudget: 0 },
 				},
 			}),
