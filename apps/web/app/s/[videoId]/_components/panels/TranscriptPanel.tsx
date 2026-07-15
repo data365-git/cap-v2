@@ -100,22 +100,29 @@ function vttTimeToSeconds(timeStr: string): number | null {
 	return null;
 }
 
+// Strip WebVTT voice tags. The opening <v Name> is consumed for the speaker
+// label; the closing </v> (and any stray tags) must not leak into the text —
+// they were rendering literally as "…oladi.</v>".
+function stripVoiceTags(t: string): string {
+	return t.replace(/<\/?v\b[^>]*>/gi, "").trim();
+}
+
 function extractSpeaker(text: string): { speaker: string; text: string } {
-	const match = text.match(/^<v\s+([^>]+)>(.*)$/);
+	const match = text.match(/^<v\s+([^>]+)>(.*)$/s);
 	if (match) {
 		return {
 			speaker: match[1]?.trim() ?? "Speaker",
-			text: match[2]?.trim() ?? text,
+			text: stripVoiceTags(match[2] ?? text),
 		};
 	}
 	const colonMatch = text.match(/^([^:]{1,30}):\s+(.+)$/);
 	if (colonMatch) {
 		return {
 			speaker: colonMatch[1]?.trim() ?? "Speaker",
-			text: colonMatch[2]?.trim() ?? text,
+			text: stripVoiceTags(colonMatch[2] ?? text),
 		};
 	}
-	return { speaker: "Speaker", text };
+	return { speaker: "Speaker", text: stripVoiceTags(text) };
 }
 
 function formatTimestamp(seconds: number): string {
@@ -193,14 +200,20 @@ export function TranscriptPanel({
 			transcriptionStatus === "SKIPPED";
 		const isInFlight =
 			!isDone &&
-			(transcriptionStatus === "PROCESSING" || transcriptionStatus === "QUEUED");
+			(transcriptionStatus === "PROCESSING" ||
+				transcriptionStatus === "QUEUED");
 
 		if (isInFlight) {
 			return (
 				<SkeletonGroup>
 					{[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-						<div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-							<Skeleton style={{ width: 36, height: 16, flexShrink: 0, marginTop: 2 }} />
+						<div
+							key={i}
+							style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
+						>
+							<Skeleton
+								style={{ width: 36, height: 16, flexShrink: 0, marginTop: 2 }}
+							/>
 							<Skeleton style={{ flex: 1, height: 16 }} />
 						</div>
 					))}
@@ -253,7 +266,9 @@ export function TranscriptPanel({
 								<span className="transcript-meta-speaker">{cue.speaker}</span>
 								<span className="transcript-meta-time">{cue.timestamp}</span>
 							</div>
-							<div className="transcript-text"><RichText inline>{cue.text}</RichText></div>
+							<div className="transcript-text">
+								<RichText inline>{cue.text}</RichText>
+							</div>
 						</div>
 						<button
 							type="button"
