@@ -17,7 +17,7 @@ jobs:
       - name: Ping recover-stale-ai-jobs
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: https://capweb-production-dd85.up.railway.app
+          APP_URL: https://web-production-e6fe4.up.railway.app
         run: |
           if [ -z "$CRON_SECRET" ]; then
             echo "CRON_SECRET secret not set yet — skipping."
