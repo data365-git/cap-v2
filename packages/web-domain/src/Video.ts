@@ -38,7 +38,14 @@ export class Video extends Schema.Class<Video>("Video")({
 	storageIntegrationId: Schema.OptionFromNullOr(StorageIntegrationId),
 	folderId: Schema.OptionFromNullOr(FolderId),
 	transcriptionStatus: Schema.OptionFromNullOr(
-		Schema.Literal("PROCESSING", "COMPLETE", "ERROR", "SKIPPED", "NO_AUDIO"),
+		Schema.Literal(
+			"PROCESSING",
+			"COMPLETE",
+			"ERROR",
+			"SKIPPED",
+			"NO_AUDIO",
+			"CANCELLED",
+		),
 	),
 	width: Schema.OptionFromNullOr(Schema.Number),
 	height: Schema.OptionFromNullOr(Schema.Number),

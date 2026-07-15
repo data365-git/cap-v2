@@ -136,6 +136,13 @@ export interface VideoMetadata {
 	 */
 	transcriptionError?: string;
 	/**
+	 * Set by the cancel endpoint to request that an in-flight transcription stop.
+	 * The workflow checks this between chunk batches (cooperative cancellation:
+	 * the running background job can't be force-killed, but it stops making
+	 * further Gemini calls at the next checkpoint) and settles as CANCELLED.
+	 */
+	cancelRequested?: boolean;
+	/**
 	 * Per-chunk VTT results for parallel audio transcription (T12 path).
 	 * Keys are chunk indices (as strings). Written after each chunk succeeds so
 	 * a retry can skip already-completed chunks without re-transcribing them.

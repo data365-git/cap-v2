@@ -94,6 +94,10 @@ export async function transcribeVideoWorkflow(
 			};
 		}
 
+		// Cheap early exit if the user cancelled during audio extraction, before
+		// any Gemini calls are made.
+		await assertNotCancelled(videoId);
+
 		const [transcription] = await Promise.all([
 			transcribeAudio(
 				audio.audioUrl,
@@ -107,6 +111,10 @@ export async function transcribeVideoWorkflow(
 				isAudioSource,
 			),
 		]);
+
+		// Final guard: if a cancel landed during the last chunk, stop before we
+		// persist a transcript / mark COMPLETE / fire AI.
+		await assertNotCancelled(videoId);
 
 		await saveTranscription(
 			videoId,
@@ -129,6 +137,13 @@ export async function transcribeVideoWorkflow(
 			);
 		}
 	} catch (error) {
+		if (error instanceof TranscriptionCancelledError) {
+			// User-requested stop: settle a clean CANCELLED state, skip AI, and do
+			// not surface an error toast. cleanupTempAudio still runs.
+			await markCancelled(videoId);
+			await cleanupTempAudio(videoId, userId, videoData.video);
+			return { success: true, message: "Transcription cancelled" };
+		}
 		await markError(videoId, describeTranscriptionError(error));
 		await markActivePhaseError(videoId);
 		await cleanupTempAudio(videoId, userId, videoData.video);
@@ -184,11 +199,20 @@ async function validateVideo(videoId: string): Promise<VideoData> {
 		.set({ transcriptionStatus: "PROCESSING" })
 		.where(eq(videos.id, videoId as Video.VideoId));
 
-	// Clear any stale failure reason so a successful retry doesn't surface an
-	// old error. Read-modify-write to preserve aiSummary/refinedTranscript/etc.
+	// Clear any stale failure reason AND a stale cancel marker so a retry starts
+	// clean — otherwise a leftover cancelRequested:true would immediately abort
+	// the new run at the first checkpoint. Read-modify-write to preserve
+	// aiSummary/refinedTranscript/etc.
 	const staleMetadata = (result.video.metadata as VideoMetadata) || {};
-	if (staleMetadata.transcriptionError !== undefined) {
-		const { transcriptionError: _cleared, ...rest } = staleMetadata;
+	if (
+		staleMetadata.transcriptionError !== undefined ||
+		staleMetadata.cancelRequested !== undefined
+	) {
+		const {
+			transcriptionError: _clearedError,
+			cancelRequested: _clearedCancel,
+			...rest
+		} = staleMetadata;
 		await db()
 			.update(videos)
 			.set({ metadata: rest })
@@ -368,6 +392,58 @@ async function markError(videoId: string, reason?: string): Promise<void> {
 		await patchVideoMetadata(videoId, {
 			transcriptionError: reason.slice(0, 200),
 		});
+	}
+}
+
+/**
+ * Thrown by the cancellation checkpoints when the user requested a stop. Extends
+ * FatalError so the workflow runtime does not retry it, and is caught in the
+ * workflow's error handler to settle a clean CANCELLED state (not ERROR).
+ */
+class TranscriptionCancelledError extends FatalError {
+	constructor() {
+		super("Transcription cancelled by user");
+		this.name = "TranscriptionCancelledError";
+	}
+}
+
+/**
+ * Cooperative cancellation checkpoint. Reads the durable cancel marker and, if
+ * set, throws to unwind the workflow before the next (billable) Gemini call.
+ * The running job cannot be force-killed, so this is how a cancel actually stops
+ * the spend: at the next checkpoint between chunk batches.
+ */
+async function assertNotCancelled(videoId: string): Promise<void> {
+	const [row] = await db()
+		.select({
+			metadata: videos.metadata,
+			status: videos.transcriptionStatus,
+		})
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+	const meta = (row?.metadata as VideoMetadata) || {};
+	if (meta.cancelRequested === true || row?.status === "CANCELLED") {
+		throw new TranscriptionCancelledError();
+	}
+}
+
+async function markCancelled(videoId: string): Promise<void> {
+	"use step";
+
+	await db()
+		.update(videos)
+		.set({ transcriptionStatus: "CANCELLED" })
+		.where(eq(videos.id, videoId as Video.VideoId));
+
+	// Flip the active pipeline phase to error so the UI stops showing a spinner.
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+	const progress = ((row?.metadata as VideoMetadata) || {}).pipelineProgress;
+	const active = progress?.phases.find((p) => p.status === "active");
+	if (active) {
+		await patchPipelinePhase(videoId, active.key, { status: "error" });
 	}
 }
 
@@ -958,6 +1034,9 @@ async function transcribeAudio(
 				.filter((i) => orderedResults[i] === null);
 
 			for (let b = 0; b < pendingIndices.length; b += AUDIO_PARALLEL_POOL) {
+				// Stop before dispatching the next (billable) batch if cancelled.
+				await assertNotCancelled(context.videoId);
+
 				const batchIndices = pendingIndices.slice(b, b + AUDIO_PARALLEL_POOL);
 				const batchSlices = batchIndices
 					.map((i) => slices[i])
@@ -1108,6 +1187,9 @@ async function transcribeAudio(
 		} else {
 			// ─── Original sequential path for video sources ──────────────────────
 			for (let i = 0; i < slices.length; i++) {
+				// Stop before transcribing the next (billable) chunk if cancelled.
+				await assertNotCancelled(context.videoId);
+
 				const slice = slices[i];
 				if (!slice) continue;
 				const chunkLabel = `${i + 1}/${slices.length}`;

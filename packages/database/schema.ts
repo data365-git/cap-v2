@@ -376,7 +376,7 @@ export const videos = mysqlTable(
 			defaultPlaybackSpeed?: number;
 		}>(),
 		transcriptionStatus: varchar("transcriptionStatus", { length: 255 }).$type<
-			"PROCESSING" | "COMPLETE" | "ERROR" | "SKIPPED" | "NO_AUDIO"
+			"PROCESSING" | "COMPLETE" | "ERROR" | "SKIPPED" | "NO_AUDIO" | "CANCELLED"
 		>(),
 		source: json("source")
 			.$type<
