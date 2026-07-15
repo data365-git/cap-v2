@@ -500,7 +500,11 @@ export function GenerateStrip({
 
 	const startAiPhase = useCallback(async () => {
 		try {
-			const res = await fetch(`/api/videos/${videoId}/retry-ai`, {
+			// force=1: this fires when the user explicitly generates/retries. Without
+			// it, a video that already has a summary is rejected by the workflow's
+			// "already generated" guard, which set QUEUED then died and stranded the
+			// job (surfacing as a spurious "Xato yuz berdi"). force means regenerate.
+			const res = await fetch(`/api/videos/${videoId}/retry-ai?force=1`, {
 				method: "POST",
 			});
 			if (!res.ok) {
