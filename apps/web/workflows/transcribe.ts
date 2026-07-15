@@ -49,6 +49,7 @@ import {
 	AUDIO_SINGLE_SHOT_MAX_SEC,
 	CHUNK_THRESHOLD_SEC,
 	shouldChunkForTranscription,
+	transcriptHasCues,
 } from "@/lib/transcription-chunking";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
@@ -116,13 +117,20 @@ export async function transcribeVideoWorkflow(
 		// persist a transcript / mark COMPLETE / fire AI.
 		await assertNotCancelled(videoId);
 
-		await saveTranscription(
+		const saved = await saveTranscription(
 			videoId,
 			userId,
 			videoData.video,
 			transcription.transcriptVtt,
 			transcription.allComplete,
 		);
+
+		if (!saved) {
+			// Empty transcript — already marked ERROR, and the existing (good)
+			// transcript, if any, was preserved. Do not index or run AI on nothing.
+			await cleanupTempAudio(videoId, userId, videoData.video);
+			return { success: true, message: "Transcription empty - skipped" };
+		}
 
 		if (transcription.allComplete) {
 			await chunkEmbedAndStore(
@@ -1261,8 +1269,19 @@ async function saveTranscription(
 	video: typeof videos.$inferSelect,
 	transcription: string,
 	allComplete: boolean,
-): Promise<void> {
+): Promise<boolean> {
 	"use step";
+
+	// Validate BEFORE writing. A re-transcription that came back empty (a cancel,
+	// a failed run, silent audio) must NOT overwrite an existing good transcript
+	// with an empty file — which previously left the video COMPLETE but with a
+	// 0-byte VTT, so the Transcript tab showed "No transcript available" while the
+	// old AI summary still displayed. Returns false so the caller skips indexing
+	// and AI generation.
+	if (!transcriptHasCues(transcription)) {
+		await markError(videoId, "Transkripsiya bo'sh — qayta urinib ko'ring");
+		return false;
+	}
 
 	const [bucket] = await Storage.getAccessForVideo(
 		decodeStorageVideo(video),
@@ -1274,11 +1293,6 @@ async function saveTranscription(
 		})
 		.pipe(runPromise);
 
-	if (!transcription || transcription.trim() === "WEBVTT\n\n") {
-		await markError(videoId, "Transkripsiya bo'sh — qayta urinib ko'ring");
-		return;
-	}
-
 	await db()
 		.update(videos)
 		.set({ transcriptionStatus: "COMPLETE" })
@@ -1289,6 +1303,7 @@ async function saveTranscription(
 			`[CAP-TRANSCRIBE] Transcription partially truncated for ${videoId} — marked COMPLETE with available cues`,
 		);
 	}
+	return true;
 }
 
 async function chunkEmbedAndStore(

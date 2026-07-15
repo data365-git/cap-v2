@@ -68,3 +68,24 @@ describe("shouldChunkForTranscription", () => {
 		).toBe(true);
 	});
 });
+
+import { transcriptHasCues } from "@/lib/transcription-chunking";
+
+describe("transcriptHasCues", () => {
+	it("accepts a real transcript with cues", () => {
+		const vtt =
+			"WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Aziz>Salom, xush kelibsiz.";
+		expect(transcriptHasCues(vtt)).toBe(true);
+	});
+
+	it("rejects empty / header-only results that must not overwrite a good transcript", () => {
+		expect(transcriptHasCues("")).toBe(false);
+		expect(transcriptHasCues(null)).toBe(false);
+		expect(transcriptHasCues(undefined)).toBe(false);
+		expect(transcriptHasCues("WEBVTT")).toBe(false);
+		expect(transcriptHasCues("WEBVTT\n\n")).toBe(false);
+		expect(transcriptHasCues("WEBVTT\n   \n  ")).toBe(false);
+		// text but no cue timings is not a usable transcript
+		expect(transcriptHasCues("WEBVTT\n\njust some words")).toBe(false);
+	});
+});
