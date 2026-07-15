@@ -18,7 +18,8 @@ type TranscriptionStatus =
 	| "COMPLETE"
 	| "ERROR"
 	| "SKIPPED"
-	| "NO_AUDIO";
+	| "NO_AUDIO"
+	| "CANCELLED";
 
 type AiGenerationStatus =
 	| "QUEUED"

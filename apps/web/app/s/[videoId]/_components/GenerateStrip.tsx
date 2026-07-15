@@ -28,7 +28,8 @@ type StripPhase =
 	| "running"
 	| "done"
 	| "error-empty"
-	| "error";
+	| "error"
+	| "cancelled";
 
 // Phase weights for overall progress
 const PHASE_WEIGHTS: Record<string, number> = {
@@ -550,6 +551,12 @@ export function GenerateStrip({
 							return;
 						}
 
+						if (ts === "CANCELLED") {
+							stopCountdown();
+							setPhase("cancelled");
+							return;
+						}
+
 						if (ts && TRANSCRIPT_ERROR_STATES.has(ts)) {
 							stopCountdown();
 							const transcriptionError = status.transcriptionError;
@@ -655,6 +662,29 @@ export function GenerateStrip({
 		await kickOffPipeline(false);
 	}, [kickOffPipeline]);
 
+	const [cancelling, setCancelling] = useState(false);
+	const onCancel = useCallback(async () => {
+		if (cancelling) return;
+		setCancelling(true);
+		try {
+			const res = await fetch(`/api/videos/${videoId}/cancel-processing`, {
+				method: "POST",
+			});
+			if (res.ok) {
+				// The workflow stops at its next checkpoint; reflect the terminal state
+				// immediately so the strip stops spinning.
+				stopCountdown();
+				setPhase("cancelled");
+			}
+			// On non-OK (e.g. 409 already finished) the pollers reconcile to the real
+			// terminal state on their next tick.
+		} catch {
+			// Network blip — the poller will pick up the real state.
+		} finally {
+			setCancelling(false);
+		}
+	}, [videoId, cancelling, stopCountdown]);
+
 	// --- Phase chip detail line ---
 	const renderPhaseDetail = (p: PipelinePhase): string | null => {
 		if (p.status !== "active") return null;
@@ -699,6 +729,7 @@ export function GenerateStrip({
 	const isRunning = phase === "running";
 	const isDone = phase === "done";
 	const isError = phase === "error" || phase === "error-empty";
+	const isCancelled = phase === "cancelled";
 	const pctInt = Math.round(progressPct * 100);
 
 	return (
@@ -755,14 +786,20 @@ export function GenerateStrip({
 				{/* Title + live action label */}
 				<div className="gen-text">
 					<div className="gen-title">
-						{isError ? "Xato yuz berdi" : "AI insights tayyorlash"}
+						{isError
+							? "Xato yuz berdi"
+							: isCancelled
+								? "Bekor qilindi"
+								: "AI insights tayyorlash"}
 					</div>
 					<div className="gen-sub">
 						{isError
 							? (errorMsg ?? "Qayta urinib ko'ring.")
-							: isRunning
-								? phaseSubtitle
-								: activeLabel}
+							: isCancelled
+								? "Transkripsiya bekor qilindi. Qayta boshlash mumkin."
+								: isRunning
+									? phaseSubtitle
+									: activeLabel}
 					</div>
 				</div>
 
@@ -813,6 +850,52 @@ export function GenerateStrip({
 							<span className="gen-btn-text">Retry</span>
 						</button>
 					)
+				) : isCancelled ? (
+					<button
+						type="button"
+						className="gen-btn gen-btn--retry"
+						onClick={onRetry}
+						aria-label="Restart transcription"
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" />
+							<path d="M3 3v5h5" />
+						</svg>
+						<span className="gen-btn-text">Qayta boshlash</span>
+					</button>
+				) : isRunning ? (
+					<button
+						type="button"
+						className="gen-btn gen-btn--cancel"
+						onClick={onCancel}
+						disabled={cancelling}
+						aria-label="Cancel transcription"
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<circle cx="12" cy="12" r="10" />
+							<line x1="15" y1="9" x2="9" y2="15" />
+							<line x1="9" y1="9" x2="15" y2="15" />
+						</svg>
+						<span className="gen-btn-text">
+							{cancelling ? "Bekor qilinmoqda…" : "Bekor qilish"}
+						</span>
+					</button>
 				) : (
 					<button
 						type="button"

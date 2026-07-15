@@ -2,585 +2,629 @@
 /* All tokens copied verbatim from Share Page - Redesigned.html */
 
 .gen-strip {
-  position: relative;
-  margin-top: 18px;
-  border-radius: 18px;
-  padding: 18px 20px 16px;
-  background: linear-gradient(135deg, #0e1a3a 0%, #122249 38%, #1f1740 100%);
-  color: #fff;
-  overflow: hidden;
-  isolation: isolate;
-  box-shadow:
-    0 18px 40px -16px rgba(15, 23, 42, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transition: padding 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+	position: relative;
+	margin-top: 18px;
+	border-radius: 18px;
+	padding: 18px 20px 16px;
+	background: linear-gradient(135deg, #0e1a3a 0%, #122249 38%, #1f1740 100%);
+	color: #fff;
+	overflow: hidden;
+	isolation: isolate;
+	box-shadow:
+		0 18px 40px -16px rgba(15, 23, 42, 0.5),
+		inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	transition: padding 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .gen-aura {
-  position: absolute;
-  inset: -40% -10% auto auto;
-  width: 60%;
-  height: 220%;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(closest-side, rgba(96, 165, 250, 0.55), transparent 70%),
-    radial-gradient(
-      closest-side at 30% 70%,
-      rgba(167, 139, 250, 0.45),
-      transparent 70%
-    );
-  filter: blur(36px);
-  opacity: 0.85;
-  animation: genAuraDrift 14s ease-in-out infinite alternate;
+	position: absolute;
+	inset: -40% -10% auto auto;
+	width: 60%;
+	height: 220%;
+	z-index: 0;
+	pointer-events: none;
+	background:
+		radial-gradient(closest-side, rgba(96, 165, 250, 0.55), transparent 70%),
+		radial-gradient(
+			closest-side at 30% 70%,
+			rgba(167, 139, 250, 0.45),
+			transparent 70%
+		);
+	filter: blur(36px);
+	opacity: 0.85;
+	animation: genAuraDrift 14s ease-in-out infinite alternate;
 }
 
 @keyframes genAuraDrift {
-  0% {
-    transform: translate(0, 0);
-  }
-  100% {
-    transform: translate(-6%, 4%);
-  }
+	0% {
+		transform: translate(0, 0);
+	}
+	100% {
+		transform: translate(-6%, 4%);
+	}
 }
 
 .gen-main {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 14px;
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: 14px;
 }
 
 .gen-orb {
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
-  flex-shrink: 0;
-  background: radial-gradient(
-    120% 120% at 30% 25%,
-    #93c5fd,
-    #3b82f6 55%,
-    #1d4ed8
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  box-shadow:
-    0 6px 18px rgba(59, 130, 246, 0.55),
-    inset 0 1px 1px rgba(255, 255, 255, 0.45);
+	width: 42px;
+	height: 42px;
+	border-radius: 13px;
+	flex-shrink: 0;
+	background: radial-gradient(
+		120% 120% at 30% 25%,
+		#93c5fd,
+		#3b82f6 55%,
+		#1d4ed8
+	);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #fff;
+	box-shadow:
+		0 6px 18px rgba(59, 130, 246, 0.55),
+		inset 0 1px 1px rgba(255, 255, 255, 0.45);
 }
 
 .gen-orb svg {
-  width: 22px;
-  height: 22px;
+	width: 22px;
+	height: 22px;
 }
 
 .gen-text {
-  flex: 1;
-  min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
 
 .gen-title {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
 }
 
 .gen-sub {
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.65);
-  margin-top: 2px;
-  transition: color 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+	font-size: 12.5px;
+	color: rgba(255, 255, 255, 0.65);
+	margin-top: 2px;
+	transition: color 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .gen-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  border: none;
-  padding: 11px 18px 11px 16px;
-  border-radius: 12px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  background: linear-gradient(180deg, #5a9bff, #3b82f6 55%, #1d4ed8);
-  color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    0 6px 18px rgba(59, 130, 246, 0.5);
-  overflow: hidden;
-  flex-shrink: 0;
-  transition:
-    filter 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    box-shadow 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    opacity 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	border: none;
+	padding: 11px 18px 11px 16px;
+	border-radius: 12px;
+	font: inherit;
+	font-size: 13px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	background: linear-gradient(180deg, #5a9bff, #3b82f6 55%, #1d4ed8);
+	color: #fff;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.45),
+		0 6px 18px rgba(59, 130, 246, 0.5);
+	overflow: hidden;
+	flex-shrink: 0;
+	transition:
+		filter 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		box-shadow 320ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		opacity 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .gen-btn:hover:not(:disabled) {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    0 10px 24px rgba(59, 130, 246, 0.65);
+	filter: brightness(1.08);
+	transform: translateY(-1px);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.5),
+		0 10px 24px rgba(59, 130, 246, 0.65);
 }
 
 .gen-btn:active:not(:disabled) {
-  transform: translateY(0);
+	transform: translateY(0);
 }
 
 .gen-btn:disabled {
-  pointer-events: none;
-  opacity: 0.55;
+	pointer-events: none;
+	opacity: 0.55;
 }
 
 .gen-btn svg {
-  width: 16px;
-  height: 16px;
-  position: relative;
-  z-index: 1;
+	width: 16px;
+	height: 16px;
+	position: relative;
+	z-index: 1;
 }
 
 .gen-btn-text {
-  position: relative;
-  z-index: 1;
+	position: relative;
+	z-index: 1;
 }
 
 .gen-btn-shimmer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    115deg,
-    transparent 30%,
-    rgba(255, 255, 255, 0.45) 50%,
-    transparent 70%
-  );
-  transform: translateX(-130%);
-  animation: btnShine 3.4s ease-in-out infinite;
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: linear-gradient(
+		115deg,
+		transparent 30%,
+		rgba(255, 255, 255, 0.45) 50%,
+		transparent 70%
+	);
+	transform: translateX(-130%);
+	animation: btnShine 3.4s ease-in-out infinite;
 }
 
 @keyframes btnShine {
-  0%,
-  40% {
-    transform: translateX(-130%);
-  }
-  60%,
-  100% {
-    transform: translateX(130%);
-  }
+	0%,
+	40% {
+		transform: translateX(-130%);
+	}
+	60%,
+	100% {
+		transform: translateX(130%);
+	}
 }
 
 .gen-btn:disabled .gen-btn-shimmer {
-  display: none;
+	display: none;
 }
 
 /* === Phase chips (replaces 5-step grid) === */
 .gen-chips {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
+	position: relative;
+	z-index: 1;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 12px;
 }
 
 .gen-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 7px 11px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 11.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.45);
-  transition:
-    background 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    border-color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    flex 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 7px 11px;
+	border-radius: 10px;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	font-size: 11.5px;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.45);
+	transition:
+		background 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		border-color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		color 280ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		flex 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .gen-chip-header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+	display: flex;
+	align-items: center;
+	gap: 7px;
 }
 
 /* State dot */
 .gen-chip-state {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.18);
-  transition: background 280ms ease;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: rgba(255, 255, 255, 0.18);
+	transition: background 280ms ease;
 }
 
 .gen-chip-label {
-  white-space: nowrap;
+	white-space: nowrap;
 }
 
 /* Detail line under active chip */
 .gen-chip-detail {
-  font-size: 10.5px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.55);
-  padding-left: 15px;
-  font-variant-numeric: tabular-nums;
+	font-size: 10.5px;
+	font-weight: 400;
+	color: rgba(255, 255, 255, 0.55);
+	padding-left: 15px;
+	font-variant-numeric: tabular-nums;
 }
 
 /* queued — already dim by default */
 
 /* active */
 .gen-chip.active {
-  background: rgba(96, 165, 250, 0.15);
-  border-color: rgba(96, 165, 250, 0.4);
-  color: #fff;
-  flex: 1;
-  min-width: 140px;
+	background: rgba(96, 165, 250, 0.15);
+	border-color: rgba(96, 165, 250, 0.4);
+	color: #fff;
+	flex: 1;
+	min-width: 140px;
 }
 
 .gen-chip.active .gen-chip-state {
-  background: #60a5fa;
-  animation: chipPulse 1.4s ease-in-out infinite;
+	background: #60a5fa;
+	animation: chipPulse 1.4s ease-in-out infinite;
 }
 
 @keyframes chipPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.85); }
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.55;
+		transform: scale(0.85);
+	}
 }
 
 /* done — green */
 .gen-chip.done {
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(52, 211, 153, 0.08);
-  border-color: rgba(52, 211, 153, 0.28);
+	color: rgba(255, 255, 255, 0.85);
+	background: rgba(52, 211, 153, 0.08);
+	border-color: rgba(52, 211, 153, 0.28);
 }
 
 .gen-chip.done .gen-chip-state {
-  background: #34d399;
+	background: #34d399;
 }
 
 /* done dot checkmark via box-shadow trick */
 .gen-chip.done .gen-chip-state::after {
-  content: "";
-  display: block;
-  width: 3px;
-  height: 5px;
-  border: solid #0f172a;
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg) translate(0.5px, -0.5px);
-  margin: 0 auto;
+	content: "";
+	display: block;
+	width: 3px;
+	height: 5px;
+	border: solid #0f172a;
+	border-width: 0 1.5px 1.5px 0;
+	transform: rotate(45deg) translate(0.5px, -0.5px);
+	margin: 0 auto;
 }
 
 /* error */
 .gen-chip.error {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.35);
+	color: #fca5a5;
+	background: rgba(239, 68, 68, 0.1);
+	border-color: rgba(239, 68, 68, 0.35);
 }
 
 .gen-chip.error .gen-chip-state {
-  background: #ef4444;
+	background: #ef4444;
 }
 
 /* Shimmer text for analyze */
 .gen-chip-shimmer-text {
-  display: inline-block;
-  background: linear-gradient(90deg, rgba(255,255,255,0.35) 25%, rgba(255,255,255,0.7) 50%, rgba(255,255,255,0.35) 75%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmerScroll 1.8s linear infinite;
+	display: inline-block;
+	background: linear-gradient(
+		90deg,
+		rgba(255, 255, 255, 0.35) 25%,
+		rgba(255, 255, 255, 0.7) 50%,
+		rgba(255, 255, 255, 0.35) 75%
+	);
+	background-size: 200% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	animation: shimmerScroll 1.8s linear infinite;
 }
 
 @keyframes shimmerScroll {
-  0% { background-position: 200% center; }
-  100% { background-position: -200% center; }
+	0% {
+		background-position: 200% center;
+	}
+	100% {
+		background-position: -200% center;
+	}
 }
 
 /* Inline spinner for audio with no % */
 .gen-chip-spinner-inline {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid rgba(255,255,255,0.25);
-  border-top-color: #93c5fd;
-  border-radius: 50%;
-  animation: chipSpin 0.8s linear infinite;
-  vertical-align: middle;
-  margin-left: 4px;
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	border: 1.5px solid rgba(255, 255, 255, 0.25);
+	border-top-color: #93c5fd;
+	border-radius: 50%;
+	animation: chipSpin 0.8s linear infinite;
+	vertical-align: middle;
+	margin-left: 4px;
 }
 
 /* Small spinner next to label for audio total=0 */
 .gen-chip-spinner {
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid rgba(255,255,255,0.25);
-  border-top-color: #93c5fd;
-  border-radius: 50%;
-  animation: chipSpin 0.8s linear infinite;
-  flex-shrink: 0;
+	width: 9px;
+	height: 9px;
+	border: 1.5px solid rgba(255, 255, 255, 0.25);
+	border-top-color: #93c5fd;
+	border-radius: 50%;
+	animation: chipSpin 0.8s linear infinite;
+	flex-shrink: 0;
 }
 
 @keyframes chipSpin {
-  to { transform: rotate(360deg); }
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 /* Done state — compact ribbon */
 .gen-strip.is-done {
-  padding: 12px 18px;
+	padding: 12px 18px;
 }
 
 .gen-strip.is-done .gen-sub {
-  color: rgba(167, 243, 208, 0.95);
+	color: rgba(167, 243, 208, 0.95);
 }
 
 /* Error message below steps */
 .gen-error {
-  position: relative;
-  z-index: 1;
-  margin-top: 10px;
-  font-size: 11.5px;
-  color: #fca5a5;
+	position: relative;
+	z-index: 1;
+	margin-top: 10px;
+	font-size: 11.5px;
+	color: #fca5a5;
 }
 
 /* Error state strip */
 .gen-strip.is-error {
-  background: linear-gradient(135deg, #1a0e0e 0%, #2a1010 38%, #1f1010 100%);
+	background: linear-gradient(135deg, #1a0e0e 0%, #2a1010 38%, #1f1010 100%);
 }
 
 .gen-strip.is-error .gen-aura {
-  background:
-    radial-gradient(closest-side, rgba(239, 68, 68, 0.35), transparent 70%),
-    radial-gradient(
-      closest-side at 30% 70%,
-      rgba(220, 38, 38, 0.25),
-      transparent 70%
-    );
+	background:
+		radial-gradient(closest-side, rgba(239, 68, 68, 0.35), transparent 70%),
+		radial-gradient(
+			closest-side at 30% 70%,
+			rgba(220, 38, 38, 0.25),
+			transparent 70%
+		);
 }
 
 /* Error orb */
 .gen-orb.error {
-  background: radial-gradient(
-    120% 120% at 30% 25%,
-    #fca5a5,
-    #ef4444 55%,
-    #b91c1c
-  );
-  box-shadow:
-    0 6px 18px rgba(239, 68, 68, 0.55),
-    inset 0 1px 1px rgba(255, 255, 255, 0.45);
+	background: radial-gradient(
+		120% 120% at 30% 25%,
+		#fca5a5,
+		#ef4444 55%,
+		#b91c1c
+	);
+	box-shadow:
+		0 6px 18px rgba(239, 68, 68, 0.55),
+		inset 0 1px 1px rgba(255, 255, 255, 0.45);
 }
 
 /* Retry button — distinct from generate button */
 .gen-btn--retry {
-  background: linear-gradient(180deg, #f87171, #ef4444 55%, #b91c1c);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 6px 18px rgba(239, 68, 68, 0.5);
+	background: linear-gradient(180deg, #f87171, #ef4444 55%, #b91c1c);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.35),
+		0 6px 18px rgba(239, 68, 68, 0.5);
 }
 
 .gen-btn--retry:hover:not(:disabled) {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 10px 24px rgba(239, 68, 68, 0.65);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.4),
+		0 10px 24px rgba(239, 68, 68, 0.65);
+}
+
+/* Cancel button — neutral/muted so it reads as "stop", not a primary action */
+.gen-btn--cancel {
+	background: rgba(255, 255, 255, 0.1);
+	color: rgba(255, 255, 255, 0.92);
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.gen-btn--cancel:hover:not(:disabled) {
+	background: rgba(239, 68, 68, 0.22);
+	box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.5);
 }
 
 /* Quiet regen link — shown after successful generation */
 .cap-regen-link {
-  display: block;
-  margin-top: 10px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
-  cursor: pointer;
-  text-align: right;
-  text-decoration: none;
-  transition: color 200ms ease;
+	display: block;
+	margin-top: 10px;
+	padding: 0;
+	border: none;
+	background: none;
+	font: inherit;
+	font-size: 12px;
+	color: rgba(255, 255, 255, 0.45);
+	cursor: pointer;
+	text-align: right;
+	text-decoration: none;
+	transition: color 200ms ease;
 }
 
 .cap-regen-link:hover {
-  color: rgba(255, 255, 255, 0.75);
-  text-decoration: underline;
+	color: rgba(255, 255, 255, 0.75);
+	text-decoration: underline;
 }
 
 /* === Determinate progress bar === */
 .gen-progress-wrap {
-  position: relative;
-  z-index: 1;
-  margin-top: 12px;
+	position: relative;
+	z-index: 1;
+	margin-top: 12px;
 }
 
 .gen-progress-bar {
-  width: 100%;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
+	width: 100%;
+	height: 5px;
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.12);
+	overflow: hidden;
 }
 
 .gen-progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, #60a5fa, #a78bfa);
-  transition: width 400ms ease;
-  min-width: 2px;
+	height: 100%;
+	border-radius: 3px;
+	background: linear-gradient(90deg, #60a5fa, #a78bfa);
+	transition: width 400ms ease;
+	min-width: 2px;
 }
 
 .gen-progress-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 5px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 5px;
+	font-size: 11px;
+	color: rgba(255, 255, 255, 0.5);
 }
 
 .gen-progress-pct {
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.8);
-  font-variant-numeric: tabular-nums;
-  min-width: 2.8ch;
+	font-weight: 700;
+	color: rgba(255, 255, 255, 0.8);
+	font-variant-numeric: tabular-nums;
+	min-width: 2.8ch;
 }
 
 .gen-progress-eta {
-  flex: 1;
-  font-variant-numeric: tabular-nums;
+	flex: 1;
+	font-variant-numeric: tabular-nums;
 }
 
 .gen-progress-elapsed {
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.35);
+	font-variant-numeric: tabular-nums;
+	color: rgba(255, 255, 255, 0.35);
 }
 
 /* === Analyze sub-checklist (FIX 2) === */
 .gen-chip-sublist {
-  list-style: none;
-  margin: 5px 0 0 0;
-  padding: 0 0 0 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+	list-style: none;
+	margin: 5px 0 0 0;
+	padding: 0 0 0 15px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
 }
 
 .gen-chip-subitem {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.55);
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 10px;
+	font-weight: 500;
+	color: rgba(255, 255, 255, 0.55);
 }
 
 /* Pulse dot while analyze is active */
 .gen-chip-subitem-pulse {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #60a5fa;
-  animation: chipPulse 1.4s ease-in-out infinite;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: #60a5fa;
+	animation: chipPulse 1.4s ease-in-out infinite;
 }
 
 /* Check mark when analyze done */
 .gen-chip-subitem--done {
-  color: rgba(255, 255, 255, 0.75);
+	color: rgba(255, 255, 255, 0.75);
 }
 
 .gen-chip-subitem-check {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #34d399;
-  position: relative;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: #34d399;
+	position: relative;
 }
 
 .gen-chip-subitem-check::after {
-  content: "";
-  display: block;
-  width: 2px;
-  height: 3.5px;
-  border: solid #0f172a;
-  border-width: 0 1px 1px 0;
-  transform: rotate(45deg) translate(0.5px, -0.5px);
-  margin: 0 auto;
+	content: "";
+	display: block;
+	width: 2px;
+	height: 3.5px;
+	border: solid #0f172a;
+	border-width: 0 1px 1px 0;
+	transform: rotate(45deg) translate(0.5px, -0.5px);
+	margin: 0 auto;
 }
 
 /* === UX polish: press/active + standard easing === */
-.gen-btn, .cap-regen-link {
-  transition: transform 200ms cubic-bezier(.22,.61,.36,1), opacity 200ms cubic-bezier(.22,.61,.36,1), background-color 200ms cubic-bezier(.22,.61,.36,1), box-shadow 200ms cubic-bezier(.22,.61,.36,1), filter 200ms cubic-bezier(.22,.61,.36,1), color 200ms cubic-bezier(.22,.61,.36,1);
+.gen-btn,
+.cap-regen-link {
+	transition:
+		transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		opacity 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		background-color 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		box-shadow 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		filter 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+		color 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.gen-btn:active:not(:disabled), .cap-regen-link:active {
-  transform: scale(0.97);
-  filter: brightness(0.95);
+.gen-btn:active:not(:disabled),
+.cap-regen-link:active {
+	transform: scale(0.97);
+	filter: brightness(0.95);
 }
-.gen-btn:focus-visible, .cap-regen-link:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+.gen-btn:focus-visible,
+.cap-regen-link:focus-visible {
+	outline: 2px solid currentColor;
+	outline-offset: 2px;
 }
 
 /* === Per-chunk mini-ticks (transcribe phase live progress) === */
 .gen-chunk-ticks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin-top: 5px;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	margin-top: 5px;
 }
 
 /* Individual tick: 6×4px */
 .gen-chunk-tick {
-  display: inline-block;
-  width: 6px;
-  height: 4px;
-  border-radius: 1px;
-  flex-shrink: 0;
+	display: inline-block;
+	width: 6px;
+	height: 4px;
+	border-radius: 1px;
+	flex-shrink: 0;
 }
 
 .gen-chunk-tick.done {
-  background: #7c3aed;
+	background: #7c3aed;
 }
 
 .gen-chunk-tick.active {
-  background: #a78bfa;
-  animation: tickPulse 1s ease-in-out infinite;
+	background: #a78bfa;
+	animation: tickPulse 1s ease-in-out infinite;
 }
 
 .gen-chunk-tick.queued {
-  background: rgba(255, 255, 255, 0.15);
+	background: rgba(255, 255, 255, 0.15);
 }
 
 @keyframes tickPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.5;
+	}
 }
 
 /* Thin progress bar fallback for > 60 chunks */
 .gen-chunk-bar {
-  width: 100%;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-  margin-top: 5px;
+	width: 100%;
+	height: 3px;
+	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.12);
+	overflow: hidden;
+	margin-top: 5px;
 }
 
 .gen-chunk-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #7c3aed, #a78bfa);
-  transition: width 600ms ease;
+	height: 100%;
+	border-radius: 2px;
+	background: linear-gradient(90deg, #7c3aed, #a78bfa);
+	transition: width 600ms ease;
 }
