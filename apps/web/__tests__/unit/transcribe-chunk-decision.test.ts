@@ -89,3 +89,57 @@ describe("transcriptHasCues", () => {
 		expect(transcriptHasCues("WEBVTT\n\njust some words")).toBe(false);
 	});
 });
+
+import {
+	collapseInCueRepeats,
+	collapseRepeatedCues,
+} from "@/lib/transcription-chunking";
+
+describe("repetition-loop cleanup", () => {
+	it("collapses a word repeated within a cue", () => {
+		expect(collapseInCueRepeats("Ha, ha, ha, ha, ha, ha.")).toBe("Ha.");
+		expect(collapseInCueRepeats("<v Speaker 3>Hm hm hm hm")).toBe(
+			"<v Speaker 3>Hm",
+		);
+	});
+
+	it("leaves a normal repeated-twice phrase alone", () => {
+		// 2 in a row is not a loop
+		expect(collapseInCueRepeats("Ha, ha.")).toBe("Ha, ha.");
+	});
+
+	it("collapses a run of 148 identical 'Ha.' cues into one spanning cue", () => {
+		const cues = Array.from({ length: 148 }, (_, i) => ({
+			index: i + 1,
+			startSec: 4145 + i * 0.4,
+			endSec: 4145 + i * 0.4 + 0.4,
+			text: "<v Speaker 15>Ha.",
+		}));
+		const out = collapseRepeatedCues(cues);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.startSec).toBeCloseTo(4145);
+		// spans to the end of the run
+		expect(out[0]?.endSec).toBeGreaterThan(4200);
+	});
+
+	it("collapses adjacent duplicate cues but keeps distinct speech", () => {
+		const out = collapseRepeatedCues([
+			{ index: 1, startSec: 0, endSec: 1, text: "Buni screenshot qilib." },
+			{ index: 2, startSec: 1, endSec: 2, text: "Buni screenshot qilib." },
+			{ index: 3, startSec: 2, endSec: 3, text: "Keyingi qadam." },
+		]);
+		expect(out.map((c) => c.text)).toEqual([
+			"Buni screenshot qilib.",
+			"Keyingi qadam.",
+		]);
+	});
+
+	it("preserves genuine single backchannel between real sentences", () => {
+		const out = collapseRepeatedCues([
+			{ index: 1, startSec: 0, endSec: 1, text: "Tizimni tekshiramiz." },
+			{ index: 2, startSec: 1, endSec: 2, text: "Ha." },
+			{ index: 3, startSec: 2, endSec: 3, text: "Keyin davom etamiz." },
+		]);
+		expect(out).toHaveLength(3);
+	});
+});

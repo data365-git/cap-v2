@@ -46,3 +46,52 @@ export function transcriptHasCues(vtt: string | null | undefined): boolean {
 	const body = vtt.replace(/^﻿?WEBVTT/i, "").trim();
 	return body.length > 0 && vtt.includes("-->");
 }
+
+export interface RepeatCollapsibleCue {
+	index: number;
+	startSec: number;
+	endSec: number;
+	text: string;
+}
+
+const normForDedup = (t: string): string =>
+	t
+		.replace(/<[^>]+>/g, "")
+		.replace(/[\s.,!?…-]+/g, " ")
+		.trim()
+		.toLowerCase();
+
+/**
+ * Collapse a word repeated 3+ times in a row inside one cue:
+ * "Ha, ha, ha, ha, ha." → "Ha." — a Gemini audio loop artifact.
+ */
+export function collapseInCueRepeats(text: string): string {
+	return text.replace(
+		/(\p{L}{1,8})((?:[\s,.!?…-]+\1\b){2,})/giu,
+		(_m, first) => first,
+	);
+}
+
+/**
+ * Remove Gemini audio repetition-loop artifacts. On silence / noise / glitches
+ * the model can emit the same short token ("Ha.", "Hm.") for dozens of
+ * consecutive cues, or repeat a word within a cue — observed as 148 "Ha." cues
+ * in a row. Collapse consecutive cues whose text is identical (ignoring speaker
+ * tag/punctuation) into one spanning cue, and collapse in-cue word loops.
+ * Genuine backchannel (a single "ha" between real sentences) is untouched.
+ */
+export function collapseRepeatedCues<T extends RepeatCollapsibleCue>(
+	cues: T[],
+): T[] {
+	const out: T[] = [];
+	for (const cue of cues) {
+		const cleaned = { ...cue, text: collapseInCueRepeats(cue.text) };
+		const prev = out[out.length - 1];
+		if (prev && normForDedup(prev.text) === normForDedup(cleaned.text)) {
+			prev.endSec = Math.max(prev.endSec, cleaned.endSec);
+			continue;
+		}
+		out.push(cleaned);
+	}
+	return out.map((c, i) => ({ ...c, index: i + 1 }));
+}

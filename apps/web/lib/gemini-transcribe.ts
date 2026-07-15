@@ -3,6 +3,7 @@ import {
 	billedInputTokens as readInputTokens,
 	billedOutputTokens as readOutputTokens,
 } from "@/lib/gemini-usage";
+import { collapseRepeatedCues } from "@/lib/transcription-chunking";
 
 /**
  * Error thrown when Gemini API quota is exceeded. This short-circuits the
@@ -380,9 +381,14 @@ export function mergeVtt(
 		all.push(...shiftCues(r.cues, r.startOffsetSec));
 	}
 	all.sort((a, b) => a.startSec - b.startSec);
+	// Remove Gemini repetition-loop artifacts (runs of identical "Ha."/"Hm." cues)
+	// before bounding/output.
+	const deduped = collapseRepeatedCues(all);
 	// Final safety net: drop anything that still lands past the real duration.
 	const bounded =
-		maxDurationSec != null ? clampCuesToDuration(all, maxDurationSec) : all;
+		maxDurationSec != null
+			? clampCuesToDuration(deduped, maxDurationSec)
+			: deduped;
 	return { vtt: cuesToVtt(bounded), cues: bounded };
 }
 
@@ -822,7 +828,10 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 		parseVttCues(baseVtt),
 		audioDurationSec,
 	);
-	const shifted = shiftCues(parsedCues, startOffsetSec);
+	// Strip repetition-loop artifacts within this chunk before shifting so a
+	// single-shot transcript is cleaned too (the merge path cleans across chunks).
+	const deduped = collapseRepeatedCues(parsedCues);
+	const shifted = shiftCues(deduped, startOffsetSec);
 	const transcriptVtt = cuesToVtt(shifted);
 
 	return {
