@@ -7,12 +7,8 @@
  * at "Audio Player.html" with purple accent (#7C5BFF) instead of blue.
  */
 
-import React, {
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -40,7 +36,13 @@ function PlayIcon() {
 
 function PauseIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="currentColor" width={24} height={24} className="audio-pause-ic">
+		<svg
+			viewBox="0 0 24 24"
+			fill="currentColor"
+			width={24}
+			height={24}
+			className="audio-pause-ic"
+		>
 			<rect x="6" y="4" width="4" height="16" rx="1.3" />
 			<rect x="14" y="4" width="4" height="16" rx="1.3" />
 		</svg>
@@ -49,7 +51,16 @@ function PauseIcon() {
 
 function RewindIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<polyline points="11 17 6 12 11 7" />
 			<polyline points="18 17 13 12 18 7" />
 		</svg>
@@ -58,7 +69,16 @@ function RewindIcon() {
 
 function ForwardIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<polyline points="13 17 18 12 13 7" />
 			<polyline points="6 17 11 12 6 7" />
 		</svg>
@@ -67,7 +87,16 @@ function ForwardIcon() {
 
 function VolumeIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<polygon points="11 5 6 9 2 9 2 15 6 15 11 19" />
 			<path d="M15.54 8.46a5 5 0 010 7.07" />
 			<path d="M19.07 4.93a10 10 0 010 14.14" />
@@ -77,7 +106,16 @@ function VolumeIcon() {
 
 function MuteIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<polygon points="11 5 6 9 2 9 2 15 6 15 11 19" />
 			<line x1="23" y1="9" x2="17" y2="15" />
 			<line x1="17" y1="9" x2="23" y2="15" />
@@ -87,7 +125,16 @@ function MuteIcon() {
 
 function DownloadIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
 			<polyline points="7 10 12 15 17 10" />
 			<line x1="12" y1="15" x2="12" y2="3" />
@@ -97,7 +144,16 @@ function DownloadIcon() {
 
 function PinOnIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<line x1="12" y1="17" x2="12" y2="22" />
 			<path d="M5 17h14v-1.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V6h1a2 2 0 000-4H8a2 2 0 000 4h1v4.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V17z" />
 		</svg>
@@ -106,7 +162,16 @@ function PinOnIcon() {
 
 function PinOffIcon() {
 	return (
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+		<svg
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={2}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			width={17}
+			height={17}
+		>
 			<line x1="2" y1="2" x2="22" y2="22" />
 			<line x1="12" y1="17" x2="12" y2="22" />
 			<path d="M9 9v1.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V17h12" />
@@ -169,48 +234,49 @@ export function CapAudioPlayer({
 		const audioEl = audioRef.current;
 		if (!audioEl) return;
 		// Cast: callers only use HTMLMediaElement members (currentTime, etc.)
-		(videoRef as React.MutableRefObject<HTMLMediaElement | null>).current = audioEl as unknown as HTMLVideoElement;
+		(videoRef as React.MutableRefObject<HTMLMediaElement | null>).current =
+			audioEl as unknown as HTMLVideoElement;
 	}, [videoRef]);
 
 	// ── dot position calculation ──────────────────────────────────────────────
-	const computeDot = useCallback((ct: number) => {
-		const segs = segRefs.current;
-		if (!segs.length || !barRef.current) return;
-		const dur = audioRef.current?.duration ?? duration;
-		if (!dur) return;
+	const computeDot = useCallback(
+		(ct: number) => {
+			const segs = segRefs.current;
+			if (!segs.length || !barRef.current) return;
+			const dur = audioRef.current?.duration ?? duration;
+			if (!dur) return;
 
-		const bounds = [
-			...chapters.map((c) => c.startSec),
-			dur,
-		];
+			const bounds = [...chapters.map((c) => c.startSec), dur];
 
-		if (chapters.length === 0) {
-			// Single fallback segment
-			const bar = barRef.current;
-			const singleSeg = bar.querySelector<HTMLButtonElement>(".progress-seg");
-			if (singleSeg) {
-				const f = Math.max(0, Math.min(1, ct / dur));
-				setDotLeft(singleSeg.offsetLeft + f * singleSeg.offsetWidth);
+			if (chapters.length === 0) {
+				// Single fallback segment
+				const bar = barRef.current;
+				const singleSeg = bar.querySelector<HTMLButtonElement>(".progress-seg");
+				if (singleSeg) {
+					const f = Math.max(0, Math.min(1, ct / dur));
+					setDotLeft(singleSeg.offsetLeft + f * singleSeg.offsetWidth);
+				}
+				return;
 			}
-			return;
-		}
 
-		let left = 0;
-		for (let i = 0; i < segs.length; i++) {
-			const start = bounds[i] ?? 0;
-			const end = bounds[i + 1] ?? dur;
-			const el = segs[i];
-			if (!el) continue;
-			if (ct >= end) {
-				left = el.offsetLeft + el.offsetWidth;
-			} else if (ct >= start) {
-				const f = (ct - start) / (end - start);
-				left = el.offsetLeft + f * el.offsetWidth;
-				break;
+			let left = 0;
+			for (let i = 0; i < segs.length; i++) {
+				const start = bounds[i] ?? 0;
+				const end = bounds[i + 1] ?? dur;
+				const el = segs[i];
+				if (!el) continue;
+				if (ct >= end) {
+					left = el.offsetLeft + el.offsetWidth;
+				} else if (ct >= start) {
+					const f = (ct - start) / (end - start);
+					left = el.offsetLeft + f * el.offsetWidth;
+					break;
+				}
 			}
-		}
-		setDotLeft(left);
-	}, [chapters, duration]);
+			setDotLeft(left);
+		},
+		[chapters, duration],
+	);
 
 	// Recompute on resize
 	useEffect(() => {
@@ -261,7 +327,10 @@ export function CapAudioPlayer({
 	const seekBy = useCallback((delta: number) => {
 		const el = audioRef.current;
 		if (!el) return;
-		el.currentTime = Math.max(0, Math.min(el.duration || 0, el.currentTime + delta));
+		el.currentTime = Math.max(
+			0,
+			Math.min(el.duration || 0, el.currentTime + delta),
+		);
 	}, []);
 
 	const cycleSpeed = useCallback(() => {
@@ -313,7 +382,11 @@ export function CapAudioPlayer({
 					break;
 				case "End":
 					e.preventDefault();
-					if (audioRef.current) audioRef.current.currentTime = Math.max(0, (audioRef.current.duration || 0) - 1);
+					if (audioRef.current)
+						audioRef.current.currentTime = Math.max(
+							0,
+							(audioRef.current.duration || 0) - 1,
+						);
 					break;
 			}
 		},
@@ -341,17 +414,16 @@ export function CapAudioPlayer({
 	);
 
 	// ── derived display values ────────────────────────────────────────────────
-	const dur = (audioRef.current?.duration && Number.isFinite(audioRef.current.duration))
-		? audioRef.current.duration
-		: duration;
+	const dur =
+		audioRef.current?.duration && Number.isFinite(audioRef.current.duration)
+			? audioRef.current.duration
+			: duration;
 
-	const subtitle = dur > 0
-		? `Audio yozuv · ${formatTime(dur)} · MP3`
-		: "Audio yozuv";
+	const subtitle =
+		dur > 0 ? `Audio yozuv · ${formatTime(dur)} · MP3` : "Audio yozuv";
 
-	const bounds = chapters.length > 0
-		? [...chapters.map((c) => c.startSec), dur]
-		: null;
+	const bounds =
+		chapters.length > 0 ? [...chapters.map((c) => c.startSec), dur] : null;
 
 	// ── render ────────────────────────────────────────────────────────────────
 	return (
@@ -395,7 +467,13 @@ export function CapAudioPlayer({
 							const segDur = end - start;
 							const fillPct =
 								dur > 0
-									? Math.max(0, Math.min(1, (currentTime - start) / Math.max(1, end - start))) * 100
+									? Math.max(
+											0,
+											Math.min(
+												1,
+												(currentTime - start) / Math.max(1, end - start),
+											),
+										) * 100
 									: 0;
 							return (
 								<button
@@ -501,8 +579,8 @@ export function CapAudioPlayer({
 							<button
 								type="button"
 								className="audio-ctrl"
-								title={isPinned ? "Panelni ajratish" : "Pastda qotirish"}
-								aria-label={isPinned ? "Panelni ajratish" : "Pastda qotirish"}
+								title={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
+								aria-label={isPinned ? "Tepadan ajratish" : "Tepada qotirish"}
 								onClick={onTogglePin}
 							>
 								{isPinned ? <PinOffIcon /> : <PinOnIcon />}
