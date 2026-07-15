@@ -34,3 +34,15 @@ export function shouldChunkForTranscription(input: {
 	const limit = isAudioSource ? AUDIO_SINGLE_SHOT_MAX_SEC : CHUNK_THRESHOLD_SEC;
 	return knownDurationSec > limit;
 }
+
+/**
+ * Whether a VTT string contains a real transcript (at least one cue), as opposed
+ * to an empty result — a bare/blank WEBVTT header, whitespace, or "". Used to
+ * refuse saving an empty re-transcription over an existing good one. A genuine
+ * cue always has a `-->` time range.
+ */
+export function transcriptHasCues(vtt: string | null | undefined): boolean {
+	if (!vtt) return false;
+	const body = vtt.replace(/^﻿?WEBVTT/i, "").trim();
+	return body.length > 0 && vtt.includes("-->");
+}
