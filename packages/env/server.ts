@@ -11,6 +11,9 @@ const boolString = (_default = false) =>
 
 function createServerEnv() {
 	return createEnv({
+		// Set SKIP_ENV_VALIDATION=true to let `next build` / typecheck run without
+		// real secrets (CI build-checks). Runtime still needs the real values.
+		skipValidation: !!process.env.SKIP_ENV_VALIDATION,
 		server: {
 			/// General configuration
 			DATABASE_URL: z.string().describe("MySQL database URL"),
