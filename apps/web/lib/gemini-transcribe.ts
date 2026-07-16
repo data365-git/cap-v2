@@ -66,6 +66,93 @@ const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL ?? "";
 const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES ?? "2");
 const BACKOFF_BASE_MS = [2000, 5000, 12000, 30000];
 
+// A single chunk is ≤ a few minutes of speech — real transcript output is ~2-4k
+// tokens. The only thing that ever needs more is a repetition loop (the "Ha. Ha.
+// Ha…" failure), which bills every wasted token at the output rate. Capping at
+// 16k lets any legit chunk through but stops a loop at 16k instead of 65k, and
+// the MAX_TOKENS re-split still recovers the real content. Exported so the
+// opt-in cheap/batch path uses the SAME cap as the synchronous path.
+export const TRANSCRIBE_MAX_OUTPUT_TOKENS = 16384;
+
+/**
+ * The transcription instruction prompt sent to Gemini. Extracted verbatim from
+ * the synchronous `transcribeWithGemini` call so the opt-in cheap/batch path
+ * submits an IDENTICAL prompt (single source of truth — no duplication).
+ */
+export function buildTranscriptionPrompt(): string {
+	return `You are a professional Uzbek meeting transcription editor.
+
+Transcribe the attached online/offline meeting fully and accurately in Uzbek Latin.
+
+Rules:
+
+1. Transcribe the entire meeting from beginning to end. Do not summarize, skip, shorten, or stop halfway.
+
+2. Uzbek words must be written only in Uzbek Latin. Do not write Uzbek words in Cyrillic.
+
+3. This meeting has multiple speakers. Identify speakers by voice, context, and conversation flow.
+
+If speaker names are known from the audio, use their names.
+
+If names are not clear, use:
+Speaker 1
+Speaker 2
+Speaker 3
+
+Keep speaker labels consistent across the whole transcript.
+
+Each WEBVTT cue must contain EXACTLY ONE speaker. Begin each cue's text with a WebVTT voice tag: <v Speaker Name> followed by that speaker's words. NEVER merge two speakers into a single cue. Example of correct format:
+
+00:00:12.500 --> 00:00:15.200
+<v Bunyodbek>Salom, qanday yangiliklar bor?
+
+00:00:15.500 --> 00:00:18.100
+<v Jahongir>Yangi mijoz keldi, **deadline** ertaga.
+
+If two people talk over each other and both cannot be clearly separated, split into two adjacent cues with the same or overlapping timestamps and add the [ustma-ust gaplashildi] tag on the second cue.
+
+4. Add real, accurate timestamps from the audio. Do not use sample, fake, guessed, or template timestamps.
+
+Put timestamps only where they exactly match the audio:
+- at the beginning,
+- when the speaker changes,
+- when a new discussion topic starts,
+- when decisions, tasks, objections, or important points appear,
+- when there is a meaningful pause or transition.
+
+Timestamp format:
+**[HH:MM:SS]**
+
+5. Clean the transcript professionally:
+- remove filler sounds like "umm", "aa", "eee", "э"
+- remove repeated stutters
+- remove meaningless false starts
+- keep the original meaning and speaking style
+
+6. If an Uzbek word is unclear, correct it based on surrounding context. If it is impossible to identify, write [noaniq].
+
+7. Keep foreign words exactly as spoken:
+- Russian words must stay in Cyrillic and be bold: **сразу**, **любой**, **дефицит**
+- English words must stay in English/Latin and be bold: **deadline**, **CRM**, **dashboard**
+- Do not translate foreign words.
+- Do not transliterate Russian words into Latin.
+- Bold every foreign word or phrase.
+
+RUSSIAN MUST BE IN CYRILLIC SCRIPT — this is mandatory, not a preference.
+Write **полностью**, never **polnostyu**. Write **подробный**, never **podrobniy**.
+Write **аудит**, never **audit**. Whenever you hear a Russian word, output it in
+Cyrillic letters and wrap it in **bold**.
+
+8. Identify REAL speaker names. The speakers address each other by name during
+the meeting — listen for those names and use them as the voice tag, e.g.
+<v Shohrux> and <v Bunyodbek>. Only fall back to <v Speaker 1> when no name is
+ever spoken aloud.
+
+9. Output only the transcript. No intro, no explanation, no table, no numbering.
+
+IMPORTANT: Start your response with "WEBVTT" header and format each line as WebVTT cues with timestamps in HH:MM:SS.mmm --> HH:MM:SS.mmm format. The speaker labels, bold formatting, and content rules above still apply within each cue text.`;
+}
+
 function isQuotaExceededError(status: number, msg: string): boolean {
 	if (status === 429 && msg.toLowerCase().includes("quota")) return true;
 	const lower = msg.toLowerCase();
@@ -438,6 +525,38 @@ function plainTextToWebVTT(text: string, durationSec: number): string {
 	return vtt;
 }
 
+/**
+ * Convert a Gemini transcription model's raw response text into cleaned, clamped,
+ * script-restored, offset-shifted cues (and their VTT). Extracted verbatim from
+ * `transcribeWithGemini` so the opt-in cheap/batch collector produces IDENTICAL
+ * output to the synchronous path (single source of truth — no duplicate parsing).
+ */
+export function transcriptRawTextToCues(
+	rawText: string,
+	audioDurationSec: number,
+	startOffsetSec = 0,
+): { cues: VttCue[]; transcriptVtt: string } {
+	const baseVtt = rawText.trimStart().startsWith("WEBVTT")
+		? rawText.trimStart()
+		: plainTextToWebVTT(rawText, audioDurationSec);
+
+	// Clamp to this call's audio length BEFORE shifting — a cue past the chunk's
+	// own duration is a hallucination; shifting it would balloon it beyond the
+	// video (e.g. 41:00 in a 90s chunk offset by 34:55 → 75:55).
+	const parsedCues = clampCuesToDuration(
+		parseVttCues(baseVtt),
+		audioDurationSec,
+	);
+	// Strip repetition-loop artifacts within this chunk before shifting so a
+	// single-shot transcript is cleaned too (the merge path cleans across chunks).
+	const deduped = collapseRepeatedCues(parsedCues).map((c) => ({
+		...c,
+		text: restoreRussianScript(c.text),
+	}));
+	const shifted = shiftCues(deduped, startOffsetSec);
+	return { cues: shifted, transcriptVtt: cuesToVtt(shifted) };
+}
+
 async function pollUntilActive(
 	fileName: string,
 	apiKey: string,
@@ -735,77 +854,7 @@ export async function transcribeWithGemini(
 								},
 							},
 							{
-								text: `You are a professional Uzbek meeting transcription editor.
-
-Transcribe the attached online/offline meeting fully and accurately in Uzbek Latin.
-
-Rules:
-
-1. Transcribe the entire meeting from beginning to end. Do not summarize, skip, shorten, or stop halfway.
-
-2. Uzbek words must be written only in Uzbek Latin. Do not write Uzbek words in Cyrillic.
-
-3. This meeting has multiple speakers. Identify speakers by voice, context, and conversation flow.
-
-If speaker names are known from the audio, use their names.
-
-If names are not clear, use:
-Speaker 1
-Speaker 2
-Speaker 3
-
-Keep speaker labels consistent across the whole transcript.
-
-Each WEBVTT cue must contain EXACTLY ONE speaker. Begin each cue's text with a WebVTT voice tag: <v Speaker Name> followed by that speaker's words. NEVER merge two speakers into a single cue. Example of correct format:
-
-00:00:12.500 --> 00:00:15.200
-<v Bunyodbek>Salom, qanday yangiliklar bor?
-
-00:00:15.500 --> 00:00:18.100
-<v Jahongir>Yangi mijoz keldi, **deadline** ertaga.
-
-If two people talk over each other and both cannot be clearly separated, split into two adjacent cues with the same or overlapping timestamps and add the [ustma-ust gaplashildi] tag on the second cue.
-
-4. Add real, accurate timestamps from the audio. Do not use sample, fake, guessed, or template timestamps.
-
-Put timestamps only where they exactly match the audio:
-- at the beginning,
-- when the speaker changes,
-- when a new discussion topic starts,
-- when decisions, tasks, objections, or important points appear,
-- when there is a meaningful pause or transition.
-
-Timestamp format:
-**[HH:MM:SS]**
-
-5. Clean the transcript professionally:
-- remove filler sounds like "umm", "aa", "eee", "э"
-- remove repeated stutters
-- remove meaningless false starts
-- keep the original meaning and speaking style
-
-6. If an Uzbek word is unclear, correct it based on surrounding context. If it is impossible to identify, write [noaniq].
-
-7. Keep foreign words exactly as spoken:
-- Russian words must stay in Cyrillic and be bold: **сразу**, **любой**, **дефицит**
-- English words must stay in English/Latin and be bold: **deadline**, **CRM**, **dashboard**
-- Do not translate foreign words.
-- Do not transliterate Russian words into Latin.
-- Bold every foreign word or phrase.
-
-RUSSIAN MUST BE IN CYRILLIC SCRIPT — this is mandatory, not a preference.
-Write **полностью**, never **polnostyu**. Write **подробный**, never **podrobniy**.
-Write **аудит**, never **audit**. Whenever you hear a Russian word, output it in
-Cyrillic letters and wrap it in **bold**.
-
-8. Identify REAL speaker names. The speakers address each other by name during
-the meeting — listen for those names and use them as the voice tag, e.g.
-<v Shohrux> and <v Bunyodbek>. Only fall back to <v Speaker 1> when no name is
-ever spoken aloud.
-
-9. Output only the transcript. No intro, no explanation, no table, no numbering.
-
-IMPORTANT: Start your response with "WEBVTT" header and format each line as WebVTT cues with timestamps in HH:MM:SS.mmm --> HH:MM:SS.mmm format. The speaker labels, bold formatting, and content rules above still apply within each cue text.`,
+								text: buildTranscriptionPrompt(),
 							},
 						],
 					},
@@ -818,7 +867,7 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 					// the output rate. Capping at 16k lets any legit chunk through but
 					// stops a loop at 16k instead of 65k (≈4× less money burned per loop),
 					// and the MAX_TOKENS re-split still recovers the real content.
-					maxOutputTokens: 16384,
+					maxOutputTokens: TRANSCRIBE_MAX_OUTPUT_TOKENS,
 					// Transcription is transduction, not reasoning — there is nothing for
 					// the model to think *about*. Gemini thinks by default and those tokens
 					// are drawn from maxOutputTokens, so budget 0 both frees the cap for
@@ -841,25 +890,11 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 		{ method: "DELETE" },
 	).catch(() => {});
 
-	const baseVtt = rawText.trimStart().startsWith("WEBVTT")
-		? rawText.trimStart()
-		: plainTextToWebVTT(rawText, audioDurationSec);
-
-	// Clamp to this call's audio length BEFORE shifting — a cue past the chunk's
-	// own duration is a hallucination; shifting it would balloon it beyond the
-	// video (e.g. 41:00 in a 90s chunk offset by 34:55 → 75:55).
-	const parsedCues = clampCuesToDuration(
-		parseVttCues(baseVtt),
+	const { cues: shifted, transcriptVtt } = transcriptRawTextToCues(
+		rawText,
 		audioDurationSec,
+		startOffsetSec,
 	);
-	// Strip repetition-loop artifacts within this chunk before shifting so a
-	// single-shot transcript is cleaned too (the merge path cleans across chunks).
-	const deduped = collapseRepeatedCues(parsedCues).map((c) => ({
-		...c,
-		text: restoreRussianScript(c.text),
-	}));
-	const shifted = shiftCues(deduped, startOffsetSec);
-	const transcriptVtt = cuesToVtt(shifted);
 
 	return {
 		transcriptVtt,

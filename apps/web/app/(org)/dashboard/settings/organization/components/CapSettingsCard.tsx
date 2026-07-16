@@ -14,6 +14,11 @@ import { ChevronDown, Gauge, Globe } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { updateOrganizationSettings } from "@/actions/organization/settings";
+import {
+	type AiSpeedMode,
+	DEFAULT_AI_SPEED_MODE,
+	isAiSpeedMode,
+} from "@/lib/ai-speed-mode";
 import { DEFAULT_PLAYBACK_SPEED, PLAYBACK_SPEEDS } from "@/lib/playback-speed";
 import { useDashboardContext } from "../../../Contexts";
 import type { OrganizationSettings } from "../../../dashboard-data";
@@ -29,11 +34,17 @@ const defaultSettings: OrganizationSettings = {
 	shareableLinkUseOrganizationIcon: false,
 	aiGenerationLanguage: AI_GENERATION_LANGUAGE_AUTO,
 	defaultPlaybackSpeed: DEFAULT_PLAYBACK_SPEED,
+	aiSpeedMode: DEFAULT_AI_SPEED_MODE,
 };
+
+const AI_SPEED_MODES: Array<{ value: AiSpeedMode; label: string }> = [
+	{ value: "fast", label: "Fast" },
+	{ value: "cheap", label: "Cheap" },
+];
 
 type BooleanOrganizationSettingKey = Exclude<
 	keyof OrganizationSettings,
-	"aiGenerationLanguage"
+	"aiGenerationLanguage" | "defaultPlaybackSpeed" | "aiSpeedMode"
 >;
 
 const options: Array<{
@@ -96,6 +107,9 @@ const mergeSettings = (
 	aiGenerationLanguage: isAiGenerationLanguage(settings?.aiGenerationLanguage)
 		? settings.aiGenerationLanguage
 		: AI_GENERATION_LANGUAGE_AUTO,
+	aiSpeedMode: isAiSpeedMode(settings?.aiSpeedMode)
+		? settings.aiSpeedMode
+		: DEFAULT_AI_SPEED_MODE,
 });
 
 const CapSettingsCard = () => {
@@ -177,6 +191,18 @@ const CapSettingsCard = () => {
 							return;
 						}
 
+						if (changedKey === "aiSpeedMode") {
+							const mode = isAiSpeedMode(debouncedUpdateSettings.aiSpeedMode)
+								? debouncedUpdateSettings.aiSpeedMode
+								: DEFAULT_AI_SPEED_MODE;
+							toast.success(
+								mode === "cheap"
+									? "AI mode set to Cheap — transcription may be delayed while waiting on the free tier"
+									: "AI mode set to Fast",
+							);
+							return;
+						}
+
 						const option = options.find((opt) => opt.value === changedKey);
 						if (changedKey === "hideShareableLinkCapLogo") {
 							toast.success(
@@ -234,6 +260,17 @@ const CapSettingsCard = () => {
 	};
 
 	const selectedSpeed = settings.defaultPlaybackSpeed ?? DEFAULT_PLAYBACK_SPEED;
+
+	const selectedSpeedMode = isAiSpeedMode(settings.aiSpeedMode)
+		? settings.aiSpeedMode
+		: DEFAULT_AI_SPEED_MODE;
+
+	const handleSpeedModeChange = (mode: AiSpeedMode) => {
+		setSettings((prev) => ({
+			...prev,
+			aiSpeedMode: mode,
+		}));
+	};
 
 	const handleLanguageChange = (language: AiGenerationLanguage) => {
 		if (!isAiGenerationLanguage(language)) {
@@ -318,6 +355,40 @@ const CapSettingsCard = () => {
 							)}
 						>
 							{speed}×
+						</button>
+					))}
+				</div>
+			</div>
+
+			<div className="flex flex-col gap-3 p-4 text-left rounded-xl border transition-colors bg-gray-2 border-gray-3 sm:flex-row sm:justify-between sm:items-center">
+				<div className="flex flex-col flex-1 gap-1">
+					<div className="flex gap-1.5 items-center">
+						<Gauge className="w-3.5 h-3.5 text-gray-9" />
+						<p className="text-sm text-gray-12">AI transcription mode</p>
+					</div>
+					<p className="text-xs text-gray-10">
+						<span className="font-medium text-gray-12">Fast</span> transcribes
+						immediately at the standard price.{" "}
+						<span className="font-medium text-gray-12">Cheap</span> is cheaper,
+						but transcription may be delayed by hours while it waits on the free
+						tier before finishing.
+					</p>
+				</div>
+				<div className="flex flex-wrap gap-1 items-center p-1 rounded-lg border bg-gray-1 border-gray-3">
+					{AI_SPEED_MODES.map((mode) => (
+						<button
+							key={mode.value}
+							type="button"
+							onClick={() => handleSpeedModeChange(mode.value)}
+							aria-pressed={selectedSpeedMode === mode.value}
+							className={clsx(
+								"min-w-14 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+								selectedSpeedMode === mode.value
+									? "text-white bg-blue-11"
+									: "text-gray-11 hover:bg-gray-3",
+							)}
+						>
+							{mode.label}
 						</button>
 					))}
 				</div>

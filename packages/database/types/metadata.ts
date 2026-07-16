@@ -187,6 +187,43 @@ export interface VideoMetadata {
 	 */
 	completedChunks?: Record<string, string>;
 	/**
+	 * Opt-in cost/speed subsystem (org `settings.aiSpeedMode`). All fields below
+	 * are additive and default undefined; a video with none behaves exactly as the
+	 * synchronous `fast` path does today.
+	 *
+	 * Per-job resolved AI cost mode. "fast" = synchronous Gemini (default,
+	 * unchanged behavior); "cheap" = patient free/Batch tier with a paid fallback.
+	 */
+	aiMode?: "fast" | "cheap";
+	/**
+	 * ISO timestamp of the first AI job start for this video. Drives the cheap →
+	 * paid patience ladder (auto-continue after AI_CHEAP_PATIENCE_MINUTES). Set
+	 * once and preserved across cheap re-kicks.
+	 */
+	aiJobStartedAt?: string;
+	/**
+	 * ISO timestamp set when AI generation starts; used alongside the stale-job
+	 * recovery / patience crons. Distinct from `pipelineProgress` timing.
+	 */
+	aiProcessingStartedAt?: string;
+	/** True while a cheap-mode job is parked waiting for free-tier quota to refresh. */
+	aiQuotaWaiting?: boolean;
+	/**
+	 * Cheap-mode chunks submitted to the paid Gemini Batch API, awaiting collection
+	 * by the poll-batch-jobs cron. Each entry is dropped once its result is merged
+	 * into `completedChunks[chunkIndex]` (succeeded) or abandoned (failed / paid
+	 * takeover). `chunkIndex` maps the collected result back onto the deterministic
+	 * chunk grid so the cheap re-kick resumes from the fuller checkpoint.
+	 */
+	aiBatchJobs?: Array<{
+		batchName: string;
+		fileName: string;
+		chunkIndex: number;
+		startSec: number;
+		durationSec: number;
+		submittedAt: string;
+	}>;
+	/**
 	 * How many times the stale-job recovery cron has re-triggered this video's
 	 * transcription / AI generation workflow. Acts as a hard anti-loop cap so a
 	 * permanently-broken video can never be re-triggered forever (and rack up

@@ -1,0 +1,37 @@
+name: Poll Gemini Batch jobs
+
+# Hits the app's Batch collector endpoint on a schedule so cheap-mode (aiSpeedMode)
+# transcription chunks submitted to the Gemini Batch API get collected, merged
+# into the checkpoint, and the workflow re-kicked — and so a video that has waited
+# past its patience window auto-continues on the paid synchronous tier.
+# Requires the repo secret CRON_SECRET (same value as the app's CRON_SECRET env).
+# Until that secret is added, each run safely skips (no failures).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes
+  workflow_dispatch: {}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping poll-batch-jobs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: https://web-production-e6fe4.up.railway.app
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret not set yet — skipping."
+            echo "Add it in: repo Settings -> Secrets and variables -> Actions -> New repository secret (name CRON_SECRET)."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/out.txt -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/poll-batch-jobs")
+          echo "HTTP $code"
+          cat /tmp/out.txt || true
+          if [ "$code" != "200" ]; then
+            echo "Batch poll ping failed"
+            exit 1
+          fi
