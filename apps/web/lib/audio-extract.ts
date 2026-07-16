@@ -4,6 +4,11 @@ import { existsSync, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
+import {
+	planVadChunks,
+	type SilenceInterval,
+	type VadPlanOptions,
+} from "@/lib/transcription-chunking";
 
 /**
  * Hard wall-clock cap on any single ffmpeg invocation. Without this a stalled
@@ -527,6 +532,170 @@ export async function chunkAudio(
 		offset += stride;
 	}
 
+	return slices;
+}
+
+/**
+ * Detect silence intervals via ffmpeg's silencedetect filter in a single pass.
+ * The equivalent of pydub's split_on_silence used in the ds_er dataset pipeline
+ * (noise floor + minimum silence duration), but detection-only so timestamps are
+ * never shifted. silencedetect prints to stderr.
+ */
+export async function detectSilenceIntervals(
+	inputPath: string,
+	// -30 dB matches the ds_er dataset pipeline's proven value: conservative
+	// enough not to classify quiet speech as silence (which would drop real
+	// words), while still catching genuine dead air.
+	noiseDb = -30,
+	minSilenceSec = 0.6,
+): Promise<SilenceInterval[]> {
+	const ffmpeg = getFfmpegPath();
+	const args = [
+		"-i",
+		inputPath,
+		"-af",
+		`silencedetect=noise=${noiseDb}dB:d=${minSilenceSec}`,
+		"-f",
+		"null",
+		"-",
+	];
+
+	const stderr = await new Promise<string>((resolveErr, rejectErr) => {
+		const proc = spawn(ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+		armFfmpegTimeout(proc, "silencedetect", rejectErr);
+		let out = "";
+		proc.stderr?.on("data", (d: Buffer) => {
+			out += d.toString();
+		});
+		proc.on("error", (err: Error) =>
+			rejectErr(new Error(`silencedetect failed: ${err.message}`)),
+		);
+		proc.on("close", (code: number | null) =>
+			code === 0
+				? resolveErr(out)
+				: rejectErr(new Error(`silencedetect exited ${code}`)),
+		);
+	});
+
+	const intervals: SilenceInterval[] = [];
+	let start: number | null = null;
+	for (const line of stderr.split("\n")) {
+		const s = line.match(/silence_start:\s*(-?[\d.]+)/);
+		if (s?.[1] != null) {
+			start = Number.parseFloat(s[1]);
+			continue;
+		}
+		const e = line.match(/silence_end:\s*(-?[\d.]+)/);
+		if (e?.[1] != null && start != null) {
+			intervals.push({ startSec: start, endSec: Number.parseFloat(e[1]) });
+			start = null;
+		}
+	}
+	return intervals;
+}
+
+async function extractSlice(
+	ffmpeg: string,
+	inputPath: string,
+	startSec: number,
+	durationSec: number,
+	outputPath: string,
+): Promise<void> {
+	const args = [
+		"-ss",
+		String(startSec),
+		"-i",
+		inputPath,
+		"-t",
+		String(durationSec),
+		"-vn",
+		"-acodec",
+		"libmp3lame",
+		"-b:a",
+		"128k",
+		"-f",
+		"mp3",
+		"-y",
+		outputPath,
+	];
+	await new Promise<void>((res, rej) => {
+		const proc = spawn(ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+		armFfmpegTimeout(proc, "vad-slice", rej);
+		let stderr = "";
+		proc.stderr?.on("data", (d: Buffer) => {
+			stderr += d.toString();
+		});
+		proc.on("error", (err: Error) => {
+			fs.unlink(outputPath).catch(() => {});
+			rej(new Error(`vad slice failed: ${err.message}`));
+		});
+		proc.on("close", (code: number | null) =>
+			code === 0
+				? res()
+				: (fs.unlink(outputPath).catch(() => {}),
+					rej(new Error(`vad slice exited ${code}: ${stderr}`))),
+		);
+	});
+}
+
+/**
+ * VAD-based chunking: split on detected silence rather than blind fixed windows.
+ * Boundaries land in silence (no mid-word cuts, no overlap needed), long silences
+ * are skipped entirely (they trigger the model's repetition loops and cost tokens
+ * for nothing), and each chunk keeps its real start offset. Falls back to fixed
+ * windows if no usable silence is found (e.g. wall-to-wall speech or a probe
+ * failure), so it is always safe to call.
+ */
+export async function chunkAudioVad(
+	inputPath: string,
+	totalDurationSec: number,
+	opts: VadPlanOptions & { noiseDb?: number; minSilenceSec?: number } = {},
+): Promise<AudioSlice[]> {
+	const ffmpeg = getFfmpegPath();
+	let plan: ReturnType<typeof planVadChunks> = [];
+	try {
+		const silences = await detectSilenceIntervals(
+			inputPath,
+			opts.noiseDb,
+			opts.minSilenceSec,
+		);
+		plan = planVadChunks(silences, totalDurationSec, opts);
+	} catch (err) {
+		console.warn(
+			`[CAP-TRANSCRIBE] silencedetect failed, falling back to fixed windows:`,
+			err,
+		);
+	}
+
+	// No usable plan (no silence, or all one block that equals fixed windows) →
+	// use the original fixed-window chunker.
+	if (plan.length === 0) {
+		return chunkAudio(inputPath, totalDurationSec, opts.maxSec ?? 300, 5);
+	}
+
+	const slices: AudioSlice[] = [];
+	let index = 0;
+	for (const chunk of plan) {
+		const outputPath = join(tmpdir(), `audio-vad-${randomUUID()}-${index}.mp3`);
+		await extractSlice(
+			ffmpeg,
+			inputPath,
+			chunk.startSec,
+			chunk.endSec - chunk.startSec,
+			outputPath,
+		);
+		slices.push({
+			path: outputPath,
+			startOffsetSec: chunk.startSec,
+			durationSec: chunk.endSec - chunk.startSec,
+			cleanup: async () => {
+				try {
+					await fs.unlink(outputPath);
+				} catch {}
+			},
+		});
+		index++;
+	}
 	return slices;
 }
 
