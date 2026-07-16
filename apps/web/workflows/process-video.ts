@@ -23,7 +23,6 @@ import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { FatalError } from "workflow";
 import { runPromise } from "@/lib/server";
-import { patchVideoMetadata } from "@/lib/video-metadata";
 import {
 	extractGifPreview,
 	extractThumbnail,
@@ -136,29 +135,28 @@ async function probeAndStoreMetadata(
 		`[CAP-PROCESS] probed video=${videoId} duration=${probe.durationSec} width=${probe.width} height=${probe.height} fps=${probe.fps} videoCodec=${probe.videoCodec} audioCodec=${probe.audioCodec} container=${probe.containerFormat}`,
 	);
 
-	// Blind column writes (duration/width/height/fps come from the probe, not a
-	// read) stay a plain UPDATE. The metadata codec fields are a read-modify-write,
-	// so route them through the atomic row-locked helper to avoid clobbering a
-	// concurrent metadata writer. Split so neither statement drops the other.
-	const columnUpdates = {
-		...(probe.durationSec != null ? { duration: probe.durationSec } : {}),
-		...(probe.width != null ? { width: probe.width } : {}),
-		...(probe.height != null ? { height: probe.height } : {}),
-		...(probe.fps != null ? { fps: probe.fps } : {}),
-	};
-	if (Object.keys(columnUpdates).length > 0) {
-		await db()
-			.update(videos)
-			.set(columnUpdates)
-			.where(eq(videos.id, videoId as Video.VideoId));
-	}
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
 
-	await patchVideoMetadata(videoId, (current) => ({
-		...current,
+	const nextMetadata: VideoMetadata = {
+		...(row?.metadata ?? {}),
 		videoCodec: probe.videoCodec ?? undefined,
 		audioCodec: probe.audioCodec ?? undefined,
 		containerFormat: probe.containerFormat ?? undefined,
-	}));
+	};
+
+	await db()
+		.update(videos)
+		.set({
+			...(probe.durationSec != null ? { duration: probe.durationSec } : {}),
+			...(probe.width != null ? { width: probe.width } : {}),
+			...(probe.height != null ? { height: probe.height } : {}),
+			...(probe.fps != null ? { fps: probe.fps } : {}),
+			metadata: nextMetadata,
+		})
+		.where(eq(videos.id, videoId as Video.VideoId));
 
 	console.info(`[CAP-PROCESS] metadata written: video=${videoId}`);
 	void userId; // referenced only for log parity / call signature symmetry
@@ -193,7 +191,7 @@ async function ensureWaveform(
 			console.info(
 				`[CAP-PROCESS] waveform.png already present video=${videoId} bytes=${existing.value.ContentLength}`,
 			);
-			await markWaveformReady(videoId, waveformKey);
+			await markWaveformReady(videoId, video.metadata ?? {}, waveformKey);
 			return;
 		}
 
@@ -208,7 +206,7 @@ async function ensureWaveform(
 			console.info(
 				`[CAP-PROCESS] waveform generated: video=${videoId} size=${body.length} key=${waveformKey}`,
 			);
-			await markWaveformReady(videoId, waveformKey);
+			await markWaveformReady(videoId, video.metadata ?? {}, waveformKey);
 		} finally {
 			await cleanup();
 		}
@@ -224,11 +222,14 @@ async function ensureWaveform(
 
 async function markWaveformReady(
 	videoId: string,
+	currentMetadata: VideoMetadata,
 	waveformKey: string,
 ): Promise<void> {
-	await patchVideoMetadata(videoId, (current) =>
-		current.waveformKey === waveformKey ? current : { ...current, waveformKey },
-	);
+	if (currentMetadata.waveformKey === waveformKey) return;
+	await db()
+		.update(videos)
+		.set({ metadata: { ...currentMetadata, waveformKey } })
+		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
 /**
@@ -261,7 +262,7 @@ async function ensureMp4Variant(
 		console.info(
 			`[CAP-PROCESS] transcoded.mp4 already present video=${videoId} bytes=${existing.value.ContentLength}`,
 		);
-		await markMp4Ready(videoId);
+		await markMp4Ready(videoId, video.metadata ?? {});
 		return;
 	}
 
@@ -290,16 +291,21 @@ async function ensureMp4Variant(
 		console.info(
 			`[CAP-PROCESS] transcode complete: video=${videoId} size=${rendered.sizeBytes} elapsed=${rendered.elapsedMs}ms key=${transcodedKey}`,
 		);
-		await markMp4Ready(videoId);
+		await markMp4Ready(videoId, video.metadata ?? {});
 	} finally {
 		await rendered.cleanup();
 	}
 }
 
-async function markMp4Ready(videoId: string): Promise<void> {
-	await patchVideoMetadata(videoId, (current) =>
-		current.mp4Ready === true ? current : { ...current, mp4Ready: true },
-	);
+async function markMp4Ready(
+	videoId: string,
+	currentMetadata: VideoMetadata,
+): Promise<void> {
+	if (currentMetadata.mp4Ready === true) return;
+	await db()
+		.update(videos)
+		.set({ metadata: { ...currentMetadata, mp4Ready: true } })
+		.where(eq(videos.id, videoId as Video.VideoId));
 }
 
 /**
@@ -409,10 +415,12 @@ async function ensurePreviewAssets(
 	const nextStatus: VideoMetadata["thumbnailStatus"] = thumbnailOk
 		? "ready"
 		: "failed";
-	await patchVideoMetadata(videoId, (current) => ({
-		...current,
-		thumbnailStatus: nextStatus,
-	}));
+	await db()
+		.update(videos)
+		.set({
+			metadata: { ...(video.metadata ?? {}), thumbnailStatus: nextStatus },
+		})
+		.where(eq(videos.id, videoId as Video.VideoId));
 
 	console.info(
 		`[CAP-THUMB] previews video=${videoId} thumbnail=${thumbnailOk ? "ready" : "failed"} gif=${gifOk ? "ready" : "failed"}`,
