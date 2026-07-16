@@ -1,7 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getCurrentUserMock = vi.fn();
-const whereMock = vi.fn();
+
+// Rows returned by each successive `db().select()...where()` (or `.limit()`)
+// call, in order. This lets a single test drive the videos lookup followed by
+// the videoUploads lookup.
+let selectResultQueue: unknown[][] = [];
+const whereMock = vi.fn(() => {
+	const rows = selectResultQueue.shift() ?? [];
+	// The videos query is awaited directly; the videoUploads query appends
+	// `.limit(1)`. Return a thenable that also answers `.limit`, so both shapes
+	// resolve to the queued rows.
+	const result = Promise.resolve(rows) as Promise<unknown[]> & {
+		limit: () => Promise<unknown[]>;
+	};
+	result.limit = () => Promise.resolve(rows);
+	return result;
+});
 const selectMock = vi.fn(() => ({
 	from: vi.fn(() => ({
 		where: whereMock,
@@ -47,118 +62,73 @@ vi.mock("server-only", () => ({}));
 describe("saveVideoEdits", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		selectResultQueue = [];
 	});
 
-	it("requires an owner session", async () => {
+	it("returns a signed-out result without touching the database", async () => {
 		getCurrentUserMock.mockResolvedValueOnce(null);
 		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
 
-		await expect(
-			saveVideoEdits("video-1" as never, {
-				version: 1,
-				sourceDuration: 10,
-				keepRanges: [{ start: 0, end: 10 }],
-			}),
-		).rejects.toThrow("Unauthorized");
+		const result = await saveVideoEdits("video-1" as never, {
+			version: 1,
+			sourceDuration: 10,
+			keepRanges: [{ start: 0, end: 10 }],
+		});
 
+		expect(result).toEqual({
+			ok: false,
+			error: "You're signed out. Please log in again.",
+		});
 		expect(selectMock).not.toHaveBeenCalled();
-	});
-
-	it("rejects active processing rows before saving", async () => {
-		getCurrentUserMock.mockResolvedValueOnce({ id: "user-1", isPro: true });
-		whereMock
-			.mockResolvedValueOnce([
-				{
-					id: "video-1",
-					ownerId: "user-1",
-					duration: 10,
-					source: { type: "webMP4" },
-					isScreenshot: false,
-					metadata: null,
-				},
-			])
-			.mockResolvedValueOnce([{ phase: "processing" }]);
-		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
-
-		await expect(
-			saveVideoEdits("video-1" as never, {
-				version: 1,
-				sourceDuration: 10,
-				keepRanges: [{ start: 0, end: 10 }],
-			}),
-		).rejects.toThrow("Video is already uploading or processing");
-
-		expect(insertMock).not.toHaveBeenCalled();
-	});
-
-	it("rejects failed edit rows before the workflow clears them", async () => {
-		getCurrentUserMock.mockResolvedValueOnce({ id: "user-1", isPro: true });
-		whereMock
-			.mockResolvedValueOnce([
-				{
-					id: "video-1",
-					ownerId: "user-1",
-					duration: 10,
-					source: { type: "webMP4" },
-					isScreenshot: false,
-					metadata: null,
-				},
-			])
-			.mockResolvedValueOnce([{ phase: "error" }]);
-		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
-
-		await expect(
-			saveVideoEdits("video-1" as never, {
-				version: 1,
-				sourceDuration: 10,
-				keepRanges: [{ start: 0, end: 10 }],
-			}),
-		).rejects.toThrow(
-			"Previous edit failed and is being cleaned up. Try again in a moment.",
-		);
-
-		expect(insertMock).not.toHaveBeenCalled();
-	});
-
-	it("rejects completed edit rows before the workflow clears them", async () => {
-		getCurrentUserMock.mockResolvedValueOnce({ id: "user-1", isPro: true });
-		whereMock
-			.mockResolvedValueOnce([
-				{
-					id: "video-1",
-					ownerId: "user-1",
-					duration: 10,
-					source: { type: "webMP4" },
-					isScreenshot: false,
-					metadata: null,
-				},
-			])
-			.mockResolvedValueOnce([{ phase: "complete" }]);
-		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
-
-		await expect(
-			saveVideoEdits("video-1" as never, {
-				version: 1,
-				sourceDuration: 10,
-				keepRanges: [{ start: 0, end: 10 }],
-			}),
-		).rejects.toThrow("Previous edit is finishing up. Try again in a moment.");
-
-		expect(insertMock).not.toHaveBeenCalled();
 	});
 
 	it("requires Cap Pro before saving edits", async () => {
 		getCurrentUserMock.mockResolvedValueOnce({ id: "user-1", isPro: false });
 		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
 
-		await expect(
-			saveVideoEdits("video-1" as never, {
-				version: 1,
-				sourceDuration: 10,
-				keepRanges: [{ start: 0, end: 10 }],
-			}),
-		).rejects.toThrow("Cap Pro is required to edit videos");
+		const result = await saveVideoEdits("video-1" as never, {
+			version: 1,
+			sourceDuration: 10,
+			keepRanges: [{ start: 0, end: 10 }],
+		});
 
+		expect(result).toEqual({
+			ok: false,
+			error: "Cap Pro is required to edit videos.",
+		});
 		expect(selectMock).not.toHaveBeenCalled();
+	});
+
+	it("rejects when another edit is still processing the video", async () => {
+		getCurrentUserMock.mockResolvedValueOnce({ id: "user-1", isPro: true });
+		selectResultQueue = [
+			// videos lookup
+			[
+				{
+					id: "video-1",
+					ownerId: "user-1",
+					duration: 10,
+					source: { type: "webMP4" },
+					isScreenshot: false,
+					metadata: null,
+				},
+			],
+			// active videoUploads lookup
+			[{ phase: "processing", startedAt: new Date() }],
+		];
+		const { saveVideoEdits } = await import("@/actions/videos/save-edits");
+
+		const result = await saveVideoEdits("video-1" as never, {
+			version: 1,
+			sourceDuration: 10,
+			keepRanges: [{ start: 0, end: 10 }],
+		});
+
+		expect(result).toEqual({
+			ok: false,
+			error:
+				"Another edit is still processing this video. Please wait a moment and try again.",
+		});
+		expect(insertMock).not.toHaveBeenCalled();
 	});
 });

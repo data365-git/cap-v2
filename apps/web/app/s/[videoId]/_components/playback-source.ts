@@ -86,7 +86,7 @@ async function probePlaybackSource(
 
 export function detectCrossOriginSupport(
 	url: string,
-	_probeWasRedirected = false,
+	probeWasRedirected = false,
 ): boolean {
 	try {
 		const resolved = new URL(url, "https://cap.so");
@@ -101,7 +101,11 @@ export function detectCrossOriginSupport(
 			hostname.includes("r2.cloudflarestorage.com") ||
 			hostname.includes("s3.amazonaws.com") ||
 			hostname.includes(".s3.");
-		if (isR2OrS3) return false;
+		// A successful redirected probe means the storage host answered our
+		// same-origin range request with CORS headers, so cross-origin playback
+		// (needed for canvas capture / thumbnails) is safe to enable. Without a
+		// redirect we fall back to the conservative host heuristic.
+		if (isR2OrS3) return probeWasRedirected;
 		const looksLikeMinio =
 			hostname.includes("minio") || hostname.endsWith(".up.railway.app");
 		return !looksLikeMinio;
