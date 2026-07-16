@@ -36,6 +36,11 @@ import {
 	chunkAudio,
 	extractAudioFromUrl,
 } from "@/lib/audio-extract";
+import {
+	CHEAP_NO_PAID_KEY_MESSAGE,
+	cheapWallDisposition,
+	resumableChunkIndices,
+} from "@/lib/cheap-park";
 import { fetchScribeWordTimes } from "@/lib/eleven-scribe";
 import { submitChunkBatch } from "@/lib/gemini-batch-transcribe";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
@@ -317,24 +322,29 @@ async function markQuotaWaiting(videoId: string): Promise<void> {
  * the SERVER paid key (never an owner key — the collector must resolve the same
  * project), persist the job (with its chunk index so the collector can drop the
  * result onto the same grid), and return so the caller can rethrow the quota
- * wait. Submits at most one job per video. NEVER throws: any failure here is
- * logged and swallowed so the patient wait stays live and a transient problem
- * never escalates a quota wait to ERROR.
+ * wait. Submits at most one job per video.
+ *
+ * Returns whether the video may PARK: true when a paid GEMINI_API_KEY exists (the
+ * park is recoverable — the poll-batch-jobs cron collects the Batch and/or the
+ * patience window auto-continues on the paid tier), false when NO paid key is
+ * configured (nothing can ever collect or continue it, so the caller must fail
+ * safe to ERROR instead of stranding the video in PROCESSING forever). Once a
+ * paid key exists this NEVER throws: a transient submit failure is swallowed and
+ * still parks, because the patience window will rescue it.
  */
 async function submitCheapChunkBatch(
 	chunk: { audioPath: string; startSec: number; durationSec: number },
 	chunkIndex: number,
 	videoId: string,
-): Promise<void> {
+): Promise<boolean> {
+	const paidKey = serverEnv().GEMINI_API_KEY;
+	if (!paidKey) {
+		console.warn(
+			`[transcribe] cheap quota but no paid GEMINI_API_KEY set; cannot park video=${videoId} (fail-safe to ERROR)`,
+		);
+		return false;
+	}
 	try {
-		const paidKey = serverEnv().GEMINI_API_KEY;
-		if (!paidKey) {
-			console.warn(
-				`[transcribe] cheap quota but no paid GEMINI_API_KEY set; staying on patient wait for video=${videoId}`,
-			);
-			return;
-		}
-
 		// Never submit while a job is already pending — one Batch per video.
 		const [row] = await db()
 			.select({ metadata: videos.metadata })
@@ -342,7 +352,7 @@ async function submitCheapChunkBatch(
 			.where(eq(videos.id, videoId as Video.VideoId))
 			.limit(1);
 		const existingJobs = ((row?.metadata as VideoMetadata) ?? {}).aiBatchJobs;
-		if (Array.isArray(existingJobs) && existingJobs.length > 0) return;
+		if (Array.isArray(existingJobs) && existingJobs.length > 0) return true;
 
 		const submitted = await submitChunkBatch(
 			{ audioPath: chunk.audioPath },
@@ -362,9 +372,10 @@ async function submitCheapChunkBatch(
 		});
 	} catch (error) {
 		console.warn(
-			`[transcribe] cheap-mode Batch submit failed for video=${videoId}; keeping patient wait: ${error instanceof Error ? error.message : String(error)}`,
+			`[transcribe] cheap-mode Batch submit failed for video=${videoId}; keeping patient wait (patience window will rescue): ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
+	return true;
 }
 
 /**
@@ -1244,7 +1255,7 @@ async function transcribeAudio(
 					);
 					if (parked && parked.status === "fulfilled") {
 						const { slice, globalIdx } = parked.value;
-						await submitCheapChunkBatch(
+						const canPark = await submitCheapChunkBatch(
 							{
 								audioPath: slice.path,
 								startSec: slice.startOffsetSec,
@@ -1253,6 +1264,11 @@ async function transcribeAudio(
 							globalIdx,
 							context.videoId,
 						);
+						// No paid tier to collect/continue on → parking would strand the
+						// video forever. Fail safe to ERROR (FatalError = no workflow retry).
+						if (cheapWallDisposition(canPark) === "fail") {
+							throw new FatalError(CHEAP_NO_PAID_KEY_MESSAGE);
+						}
 						throw new AiQuotaWaitFatalError(
 							`Free-tier transcription quota exhausted for video=${context.videoId}`,
 						);
@@ -1337,7 +1353,7 @@ async function transcribeAudio(
 						// Cheap mode: a quota wall on retry parks the video (submit Batch +
 						// throw) instead of leaving a gap, same as the pool path above.
 						if (isCheap && isQuotaLikeAiError(retryErr)) {
-							await submitCheapChunkBatch(
+							const canPark = await submitCheapChunkBatch(
 								{
 									audioPath: slice.path,
 									startSec: slice.startOffsetSec,
@@ -1346,6 +1362,9 @@ async function transcribeAudio(
 								fi,
 								context.videoId,
 							);
+							if (cheapWallDisposition(canPark) === "fail") {
+								throw new FatalError(CHEAP_NO_PAID_KEY_MESSAGE);
+							}
 							throw new AiQuotaWaitFatalError(
 								`Free-tier transcription quota exhausted for video=${context.videoId}`,
 							);
@@ -1391,7 +1410,39 @@ async function transcribeAudio(
 			await patchVideoMetadata(context.videoId, { completedChunks: undefined });
 		} else {
 			// ─── Original sequential path for video sources ──────────────────────
+			// Resume from the durable completedChunks checkpoint: a cheap-mode VIDEO
+			// source that parked on the free tier and was then flipped to the paid
+			// tier (continue-paid / patience) MUST NOT re-transcribe — and re-bill on
+			// the paid key — chunks the free tier already produced. Pure-fast videos
+			// never populate completedChunks, so this is inert on the default path.
+			const [seqMetaRow] = await db()
+				.select({ metadata: videos.metadata })
+				.from(videos)
+				.where(eq(videos.id, context.videoId as Video.VideoId));
+			const seqSaved: Record<string, string> =
+				((seqMetaRow?.metadata as VideoMetadata) || {}).completedChunks ?? {};
+			const seqResumable = new Set(
+				resumableChunkIndices(slices.length, seqSaved),
+			);
+			if (seqResumable.size > 0) {
+				console.info(
+					`[CAP-TRANSCRIBE] sequential resume: ${seqResumable.size}/${slices.length} chunks already completed — skipping paid re-transcription`,
+				);
+			}
+
 			for (let i = 0; i < slices.length; i++) {
+				// Resume: reuse an already-transcribed chunk (absolute-timed VTT in the
+				// grid) instead of re-billing it.
+				if (seqResumable.has(i)) {
+					const savedVtt = seqSaved[String(i)];
+					if (savedVtt) {
+						const savedCues = parseVttCues(savedVtt);
+						perChunkResults.push({ cues: savedCues, startOffsetSec: 0 });
+						totalCueCount += savedCues.length;
+						continue;
+					}
+				}
+
 				// Stop before transcribing the next (billable) chunk if cancelled.
 				await assertNotCancelled(context.videoId);
 
@@ -1440,6 +1491,22 @@ async function transcribeAudio(
 					activeUnitLabel: undefined,
 					activeUnitEtaSec: undefined,
 					...(isLast ? { completedAt: new Date().toISOString() } : {}),
+				});
+			}
+
+			// When a resume happened, the loop's per-chunk "done" marker may have
+			// been skipped for a resumed final chunk — force the phase done — and
+			// clear the checkpoint so a later forced re-transcription starts clean
+			// (mirrors the parallel path). Gated on a resume so pure-fast is inert.
+			if (seqResumable.size > 0) {
+				await patchPipelinePhase(context.videoId, "transcribe", {
+					status: "done",
+					done: slices.length,
+					total: slices.length,
+					completedAt: new Date().toISOString(),
+				});
+				await patchVideoMetadata(context.videoId, {
+					completedChunks: undefined,
 				});
 			}
 		}
