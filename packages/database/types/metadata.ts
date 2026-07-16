@@ -184,6 +184,13 @@ export interface VideoMetadata {
 	 */
 	recoveryAttempts?: number;
 	/**
+	 * Set by the storage-reconcile cron when the video's underlying S3/R2 object
+	 * can no longer be found (orphaned DB row). Purely a diagnostic flag so the
+	 * reconcile job skips already-flagged rows on subsequent runs; it does not
+	 * change playback behavior. See app/api/cron/reconcile-storage/route.ts.
+	 */
+	storageMissing?: boolean;
+	/**
 	 * On-demand translations of the AI summary + transcript into other
 	 * languages, keyed by ISO language code (see `@cap/web-domain` LanguageCode).
 	 * Additive: the base `aiSummary` and original transcript VTT are untouched;

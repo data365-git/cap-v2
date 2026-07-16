@@ -6,6 +6,10 @@ import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { startAiGeneration } from "@/lib/generate-ai";
+import {
+	REPROCESS_RATE_LIMIT_CODE,
+	recordReprocessAttempt,
+} from "@/lib/reprocess-rate-limit";
 import { isAiGenerationEnabled } from "@/utils/flags";
 
 export async function POST(
@@ -86,6 +90,20 @@ export async function POST(
 					aiGenerationStatus: metadata.aiGenerationStatus,
 				},
 				{ status: 400 },
+			);
+		}
+
+		// Cost guard: cap forced/error AI re-generations to a small number per
+		// rolling hour per video so a repeated-click or scripted loop can't rack
+		// up unbounded Gemini spend.
+		if (!recordReprocessAttempt(`ai:${videoId}`)) {
+			return Response.json(
+				{
+					error:
+						"Too many AI re-generation attempts for this video. Please wait before trying again.",
+					code: REPROCESS_RATE_LIMIT_CODE,
+				},
+				{ status: 429 },
 			);
 		}
 
