@@ -1,0 +1,42 @@
+name: uptime-alert
+
+# External down-alert: GitHub (off-host) pings /api/health on a schedule and
+# Telegrams the owner when the site is unreachable/unhealthy. The in-app
+# sendOpsAlert (lib/ops-alert.ts) can only fire while the app is ALIVE, so it
+# cannot report a full outage — this catches that.
+#
+# Secrets to set (repo Settings → Secrets and variables → Actions):
+#   TELEGRAM_BOT_TOKEN      — bot token (from @BotFather)
+#   TELEGRAM_ALERT_CHAT_ID  — owner chat id (from @userinfobot)
+# Until they're set, an unhealthy run just fails loudly (no Telegram).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health and alert on failure
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
+          APP_URL: https://web-production-e6fe4.up.railway.app
+        run: |
+          set +e
+          code=$(curl -s -o /tmp/h.json -w "%{http_code}" --max-time 25 "$APP_URL/api/health")
+          healthy=$(grep -c '"status":"ok"' /tmp/h.json 2>/dev/null)
+          echo "http=$code healthy=$healthy body=$(head -c 300 /tmp/h.json 2>/dev/null)"
+          if [ "$code" = "200" ] && [ "$healthy" != "0" ]; then
+            echo "site healthy"; exit 0
+          fi
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+            echo "::warning::site unhealthy (http=$code) but Telegram secrets not set"; exit 1
+          fi
+          msg="🔴 data365 (cap-v2) DOWN — /api/health returned HTTP $code ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            --data-urlencode chat_id="${TG_CHAT}" \
+            --data-urlencode text="$msg" >/dev/null
+          echo "alert sent"; exit 1
