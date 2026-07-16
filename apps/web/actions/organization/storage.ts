@@ -27,6 +27,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { recordAudit } from "@/lib/audit";
 import { runPromise } from "@/lib/server";
+import { assertSafeExternalUrl } from "@/lib/validate-external-url";
 import { requireOrganizationSettingsManager } from "./authorization";
 
 const googleDriveProvider = "googleDrive";
@@ -385,6 +386,10 @@ export async function saveOrganizationS3Config(input: S3ConfigInput) {
 	const { user } = await requireOrganizationStorageManagerPro(
 		input.organizationId,
 	);
+	// SSRF guard: a custom endpoint is a user-supplied URL the server will later
+	// make S3 requests against. Reject anything that resolves to a private /
+	// loopback / link-local / metadata address before persisting it.
+	if (input.endpoint) await assertSafeExternalUrl(input.endpoint);
 	const credentials = await getS3InputCredentials(input);
 	const encryptedConfig = {
 		provider: input.provider,
@@ -446,6 +451,9 @@ export async function removeOrganizationS3Config(
 
 export async function testOrganizationS3Config(input: S3ConfigInput) {
 	await requireOrganizationStorageManagerPro(input.organizationId);
+	// SSRF guard: this function actually dials the endpoint (HeadBucket), so
+	// validate the user-supplied URL before creating the S3 client.
+	if (input.endpoint) await assertSafeExternalUrl(input.endpoint);
 	const credentials = await getS3InputCredentials(input);
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), 5000);

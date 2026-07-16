@@ -156,6 +156,13 @@ export interface VideoMetadata {
 	 * cost). See app/api/cron/recover-stale-ai-jobs/route.ts.
 	 */
 	recoveryAttempts?: number;
+	/**
+	 * Set by the storage-reconcile cron when the video's underlying S3/R2 object
+	 * can no longer be found (orphaned DB row). Purely a diagnostic flag so the
+	 * reconcile job skips already-flagged rows on subsequent runs; it does not
+	 * change playback behavior. See app/api/cron/reconcile-storage/route.ts.
+	 */
+	storageMissing?: boolean;
 }
 
 export type VideoEditRange = {
