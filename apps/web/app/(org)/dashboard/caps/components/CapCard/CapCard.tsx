@@ -19,6 +19,7 @@ import { HttpClient } from "@effect/platform";
 import {
 	faChartSimple,
 	faCheck,
+	faClockRotateLeft,
 	faCopy,
 	faDownload,
 	faEllipsis,
@@ -44,10 +45,13 @@ import { getTranscript } from "@/actions/videos/get-transcript";
 import { ConfirmationDialog } from "@/app/(org)/dashboard/_components/ConfirmationDialog";
 import { useDashboardContext } from "@/app/(org)/dashboard/Contexts";
 import { useUploadProgress } from "@/app/s/[videoId]/_components/ProgressCircle";
+import { parseVTT } from "@/app/s/[videoId]/_components/utils/transcript-utils";
 import {
 	type ImageLoadingStatus,
 	VideoThumbnail,
 } from "@/components/VideoThumbnail";
+import { useEffectMutation, useRpcClient } from "@/lib/EffectRuntime";
+import { ThumbnailRequest } from "@/lib/Requests/ThumbnailRequest";
 import {
 	sanitizeFilename,
 	toJson,
@@ -56,9 +60,6 @@ import {
 	toVtt,
 	triggerBrowserDownload,
 } from "@/lib/transcript-export";
-import { parseVTT } from "@/app/s/[videoId]/_components/utils/transcript-utils";
-import { useEffectMutation, useRpcClient } from "@/lib/EffectRuntime";
-import { ThumbnailRequest } from "@/lib/Requests/ThumbnailRequest";
 import { usePublicEnv } from "@/utils/public-env";
 
 import { PasswordDialog } from "../PasswordDialog";
@@ -244,6 +245,44 @@ export const CapCard = ({
 		},
 	});
 
+	// Opt-in ElevenLabs Scribe timestamp refinement. Replaces Gemini's estimated
+	// cue timing with word-accurate Scribe timing (text is preserved). Dormant
+	// server-side until ELEVENLABS_API_KEY is set — the route returns
+	// `notConfigured` and nothing changes.
+	const refineStatus = cap.metadata?.timestampRefineStatus;
+	const refineTimestampsMutation = useMutation({
+		mutationFn: async () => {
+			const res = await fetch(`/api/videos/${cap.id}/refine-timestamps`, {
+				method: "POST",
+			});
+			const body = (await res.json().catch(() => ({}))) as {
+				error?: string;
+				notConfigured?: boolean;
+			};
+			if (!res.ok) {
+				throw new Error(
+					body.notConfigured
+						? "Timestamp refinement is not configured on this server"
+						: (body.error ?? "Failed to refine timestamps"),
+				);
+			}
+			return body;
+		},
+		onSuccess: () => {
+			router.refresh();
+		},
+	});
+	const handleRefineTimestamps = () => {
+		if (refineTimestampsMutation.isPending || refineStatus === "PROCESSING")
+			return;
+		toast.promise(refineTimestampsMutation.mutateAsync(), {
+			loading: "Starting timestamp refinement...",
+			success: "Timestamp refinement started",
+			error: (error) =>
+				error instanceof Error ? error.message : "Failed to refine timestamps",
+		});
+	};
+
 	const handleSharingUpdated = () => {
 		router.refresh();
 	};
@@ -395,8 +434,7 @@ export const CapCard = ({
 		router.push(`/s/${cap.id}/edit`);
 	};
 
-	const transcriptHidden =
-		cap.settings?.disableTranscript === true;
+	const transcriptHidden = cap.settings?.disableTranscript === true;
 
 	const TRANSCRIPT_FORMATS = [
 		{
@@ -449,8 +487,7 @@ export const CapCard = ({
 				title: cap.name,
 				durationSec: cap.duration ?? null,
 				vttCues,
-				refinedTranscript:
-					cap.metadata?.aiSummary?.refinedTranscript ?? null,
+				refinedTranscript: cap.metadata?.aiSummary?.refinedTranscript ?? null,
 				aiSummary: cap.metadata?.aiSummary ?? null,
 			};
 			const content = formatter(exportInput);
@@ -649,9 +686,7 @@ export const CapCard = ({
 													}}
 													className="flex gap-2 items-center rounded-lg"
 												>
-													<p className="text-sm text-gray-12">
-														{format.label}
-													</p>
+													<p className="text-sm text-gray-12">{format.label}</p>
 												</DropdownMenuItem>
 											))}
 										</DropdownMenuSubContent>
@@ -686,6 +721,30 @@ export const CapCard = ({
 									>
 										<FontAwesomeIcon className="size-3" icon={faCopy} />
 										<p className="text-sm text-gray-12">Duplicate</p>
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={(e) => {
+											e.stopPropagation();
+											handleRefineTimestamps();
+										}}
+										disabled={
+											refineTimestampsMutation.isPending ||
+											refineStatus === "PROCESSING"
+										}
+										className="flex gap-2 items-center rounded-lg"
+									>
+										<FontAwesomeIcon
+											className={clsx(
+												"size-3",
+												refineStatus === "PROCESSING" && "animate-spin",
+											)}
+											icon={faClockRotateLeft}
+										/>
+										<p className="text-sm text-gray-12">
+											{refineStatus === "PROCESSING"
+												? "Refining timestamps..."
+												: "Refine timestamps"}
+										</p>
 									</DropdownMenuItem>
 									{canEditVideo && (
 										<DropdownMenuItem
@@ -949,6 +1008,31 @@ export const CapCard = ({
 							<span className="ml-0.5 animate-pulse">✨</span>
 						</button>
 					)}
+					{isOwner &&
+						(refineStatus === "PROCESSING" ||
+							refineStatus === "COMPLETE" ||
+							cap.metadata?.timestampsRefined) && (
+							<span
+								className={clsx(
+									"inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border self-start",
+									refineStatus === "PROCESSING"
+										? "bg-amber-3 text-amber-11 border-amber-6"
+										: "bg-green-3 text-green-11 border-green-6",
+								)}
+								title="ElevenLabs Scribe timestamp refinement"
+							>
+								<FontAwesomeIcon
+									icon={faClockRotateLeft}
+									className={clsx(
+										"size-2.5",
+										refineStatus === "PROCESSING" && "animate-spin",
+									)}
+								/>
+								{refineStatus === "PROCESSING"
+									? "Refining timestamps"
+									: "Timestamps refined"}
+							</span>
+						)}
 					{children}
 					<CapCardAnalytics
 						capId={cap.id}

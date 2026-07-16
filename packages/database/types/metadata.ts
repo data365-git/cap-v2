@@ -156,6 +156,24 @@ export interface VideoMetadata {
 	 * cost). See app/api/cron/recover-stale-ai-jobs/route.ts.
 	 */
 	recoveryAttempts?: number;
+	/**
+	 * Opt-in ElevenLabs Scribe timestamp refinement (per-video owner action).
+	 * Gemini timing remains the default for every transcript; the owner may
+	 * choose "Refine timestamps" to replace the estimated cue timing with
+	 * Scribe's word-accurate timing while preserving the transcript TEXT.
+	 *
+	 * `timestampsRefined` is true once a refinement has successfully rewritten
+	 * the stored VTT. `timestampRefineStatus` tracks the in-flight/terminal state
+	 * of the most recent request. Both live in this JSON column (no new DB
+	 * column / migration) and default to undefined for every existing row.
+	 * Dormant unless ELEVENLABS_API_KEY is configured.
+	 */
+	timestampsRefined?: boolean;
+	timestampRefineStatus?: "PROCESSING" | "COMPLETE" | "ERROR";
+	/** Human-readable reason the most recent refinement failed. */
+	timestampRefineError?: string;
+	/** ISO timestamp of the most recent successful refinement. */
+	timestampRefinedAt?: string;
 }
 
 export type VideoEditRange = {
