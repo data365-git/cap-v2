@@ -5,6 +5,7 @@ import type { VideoMetadata } from "@cap/database/types";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { startAiGeneration } from "@/lib/generate-ai";
+import { sendOpsAlert } from "@/lib/ops-alert";
 import { transcribeVideo } from "@/lib/transcribe";
 
 export const dynamic = "force-dynamic";
@@ -127,6 +128,15 @@ async function handler(request: Request) {
 				error,
 			);
 		}
+	}
+
+	// Recovering stranded jobs means something crashed/redeployed mid-run — worth
+	// an ops ping so the owner notices a pattern. No-ops silently if Telegram env
+	// isn't set; never throws.
+	if (recovered.length > 0) {
+		await sendOpsAlert(
+			`♻️ recover-stale-ai-jobs re-fired ${recovered.length} stranded job(s): ${recovered.join(", ")}`,
+		);
 	}
 
 	return NextResponse.json({ recovered: recovered.length, ids: recovered });
