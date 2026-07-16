@@ -10,6 +10,7 @@ import {
 	useCallback,
 	useEffect,
 	useImperativeHandle,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -25,6 +26,7 @@ import { CapAudioPlayer } from "./CapAudioPlayer";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
 import { GenerateStrip } from "./GenerateStrip";
+import { LanguagePicker, type SelectedLanguage } from "./LanguagePicker";
 import { MiniPlayerController } from "./MiniPlayerController";
 import {
 	shouldDeferPlaybackSource,
@@ -120,6 +122,38 @@ export const ShareVideo = forwardRef<
 		>(null);
 		const [aiChatOpen, setAiChatOpen] = useState(false);
 		const [currentTime, setCurrentTime] = useState(0);
+
+		// Multi-language: which language the AI panels (summary/tasks/refined) show.
+		// "base" = the originally generated content; a language code = a cached
+		// translation from metadata.translations. Defaults to the owner's
+		// preferredLanguage when that translation is available.
+		const translations = data.metadata?.translations;
+		// Single source of truth for language: CaptionContext already drives the
+		// captions + transcript (Groq VTT translation). Derive the summary picker's
+		// value from it ("original"/"off" → "base") and, on pick, drive BOTH — so
+		// one language choice translates summary, transcript, and captions together
+		// instead of the two disconnected selectors that existed before.
+		const captionLang = captionContext.selectedLanguage;
+		const selectedLanguage: SelectedLanguage =
+			captionLang === "original" || captionLang === "off"
+				? "base"
+				: captionLang;
+		const setSelectedLanguage = useCallback(
+			(value: SelectedLanguage) => {
+				const capLang: CaptionLanguage = value === "base" ? "original" : value;
+				captionContext.setSelectedLanguage(capLang);
+				if (value !== "base") {
+					void captionContext.requestTranslation(value);
+				}
+			},
+			[captionContext],
+		);
+
+		const baseSummary = data.metadata?.aiSummary ?? undefined;
+		const activeSummary =
+			selectedLanguage !== "base"
+				? (translations?.[selectedLanguage]?.aiSummary ?? baseSummary)
+				: baseSummary;
 		// videoSize-v2: bumped from "videoSize" so stale "md" preferences from
 		// the pre-LG-default era are ignored. Everyone now opens at LG (matches
 		// the single-frame + pin-by-default UX); a deliberate SM/MD choice still
@@ -269,6 +303,24 @@ export const ShareVideo = forwardRef<
 			transcriptContent,
 			transcriptError,
 			captionContext.setOriginalVttContent,
+		]);
+
+		// Transcript tab content follows the selected caption language. When a
+		// non-original translation is selected and its VTT is cached in the caption
+		// context, render that; otherwise (original, captions "off", or a translation
+		// still loading) fall back to the original transcript so the default path is
+		// never broken.
+		const transcriptDisplayContent = useMemo(() => {
+			const language = captionContext.selectedLanguage;
+			if (language !== "original" && language !== "off") {
+				const translated = captionContext.translatedVttContent.get(language);
+				if (translated) return translated;
+			}
+			return transcriptContent ?? undefined;
+		}, [
+			captionContext.selectedLanguage,
+			captionContext.translatedVttContent,
+			transcriptContent,
 		]);
 
 		useEffect(() => {
@@ -734,6 +786,24 @@ export const ShareVideo = forwardRef<
 					aiGenerationStatus === "PROCESSING" ||
 					aiGenerationStatus === "QUEUED") && (
 					<div className="mt-4">
+						{/* Language picker — appears once a base AI summary exists, so an
+						    owner can request a translation and any viewer can switch the
+						    summary/tasks/refined panels between languages. */}
+						{baseSummary &&
+							(isOwner ||
+								Object.values(translations ?? {}).some(
+									(t) => t?.status === "COMPLETE",
+								)) && (
+								<div className="mb-2 flex justify-end">
+									<LanguagePicker
+										videoId={data.id}
+										isOwner={isOwner}
+										translations={translations}
+										selected={selectedLanguage}
+										onSelect={setSelectedLanguage}
+									/>
+								</div>
+							)}
 						<BelowVideoTabs
 							isOwner={isOwner}
 							summary={
@@ -743,10 +813,10 @@ export const ShareVideo = forwardRef<
 									aiGenerationStatus={aiGenerationStatus}
 									data={{
 										duration: data.duration ?? undefined,
-										aiSummary: data.metadata?.aiSummary ?? undefined,
+										aiSummary: activeSummary,
 										speakerCount:
-											data.metadata?.aiSummary?.refinedTranscript?.intro
-												?.participants?.length || undefined,
+											activeSummary?.refinedTranscript?.intro?.participants
+												?.length || undefined,
 									}}
 									isOwner={isOwner}
 									onVideoJump={handleSeek}
@@ -757,7 +827,7 @@ export const ShareVideo = forwardRef<
 									videoId={data.id}
 									transcriptionStatus={data.transcriptionStatus}
 									aiGenerationStatus={aiGenerationStatus}
-									tasks={data.metadata?.aiSummary?.tasks ?? []}
+									tasks={activeSummary?.tasks ?? []}
 									isOwner={isOwner}
 								/>
 							}
@@ -765,7 +835,7 @@ export const ShareVideo = forwardRef<
 								<TranscriptPanel
 									videoId={data.id}
 									transcriptionStatus={data.transcriptionStatus}
-									transcriptContent={transcriptContent ?? undefined}
+									transcriptContent={transcriptDisplayContent}
 									currentTime={currentTime}
 									onVideoJump={handleSeek}
 									isOwner={isOwner}
@@ -778,7 +848,7 @@ export const ShareVideo = forwardRef<
 									aiGenerationStatus={aiGenerationStatus}
 									currentTime={currentTime}
 									refinedTranscript={
-										data.metadata?.aiSummary?.refinedTranscript ?? undefined
+										activeSummary?.refinedTranscript ?? undefined
 									}
 									onVideoJump={handleSeek}
 									isOwner={isOwner}
