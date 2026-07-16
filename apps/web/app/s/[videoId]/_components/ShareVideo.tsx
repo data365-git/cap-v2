@@ -10,6 +10,7 @@ import {
 	useCallback,
 	useEffect,
 	useImperativeHandle,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -269,6 +270,24 @@ export const ShareVideo = forwardRef<
 			transcriptContent,
 			transcriptError,
 			captionContext.setOriginalVttContent,
+		]);
+
+		// Transcript tab content follows the selected caption language. When a
+		// non-original translation is selected and its VTT is cached in the caption
+		// context, render that; otherwise (original, captions "off", or a translation
+		// still loading) fall back to the original transcript so the default path is
+		// never broken.
+		const transcriptDisplayContent = useMemo(() => {
+			const language = captionContext.selectedLanguage;
+			if (language !== "original" && language !== "off") {
+				const translated = captionContext.translatedVttContent.get(language);
+				if (translated) return translated;
+			}
+			return transcriptContent ?? undefined;
+		}, [
+			captionContext.selectedLanguage,
+			captionContext.translatedVttContent,
+			transcriptContent,
 		]);
 
 		useEffect(() => {
@@ -765,7 +784,7 @@ export const ShareVideo = forwardRef<
 								<TranscriptPanel
 									videoId={data.id}
 									transcriptionStatus={data.transcriptionStatus}
-									transcriptContent={transcriptContent ?? undefined}
+									transcriptContent={transcriptDisplayContent}
 									currentTime={currentTime}
 									onVideoJump={handleSeek}
 									isOwner={isOwner}
