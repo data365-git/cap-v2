@@ -7,6 +7,12 @@ let _env: ReturnType<typeof create>;
 
 const create = () =>
 	createEnv({
+		// Allow `next build` / typecheck to run without real secrets (CI build-checks,
+		// local compile) by setting SKIP_ENV_VALIDATION=true. NOTE: a build produced
+		// this way is NOT deployable — NEXT_PUBLIC_WEB_URL is inlined into the client
+		// bundle, so a real deploy must still provide it (or WEB_URL, which it falls
+		// back to below).
+		skipValidation: !!process.env.SKIP_ENV_VALIDATION,
 		client: {
 			NEXT_PUBLIC_IS_CAP: z.string().optional(),
 			NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),

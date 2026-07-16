@@ -1,10 +1,10 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videos } from "@cap/database/schema";
-import type { VideoMetadata } from "@cap/database/types";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 
 /**
  * Cancel an in-flight transcription.
@@ -58,14 +58,19 @@ export async function POST(
 			);
 		}
 
-		const metadata = (video.metadata as VideoMetadata) || {};
+		// transcriptionStatus is a plain column write; the durable cancelRequested
+		// marker (which the transcribe workflow polls) is a read-modify-write, so
+		// route it through the atomic row-locked helper to avoid clobbering a
+		// concurrent workflow metadata write (pipelineProgress/completedChunks).
 		await db()
 			.update(videos)
-			.set({
-				transcriptionStatus: "CANCELLED",
-				metadata: { ...metadata, cancelRequested: true },
-			})
+			.set({ transcriptionStatus: "CANCELLED" })
 			.where(eq(videos.id, videoId));
+
+		await patchVideoMetadata(videoId, (current) => ({
+			...current,
+			cancelRequested: true,
+		}));
 
 		revalidatePath(`/s/${videoId}`);
 

@@ -11,6 +11,9 @@ const boolString = (_default = false) =>
 
 function createServerEnv() {
 	return createEnv({
+		// Set SKIP_ENV_VALIDATION=true to let `next build` / typecheck run without
+		// real secrets (CI build-checks). Runtime still needs the real values.
+		skipValidation: !!process.env.SKIP_ENV_VALIDATION,
 		server: {
 			/// General configuration
 			DATABASE_URL: z.string().describe("MySQL database URL"),
@@ -103,10 +106,31 @@ function createServerEnv() {
 				.string()
 				.optional()
 				.describe("Google Gemini API for AI processing"),
+			GEMINI_API_KEY_FREE: z
+				.string()
+				.optional()
+				.describe(
+					"Optional free-of-charge Gemini key used FIRST only in opt-in cheap (aiSpeedMode) transcription. Dormant when unset — fast/default path never touches it.",
+				),
+			AI_CHEAP_PATIENCE_MINUTES: z.coerce
+				.number()
+				.int()
+				.positive()
+				.optional()
+				.default(240)
+				.describe(
+					"How long a cheap-mode video may wait on free/Batch tier before the poll-batch-jobs cron auto-continues it on the paid synchronous tier. Defaults to 4h; feature is dormant without cheap mode.",
+				),
 			DEEPGRAM_API_KEY: z
 				.string()
 				.optional()
 				.describe("Audio transcription (deprecated)"),
+			ELEVENLABS_API_KEY: z
+				.string()
+				.optional()
+				.describe(
+					"ElevenLabs Scribe speech-to-text for opt-in timestamp refinement",
+				),
 			ANTHROPIC_API_KEY: z.string().optional().describe("AI chat"),
 			OPENAI_API_KEY: z.string().optional().describe("AI summaries"),
 			GROQ_API_KEY: z.string().optional().describe("AI summaries"),

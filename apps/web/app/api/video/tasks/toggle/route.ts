@@ -5,6 +5,7 @@ import type { VideoMetadata } from "@cap/database/types";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 
 export async function POST(request: Request) {
 	const user = await getCurrentUser();
@@ -56,12 +57,15 @@ export async function POST(request: Request) {
 	if (!task) {
 		return Response.json({ error: "Task index out of range" }, { status: 400 });
 	}
-	task.done = done;
 
-	await db()
-		.update(videos)
-		.set({ metadata })
-		.where(eq(videos.id, videoId as Video.VideoId));
+	// Atomic row-locked read-modify-write: toggle the task's done flag on the
+	// freshly-locked metadata (re-resolving the task by index) so a concurrent
+	// writer (AI regeneration, translation) cannot be clobbered.
+	await patchVideoMetadata(videoId as Video.VideoId, (current) => {
+		const currentTask = current.aiSummary?.tasks?.[taskIndex];
+		if (currentTask) currentTask.done = done;
+		return current;
+	});
 
 	revalidatePath(`/s/${videoId}`);
 

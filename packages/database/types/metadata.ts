@@ -134,6 +134,16 @@ export interface VideoMetadata {
 	 */
 	mp4Ready?: boolean;
 	/**
+	 * Set by the owner-only "replace with audio" storage-reclaim action
+	 * (actions/video/replace-with-audio.ts). When true the heavy video objects
+	 * (transcoded.mp4 / result.* / raw-upload.*) have been deleted and an
+	 * audio-only file lives at <owner>/<videoId>/audio-only.mp3. The playlist
+	 * route serves that audio file for media-playback requests instead of the
+	 * (now-absent) video. Additive: absent → current behavior unchanged.
+	 * Irreversible — the original video bytes are gone once this is set.
+	 */
+	isAudio?: boolean;
+	/**
 	 * Generation status for the screen-capture thumbnail + animated preview.
 	 * "pending" is the implicit default for old rows (treat undefined as pending).
 	 */
@@ -177,12 +187,74 @@ export interface VideoMetadata {
 	 */
 	completedChunks?: Record<string, string>;
 	/**
+	 * Opt-in cost/speed subsystem (org `settings.aiSpeedMode`). All fields below
+	 * are additive and default undefined; a video with none behaves exactly as the
+	 * synchronous `fast` path does today.
+	 *
+	 * Per-job resolved AI cost mode. "fast" = synchronous Gemini (default,
+	 * unchanged behavior); "cheap" = patient free/Batch tier with a paid fallback.
+	 */
+	aiMode?: "fast" | "cheap";
+	/**
+	 * ISO timestamp of the first AI job start for this video. Drives the cheap →
+	 * paid patience ladder (auto-continue after AI_CHEAP_PATIENCE_MINUTES). Set
+	 * once and preserved across cheap re-kicks.
+	 */
+	aiJobStartedAt?: string;
+	/**
+	 * ISO timestamp set when AI generation starts; used alongside the stale-job
+	 * recovery / patience crons. Distinct from `pipelineProgress` timing.
+	 */
+	aiProcessingStartedAt?: string;
+	/** True while a cheap-mode job is parked waiting for free-tier quota to refresh. */
+	aiQuotaWaiting?: boolean;
+	/**
+	 * Cheap-mode chunks submitted to the paid Gemini Batch API, awaiting collection
+	 * by the poll-batch-jobs cron. Each entry is dropped once its result is merged
+	 * into `completedChunks[chunkIndex]` (succeeded) or abandoned (failed / paid
+	 * takeover). `chunkIndex` maps the collected result back onto the deterministic
+	 * chunk grid so the cheap re-kick resumes from the fuller checkpoint.
+	 */
+	aiBatchJobs?: Array<{
+		batchName: string;
+		fileName: string;
+		chunkIndex: number;
+		startSec: number;
+		durationSec: number;
+		submittedAt: string;
+	}>;
+	/**
 	 * How many times the stale-job recovery cron has re-triggered this video's
 	 * transcription / AI generation workflow. Acts as a hard anti-loop cap so a
 	 * permanently-broken video can never be re-triggered forever (and rack up
 	 * cost). See app/api/cron/recover-stale-ai-jobs/route.ts.
 	 */
 	recoveryAttempts?: number;
+	/**
+	 * Opt-in ElevenLabs Scribe timestamp refinement (per-video owner action).
+	 * Gemini timing remains the default for every transcript; the owner may
+	 * choose "Refine timestamps" to replace the estimated cue timing with
+	 * Scribe's word-accurate timing while preserving the transcript TEXT.
+	 *
+	 * `timestampsRefined` is true once a refinement has successfully rewritten
+	 * the stored VTT. `timestampRefineStatus` tracks the in-flight/terminal state
+	 * of the most recent request. Both live in this JSON column (no new DB
+	 * column / migration) and default to undefined for every existing row.
+	 * Dormant unless ELEVENLABS_API_KEY is configured.
+	 */
+	timestampsRefined?: boolean;
+	timestampRefineStatus?: "PROCESSING" | "COMPLETE" | "ERROR";
+	/** Human-readable reason the most recent refinement failed. */
+	timestampRefineError?: string;
+	/** ISO timestamp of the most recent successful refinement. */
+	timestampRefinedAt?: string;
+	/**
+	 * Set by the storage-reconcile cron when the video's underlying S3/R2 object
+	 * can no longer be found (orphaned DB row). Purely a diagnostic flag so the
+	 * reconcile job skips already-flagged rows on subsequent runs; it does not
+	 * change playback behavior. See app/api/cron/reconcile-storage/route.ts.
+	 */
+	storageMissing?: boolean;
 	/**
 	 * On-demand translations of the AI summary + transcript into other
 	 * languages, keyed by ISO language code (see `@cap/web-domain` LanguageCode).

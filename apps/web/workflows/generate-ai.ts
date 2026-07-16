@@ -31,6 +31,7 @@ import {
 } from "@/lib/gemini-usage";
 import { restoreRussianScriptDeep } from "@/lib/restore-russian-script";
 import { runPromise } from "@/lib/server";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
 interface GenerateAiWorkflowPayload {
@@ -167,7 +168,7 @@ export async function generateAiWorkflow(payload: GenerateAiWorkflowPayload) {
 	const transcript = await fetchTranscript(videoId, userId, videoData.video);
 
 	if (!transcript) {
-		await markSkipped(videoId, videoData.metadata);
+		await markSkipped(videoId);
 		return {
 			success: true,
 			message: "Transcript empty or too short - skipped",
@@ -271,32 +272,30 @@ async function patchPipelinePhase(
 	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
 	isAudioSource = false,
 ): Promise<void> {
-	const current = await getCurrentVideoMetadata(videoId, {});
-	const now = new Date().toISOString();
+	await patchVideoMetadata(videoId, (current) => {
+		const now = new Date().toISOString();
 
-	const existing = current.pipelineProgress;
-	const base: PipelineProgress = existing ?? {
-		currentPhase: phaseKey,
-		phases: initialPhases(isAudioSource),
-		startedAt: now,
-		updatedAt: now,
-	};
+		const existing = current.pipelineProgress;
+		const base: PipelineProgress = existing ?? {
+			currentPhase: phaseKey,
+			phases: initialPhases(isAudioSource),
+			startedAt: now,
+			updatedAt: now,
+		};
 
-	const phases = base.phases.map((p) =>
-		p.key === phaseKey ? { ...p, ...patch } : p,
-	);
+		const phases = base.phases.map((p) =>
+			p.key === phaseKey ? { ...p, ...patch } : p,
+		);
 
-	const next: PipelineProgress = {
-		...base,
-		phases,
-		currentPhase: phaseKey,
-		updatedAt: now,
-	};
+		const next: PipelineProgress = {
+			...base,
+			phases,
+			currentPhase: phaseKey,
+			updatedAt: now,
+		};
 
-	await db()
-		.update(videos)
-		.set({ metadata: { ...current, pipelineProgress: next } })
-		.where(eq(videos.id, videoId as Video.VideoId));
+		return { ...current, pipelineProgress: next };
+	});
 }
 
 async function validateAndSetProcessing(
@@ -333,15 +332,12 @@ async function validateAndSetProcessing(
 		throw new FatalError("AI metadata already generated");
 	}
 
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...metadata,
-				aiGenerationStatus: "PROCESSING",
-			},
-		})
-		.where(eq(videos.id, videoId as Video.VideoId));
+	// Atomic row-locked patch so flipping the analyze phase to PROCESSING never
+	// clobbers a concurrent transcribe-side pipelineProgress/completedChunks write.
+	await patchVideoMetadata(videoId, (current) => ({
+		...current,
+		aiGenerationStatus: "PROCESSING",
+	}));
 
 	return {
 		video,
@@ -383,23 +379,13 @@ async function fetchTranscript(
 	return { segments, text };
 }
 
-async function markSkipped(
-	videoId: string,
-	metadata: VideoMetadata,
-): Promise<void> {
+async function markSkipped(videoId: string): Promise<void> {
 	"use step";
 
-	const currentMetadata = await getCurrentVideoMetadata(videoId, metadata);
-
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...currentMetadata,
-				aiGenerationStatus: "SKIPPED",
-			},
-		})
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadata(videoId, (current) => ({
+		...current,
+		aiGenerationStatus: "SKIPPED",
+	}));
 }
 
 async function generateWithAi(
@@ -548,36 +534,41 @@ async function saveResults(
 ): Promise<void> {
 	"use step";
 
-	const { video, metadata } = videoData;
+	const { video } = videoData;
 	const generatedTitle = result.title?.trim();
 	const currentVideo = await getCurrentVideo(videoId);
-	const currentMetadata = currentVideo
-		? (currentVideo.metadata as VideoMetadata) || {}
-		: metadata;
 	const currentTitle = currentVideo?.name ?? video.name;
 
-	const updatedMetadata: VideoMetadata = {
-		...currentMetadata,
-		aiTitle: generatedTitle || currentMetadata.aiTitle,
-		summary: result.summary || currentMetadata.summary,
-		chapters: result.chapters || currentMetadata.chapters,
-		aiSummary: result.aiSummary ?? currentMetadata.aiSummary,
-		aiGenerationStatus: "COMPLETE",
-	};
+	// Merge the AI result into the freshly-locked metadata under a row lock so a
+	// concurrent writer (translation status, pipeline phase) is not clobbered.
+	// The title-replacement decision needs the PRE-update aiTitle/sourceName/
+	// titleManuallyEdited, so capture them from inside the same locked read.
+	let previousAiTitle: string | undefined;
+	let previousSourceName: string | undefined;
+	let previousTitleManuallyEdited: boolean | undefined;
 
-	await db()
-		.update(videos)
-		.set({ metadata: updatedMetadata })
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadata(videoId, (currentMetadata) => {
+		previousAiTitle = currentMetadata.aiTitle;
+		previousSourceName = currentMetadata.sourceName;
+		previousTitleManuallyEdited = currentMetadata.titleManuallyEdited;
+		return {
+			...currentMetadata,
+			aiTitle: generatedTitle || currentMetadata.aiTitle,
+			summary: result.summary || currentMetadata.summary,
+			chapters: result.chapters || currentMetadata.chapters,
+			aiSummary: result.aiSummary ?? currentMetadata.aiSummary,
+			aiGenerationStatus: "COMPLETE",
+		};
+	});
 
 	if (
 		generatedTitle &&
 		shouldReplaceVideoTitle({
 			currentTitle,
-			previousAiTitle: currentMetadata.aiTitle,
+			previousAiTitle,
 			nextAiTitle: generatedTitle,
-			sourceName: currentMetadata.sourceName,
-			titleManuallyEdited: currentMetadata.titleManuallyEdited,
+			sourceName: previousSourceName,
+			titleManuallyEdited: previousTitleManuallyEdited,
 		})
 	) {
 		await db()
@@ -601,16 +592,6 @@ async function getCurrentVideo(
 		.where(eq(videos.id, videoId as Video.VideoId));
 
 	return currentVideo ?? null;
-}
-
-async function getCurrentVideoMetadata(
-	videoId: string,
-	fallback: VideoMetadata,
-): Promise<VideoMetadata> {
-	const currentVideo = await getCurrentVideo(videoId);
-	return currentVideo
-		? (currentVideo.metadata as VideoMetadata) || {}
-		: fallback;
 }
 
 function parseVttWithTimestamps(vttContent: string): VttSegment[] {

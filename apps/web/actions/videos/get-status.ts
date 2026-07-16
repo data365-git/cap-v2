@@ -37,6 +37,8 @@ export interface VideoStatusResult {
 	chapters: { title: string; start: number }[] | null;
 	pipelineProgress?: PipelineProgress;
 	transcriptionError?: string;
+	/** True while a cheap-mode (aiSpeedMode) job is parked waiting on free-tier quota. */
+	aiQuotaWaiting?: boolean;
 	error?: string;
 }
 
@@ -137,5 +139,6 @@ export async function getVideoStatus(
 		chapters: metadata.chapters || null,
 		pipelineProgress: metadata.pipelineProgress,
 		transcriptionError: metadata.transcriptionError,
+		aiQuotaWaiting: metadata.aiQuotaWaiting,
 	};
 }

@@ -224,6 +224,10 @@ export const organizations = mysqlTable(
 				alertAtPct?: number;
 				enabled?: boolean;
 			};
+			// Opt-in transcription cost/speed mode. Absent/"fast" = the current
+			// synchronous behavior; "cheap" = patient free/Batch tier. Additive: no
+			// column, widens the existing settings JSON union in place.
+			aiSpeedMode?: "fast" | "cheap";
 		}>(),
 		iconUrl: varchar("iconUrl", {
 			length: 1024,
@@ -1542,6 +1546,7 @@ export type AiOperation =
 	| "summary"
 	| "embedding"
 	| "chat"
+	| "scribe"
 	| "translate";
 
 export const aiUsageEvents = mysqlTable(

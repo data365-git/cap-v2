@@ -7,6 +7,10 @@ import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { revalidatePath } from "next/cache";
+import {
+	REPROCESS_RATE_LIMIT_CODE,
+	recordReprocessAttempt,
+} from "@/lib/reprocess-rate-limit";
 import { runPromise } from "@/lib/server";
 import { transcribeVideo } from "@/lib/transcribe";
 import { decodeStorageVideo } from "@/lib/video-storage";
@@ -102,6 +106,20 @@ export async function POST(
 					transcriptionStatus: video.transcriptionStatus,
 				},
 				{ status: 400 },
+			);
+		}
+
+		// Cost guard: cap forced/error re-transcriptions to a small number per
+		// rolling hour per video so a repeated-click or scripted loop can't rack
+		// up unbounded transcription spend.
+		if (!recordReprocessAttempt(`transcription:${videoId}`)) {
+			return Response.json(
+				{
+					error:
+						"Too many re-transcription attempts for this video. Please wait before trying again.",
+					code: REPROCESS_RATE_LIMIT_CODE,
+				},
+				{ status: 429 },
 			);
 		}
 
