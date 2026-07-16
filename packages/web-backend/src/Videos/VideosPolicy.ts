@@ -52,8 +52,11 @@ export function buildCanView(
 			const res = yield* repo.getById(videoId);
 
 			if (Option.isNone(res)) {
-				yield* Effect.log("Video not found. Access denied.");
-				return false;
+				// A missing video is not an authorization failure: allow the policy
+				// so callers receive Option.none from getById and surface a 404
+				// instead of a misleading 403 PolicyDenied.
+				yield* Effect.log("Video not found. Deferring to not-found handling.");
+				return true;
 			}
 
 			const [video, password] = res.value;
