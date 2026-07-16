@@ -56,6 +56,7 @@ import {
 	shouldChunkForTranscription,
 	transcriptHasCues,
 } from "@/lib/transcription-chunking";
+import { patchVideoMetadata as patchVideoMetadataLocked } from "@/lib/video-metadata";
 import { decodeStorageVideo } from "@/lib/video-storage";
 import { transferVttTimingWithStats } from "@/lib/vtt-timing-transfer";
 
@@ -252,26 +253,23 @@ async function validateVideo(
 
 	// Clear any stale failure reason AND a stale cancel marker so a retry starts
 	// clean — otherwise a leftover cancelRequested:true would immediately abort
-	// the new run at the first checkpoint. Read-modify-write to preserve
-	// aiSummary/refinedTranscript/etc. Also stamps the resolved cost mode + job
-	// clock (additive; "fast" is inert for every downstream check).
-	const {
-		transcriptionError: _clearedError,
-		cancelRequested: _clearedCancel,
-		...rest
-	} = staleMetadata;
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...rest,
-				aiMode: aiSpeedMode,
-				aiJobStartedAt:
-					staleMetadata.aiJobStartedAt ?? new Date().toISOString(),
-				aiQuotaWaiting: false,
-			} satisfies VideoMetadata,
-		})
-		.where(eq(videos.id, videoId as Video.VideoId));
+	// the new run at the first checkpoint. Atomic read-modify-write under a row
+	// lock (derives from the freshly-locked value, not the stale validate read)
+	// to preserve aiSummary/refinedTranscript/etc. Also stamps the resolved cost
+	// mode + job clock (additive; "fast" is inert for every downstream check).
+	await patchVideoMetadataLocked(videoId, (current) => {
+		const {
+			transcriptionError: _clearedError,
+			cancelRequested: _clearedCancel,
+			...rest
+		} = current;
+		return {
+			...rest,
+			aiMode: aiSpeedMode,
+			aiJobStartedAt: rest.aiJobStartedAt ?? new Date().toISOString(),
+			aiQuotaWaiting: false,
+		} satisfies VideoMetadata;
+	});
 
 	return {
 		video: result.video,
@@ -310,18 +308,7 @@ async function markNoAudio(videoId: string): Promise<void> {
 async function markQuotaWaiting(videoId: string): Promise<void> {
 	"use step";
 
-	const [row] = await db()
-		.select({ metadata: videos.metadata })
-		.from(videos)
-		.where(eq(videos.id, videoId as Video.VideoId));
-	const metadata = (row?.metadata as VideoMetadata) || {};
-
-	await db()
-		.update(videos)
-		.set({
-			metadata: { ...metadata, aiQuotaWaiting: true } satisfies VideoMetadata,
-		})
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadata(videoId, { aiQuotaWaiting: true });
 }
 
 /**
@@ -383,22 +370,19 @@ async function submitCheapChunkBatch(
 /**
  * Read-modify-write a partial patch into the video's metadata JSON so we never
  * clobber sibling fields (aiSummary, refinedTranscript, enhancedAudioStatus…).
+ * Delegates to the shared atomic helper (SELECT … FOR UPDATE + UPDATE in one
+ * transaction under a row lock) so concurrent workflows/crons cannot lose each
+ * other's writes. The `(videoId, partial)` shallow-merge signature is preserved
+ * so every existing call site is unchanged.
  */
 async function patchVideoMetadata(
 	videoId: string,
 	patch: Partial<VideoMetadata>,
 ): Promise<void> {
-	const [row] = await db()
-		.select({ metadata: videos.metadata })
-		.from(videos)
-		.where(eq(videos.id, videoId as Video.VideoId));
-
-	const currentMetadata = (row?.metadata as VideoMetadata) || {};
-
-	await db()
-		.update(videos)
-		.set({ metadata: { ...currentMetadata, ...patch } })
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadataLocked(videoId, (current) => ({
+		...current,
+		...patch,
+	}));
 }
 
 const PHASE_LABELS: Record<PipelinePhaseKey, string> = {
@@ -464,37 +448,30 @@ async function patchPipelinePhase(
 	patch: Partial<Omit<PipelinePhase, "key" | "label">>,
 	isAudioSource = false,
 ): Promise<void> {
-	const [row] = await db()
-		.select({ metadata: videos.metadata })
-		.from(videos)
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadataLocked(videoId, (currentMetadata) => {
+		const now = new Date().toISOString();
 
-	const currentMetadata = (row?.metadata as VideoMetadata) || {};
-	const now = new Date().toISOString();
+		const existing = currentMetadata.pipelineProgress;
+		const base: PipelineProgress = existing ?? {
+			currentPhase: phaseKey,
+			phases: initialPhases(isAudioSource),
+			startedAt: now,
+			updatedAt: now,
+		};
 
-	const existing = currentMetadata.pipelineProgress;
-	const base: PipelineProgress = existing ?? {
-		currentPhase: phaseKey,
-		phases: initialPhases(isAudioSource),
-		startedAt: now,
-		updatedAt: now,
-	};
+		const phases = base.phases.map((p) =>
+			p.key === phaseKey ? { ...p, ...patch } : p,
+		);
 
-	const phases = base.phases.map((p) =>
-		p.key === phaseKey ? { ...p, ...patch } : p,
-	);
+		const next: PipelineProgress = {
+			...base,
+			phases,
+			currentPhase: phaseKey,
+			updatedAt: now,
+		};
 
-	const next: PipelineProgress = {
-		...base,
-		phases,
-		currentPhase: phaseKey,
-		updatedAt: now,
-	};
-
-	await db()
-		.update(videos)
-		.set({ metadata: { ...currentMetadata, pipelineProgress: next } })
-		.where(eq(videos.id, videoId as Video.VideoId));
+		return { ...currentMetadata, pipelineProgress: next };
+	});
 }
 
 /**
@@ -1687,22 +1664,7 @@ async function queueAiGeneration(
 async function _markEnhancedAudioProcessing(videoId: string): Promise<void> {
 	"use step";
 
-	const [video] = await db()
-		.select({ metadata: videos.metadata })
-		.from(videos)
-		.where(eq(videos.id, videoId as Video.VideoId));
-
-	const currentMetadata = (video?.metadata as VideoMetadata) || {};
-
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...currentMetadata,
-				enhancedAudioStatus: "PROCESSING",
-			},
-		})
-		.where(eq(videos.id, videoId as Video.VideoId));
+	await patchVideoMetadata(videoId, { enhancedAudioStatus: "PROCESSING" });
 }
 
 async function _enhanceAndSaveAudio(
@@ -1733,44 +1695,14 @@ async function _enhanceAndSaveAudio(
 			})
 			.pipe(runPromise);
 
-		const [videoRecord] = await db()
-			.select({ metadata: videos.metadata })
-			.from(videos)
-			.where(eq(videos.id, videoId as Video.VideoId));
-
-		const currentMetadata = (videoRecord?.metadata as VideoMetadata) || {};
-
-		await db()
-			.update(videos)
-			.set({
-				metadata: {
-					...currentMetadata,
-					enhancedAudioStatus: "COMPLETE",
-				},
-			})
-			.where(eq(videos.id, videoId as Video.VideoId));
+		await patchVideoMetadata(videoId, { enhancedAudioStatus: "COMPLETE" });
 	} catch (error) {
 		console.error(
 			`[transcribe] Audio enhancement failed for video ${videoId}:`,
 			error,
 		);
 
-		const [video] = await db()
-			.select({ metadata: videos.metadata })
-			.from(videos)
-			.where(eq(videos.id, videoId as Video.VideoId));
-
-		const currentMetadata = (video?.metadata as VideoMetadata) || {};
-
-		await db()
-			.update(videos)
-			.set({
-				metadata: {
-					...currentMetadata,
-					enhancedAudioStatus: "ERROR",
-				},
-			})
-			.where(eq(videos.id, videoId as Video.VideoId));
+		await patchVideoMetadata(videoId, { enhancedAudioStatus: "ERROR" });
 	}
 }
 

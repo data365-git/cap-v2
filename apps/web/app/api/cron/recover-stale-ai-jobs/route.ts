@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { startAiGeneration } from "@/lib/generate-ai";
 import { sendOpsAlert } from "@/lib/ops-alert";
 import { transcribeVideo } from "@/lib/transcribe";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 
 export const dynamic = "force-dynamic";
 
@@ -82,13 +83,18 @@ async function handler(request: Request) {
 				// Stranded transcription: reset the status so transcribeVideo starts
 				// cleanly, record the recovery attempt, then re-fire the workflow
 				// (same fire-and-forget invocation as retry-transcription).
+				// transcriptionStatus is a plain column write; the recoveryAttempts
+				// bump is an atomic row-locked read-modify-write (derived from the
+				// freshly-locked row) so it never clobbers a concurrent metadata write.
 				await db()
 					.update(videos)
-					.set({
-						transcriptionStatus: null,
-						metadata: { ...metadata, recoveryAttempts: attempts },
-					})
+					.set({ transcriptionStatus: null })
 					.where(eq(videos.id, video.id));
+
+				await patchVideoMetadata(video.id, (current) => ({
+					...current,
+					recoveryAttempts: (current.recoveryAttempts ?? 0) + 1,
+				}));
 
 				transcribeVideo(video.id, video.ownerId, false).catch((error) => {
 					console.error(
@@ -102,16 +108,11 @@ async function handler(request: Request) {
 				// attempt) first, then re-fire. force=true because a stranded job may
 				// carry stale summary/chapters — without it the workflow's own
 				// "already generated" guard throws and re-strands the job.
-				await db()
-					.update(videos)
-					.set({
-						metadata: {
-							...metadata,
-							aiGenerationStatus: "ERROR",
-							recoveryAttempts: attempts,
-						},
-					})
-					.where(eq(videos.id, video.id));
+				await patchVideoMetadata(video.id, (current) => ({
+					...current,
+					aiGenerationStatus: "ERROR",
+					recoveryAttempts: (current.recoveryAttempts ?? 0) + 1,
+				}));
 
 				await startAiGeneration(video.id, video.ownerId, true);
 			}

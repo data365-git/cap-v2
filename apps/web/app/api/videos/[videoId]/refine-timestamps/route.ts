@@ -6,6 +6,7 @@ import { serverEnv } from "@cap/env";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 import { refineVideoTimestampsWorkflow } from "@/workflows/transcribe";
 
 // A PROCESSING refinement older than this is treated as a crashed run rather
@@ -93,17 +94,14 @@ export async function POST(
 		// Flip to PROCESSING synchronously so the dashboard reflects the in-flight
 		// state, then run the refinement inline (fire-and-forget) like the
 		// transcription trigger. The workflow writes the terminal COMPLETE/ERROR.
-		await db()
-			.update(videos)
-			.set({
-				metadata: {
-					...metadata,
-					timestampRefineStatus: "PROCESSING",
-					timestampRefineError: undefined,
-					timestampRefinedAt: new Date().toISOString(),
-				},
-			})
-			.where(eq(videos.id, videoId as Video.VideoId));
+		// Atomic row-locked read-modify-write so this flip cannot clobber a
+		// concurrent metadata write (and vice versa).
+		await patchVideoMetadata(videoId as Video.VideoId, (current) => ({
+			...current,
+			timestampRefineStatus: "PROCESSING",
+			timestampRefineError: undefined,
+			timestampRefinedAt: new Date().toISOString(),
+		}));
 
 		refineVideoTimestampsWorkflow({ videoId, userId: user.id }).catch((err) => {
 			console.error(

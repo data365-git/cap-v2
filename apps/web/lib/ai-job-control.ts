@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { cancelBatch, deleteBatchFile } from "@/lib/gemini-batch-transcribe";
 import { startAiGeneration } from "@/lib/generate-ai";
 import { transcribeVideo } from "@/lib/transcribe";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 
 /**
  * Best-effort abandon of any pending durable Batch jobs on a paid takeover (the
@@ -70,30 +71,31 @@ export async function continueAiJobOnPaid({
 	// chunk. Best-effort: never blocks the continuation.
 	await abandonPendingBatchJobs(metadata);
 
-	const nextMetadata: VideoMetadata = {
-		...metadata,
+	// The flip-to-fast is a read-modify-write of the metadata JSON. Route it
+	// through the atomic row-locked helper (deriving from the freshly-locked row,
+	// not the stale read above) so it never clobbers a chunk the poll-batch-jobs
+	// cron merged into completedChunks concurrently. transcriptionStatus is a plain
+	// column write kept as its own statement.
+	const applyFastFlip = (current: VideoMetadata): VideoMetadata => ({
+		...current,
 		aiMode: "fast",
 		aiQuotaWaiting: undefined,
 		aiBatchJobs: undefined,
 		aiProcessingStartedAt: undefined,
-	};
+	});
 
 	if (phase === "transcription") {
 		await db()
 			.update(videos)
-			.set({ transcriptionStatus: null, metadata: nextMetadata })
+			.set({ transcriptionStatus: null })
 			.where(eq(videos.id, videoId));
+		await patchVideoMetadata(videoId, applyFastFlip);
 		return transcribeVideo(videoId, ownerId, true, false, "fast");
 	}
 
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...nextMetadata,
-				aiGenerationStatus: undefined,
-			} satisfies VideoMetadata,
-		})
-		.where(eq(videos.id, videoId));
+	await patchVideoMetadata(videoId, (current) => ({
+		...applyFastFlip(current),
+		aiGenerationStatus: undefined,
+	}));
 	return startAiGeneration(videoId, ownerId, true);
 }

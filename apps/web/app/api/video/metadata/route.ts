@@ -1,8 +1,10 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { videos } from "@cap/database/schema";
+import type { VideoMetadata } from "@cap/database/types";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 
 const USER_EDITABLE_METADATA_FIELDS = [
 	"customCreatedAt",
@@ -55,15 +57,12 @@ export async function PUT(request: NextRequest) {
 		return Response.json({ error: true }, { status: 401 });
 	}
 
-	await db()
-		.update(videos)
-		.set({
-			metadata: {
-				...((result.metadata as Record<string, unknown> | null) ?? {}),
-				...editableMetadata,
-			},
-		})
-		.where(eq(videos.id, videoId));
+	// Atomic row-locked read-modify-write so a user's metadata edit can't clobber
+	// a concurrent pipeline write (and vice versa).
+	await patchVideoMetadata(
+		videoId,
+		(current) => ({ ...current, ...editableMetadata }) as VideoMetadata,
+	);
 
 	return Response.json(true, { status: 200 });
 }

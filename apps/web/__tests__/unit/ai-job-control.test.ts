@@ -9,6 +9,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const H = vi.hoisted(() => ({
 	selectResult: [] as unknown[],
 	updateSet: vi.fn(),
+	patchVideoMetadata: vi.fn(
+		async (
+			_id: string,
+			_u: (m: Record<string, unknown>) => Record<string, unknown>,
+		) => undefined as unknown,
+	),
 	cancelBatch: vi.fn(async (_n: string, _k: string) => {}),
 	deleteBatchFile: vi.fn(async (_n: string, _k: string) => {}),
 	transcribeVideo: vi.fn(async (..._a: unknown[]) => ({
@@ -48,6 +54,12 @@ vi.mock("@/lib/generate-ai", () => ({
 vi.mock("@/lib/transcribe", () => ({
 	transcribeVideo: (...a: unknown[]) => H.transcribeVideo(...a),
 }));
+vi.mock("@/lib/video-metadata", () => ({
+	patchVideoMetadata: (
+		id: string,
+		updater: (m: Record<string, unknown>) => Record<string, unknown>,
+	) => H.patchVideoMetadata(id, updater),
+}));
 
 const { abandonPendingBatchJobs, continueAiJobOnPaid } = await import(
 	"@/lib/ai-job-control"
@@ -65,6 +77,7 @@ const JOB_A = {
 beforeEach(() => {
 	H.selectResult = [];
 	H.updateSet.mockReset();
+	H.patchVideoMetadata.mockReset().mockResolvedValue(undefined);
 	H.cancelBatch.mockReset().mockResolvedValue(undefined);
 	H.deleteBatchFile.mockReset().mockResolvedValue(undefined);
 	H.transcribeVideo
@@ -113,6 +126,7 @@ describe("continueAiJobOnPaid", () => {
 		});
 		expect(out.success).toBe(false);
 		expect(H.updateSet).not.toHaveBeenCalled();
+		expect(H.patchVideoMetadata).not.toHaveBeenCalled();
 		expect(H.transcribeVideo).not.toHaveBeenCalled();
 	});
 
@@ -139,18 +153,30 @@ describe("continueAiJobOnPaid", () => {
 			"server-paid-key",
 		);
 
+		// transcriptionStatus is now its own plain column write (no metadata key).
 		const setArg = H.updateSet.mock.calls[0]?.[0] as {
 			transcriptionStatus: unknown;
-			metadata: {
-				aiMode?: string;
-				aiBatchJobs?: unknown;
-				aiQuotaWaiting?: unknown;
-			};
+			metadata?: unknown;
 		};
 		expect(setArg.transcriptionStatus).toBeNull();
-		expect(setArg.metadata.aiMode).toBe("fast");
-		expect(setArg.metadata.aiBatchJobs).toBeUndefined();
-		expect(setArg.metadata.aiQuotaWaiting).toBeUndefined();
+		expect(setArg.metadata).toBeUndefined();
+
+		// The metadata flip goes through the atomic row-locked helper. Apply the
+		// captured updater to a freshly-locked row that ALSO carries a chunk the
+		// poll cron just collected — it must survive (no lost update).
+		const updater = H.patchVideoMetadata.mock.calls[0]?.[1] as (
+			m: Record<string, unknown>,
+		) => Record<string, unknown>;
+		const next = updater({
+			aiMode: "cheap",
+			aiQuotaWaiting: true,
+			aiBatchJobs: [JOB_A],
+			completedChunks: { "0": "WEBVTT" },
+		});
+		expect(next.aiMode).toBe("fast");
+		expect(next.aiBatchJobs).toBeUndefined();
+		expect(next.aiQuotaWaiting).toBeUndefined();
+		expect(next.completedChunks).toEqual({ "0": "WEBVTT" });
 
 		// paid Standard resumes from the checkpoint (fast, not cheap).
 		expect(H.transcribeVideo).toHaveBeenCalledWith(
@@ -173,16 +199,22 @@ describe("continueAiJobOnPaid", () => {
 			phase: "generation",
 		});
 
-		const setArg = H.updateSet.mock.calls[0]?.[0] as {
-			metadata: {
-				aiBatchJobs?: unknown;
-				aiGenerationStatus?: unknown;
-				aiMode?: string;
-			};
-		};
-		expect(setArg.metadata.aiBatchJobs).toBeUndefined();
-		expect(setArg.metadata.aiGenerationStatus).toBeUndefined();
-		expect(setArg.metadata.aiMode).toBe("fast");
+		// Generation path has no column write — only the atomic metadata patch.
+		expect(H.updateSet).not.toHaveBeenCalled();
+		const updater = H.patchVideoMetadata.mock.calls[0]?.[1] as (
+			m: Record<string, unknown>,
+		) => Record<string, unknown>;
+		const next = updater({
+			aiMode: "cheap",
+			aiBatchJobs: [JOB_A],
+			aiGenerationStatus: "PROCESSING",
+			aiSummary: { keep: true },
+		});
+		expect(next.aiBatchJobs).toBeUndefined();
+		expect(next.aiGenerationStatus).toBeUndefined();
+		expect(next.aiMode).toBe("fast");
+		// Sibling AI content survives the flip.
+		expect(next.aiSummary).toEqual({ keep: true });
 		expect(H.startAiGeneration).toHaveBeenCalledWith("v1", "u1", true);
 		expect(H.transcribeVideo).not.toHaveBeenCalled();
 	});
