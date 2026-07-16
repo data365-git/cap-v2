@@ -32,6 +32,7 @@ import {
 	faTrash,
 	faUnlock,
 	faVideo,
+	faVolumeHigh,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +42,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type PropsWithChildren, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { replaceVideoWithAudio } from "@/actions/video/replace-with-audio";
 import { getTranscript } from "@/actions/videos/get-transcript";
 import { ConfirmationDialog } from "@/app/(org)/dashboard/_components/ConfirmationDialog";
 import { useDashboardContext } from "@/app/(org)/dashboard/Contexts";
@@ -176,6 +178,9 @@ export const CapCard = ({
 	const { user, setUpgradeModalOpen } = useDashboardContext();
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [isTranscriptDownloading, setIsTranscriptDownloading] = useState(false);
+	const [confirmReplaceWithAudioOpen, setConfirmReplaceWithAudioOpen] =
+		useState(false);
+	const [isReplacingWithAudio, setIsReplacingWithAudio] = useState(false);
 
 	const [isFreshlyUploaded, setIsFreshlyUploaded] = useState(() => {
 		if (!cap.createdAt) return false;
@@ -500,6 +505,36 @@ export const CapCard = ({
 		}
 	};
 
+	// Owner-only storage-reclaim action: extract audio, serve audio-only, and
+	// delete the heavy video bytes. Irreversible — guarded by a confirm dialog.
+	const handleReplaceWithAudio = async () => {
+		if (isReplacingWithAudio) return;
+		setIsReplacingWithAudio(true);
+		try {
+			const result = await replaceVideoWithAudio(cap.id);
+			if (result.ok) {
+				toast.success("Video replaced with audio — storage reclaimed");
+				router.refresh();
+				return;
+			}
+			if (result.reason === "already_audio") {
+				router.refresh();
+				return;
+			}
+			toast.error(
+				result.reason === "unsupported_source"
+					? "This recording has no convertible video to reclaim"
+					: "Failed to replace video with audio",
+			);
+		} catch (error) {
+			console.error("Failed to replace video with audio", error);
+			toast.error("Failed to replace video with audio");
+		} finally {
+			setIsReplacingWithAudio(false);
+			setConfirmReplaceWithAudioOpen(false);
+		}
+	};
+
 	return (
 		<>
 			<SharingDialog
@@ -774,6 +809,23 @@ export const CapCard = ({
 											{passwordProtected ? "Edit password" : "Add password"}
 										</p>
 									</DropdownMenuItem>
+									{!cap.metadata?.isAudio && (
+										<DropdownMenuItem
+											onClick={(e) => {
+												e.stopPropagation();
+												setConfirmReplaceWithAudioOpen(true);
+											}}
+											disabled={isReplacingWithAudio || cap.hasActiveUpload}
+											className="flex gap-2 items-center rounded-lg"
+										>
+											<FontAwesomeIcon className="size-3" icon={faVolumeHigh} />
+											<p className="text-sm text-gray-12">
+												{isReplacingWithAudio
+													? "Replacing..."
+													: "Replace with audio"}
+											</p>
+										</DropdownMenuItem>
+									)}
 									<DropdownMenuItem
 										onClick={(e) => {
 											e.stopPropagation();
@@ -799,6 +851,19 @@ export const CapCard = ({
 						loading={deleteMutation.isPending}
 						onConfirm={() => deleteMutation.mutate()}
 						onCancel={() => setConfirmOpen(false)}
+					/>
+
+					<ConfirmationDialog
+						open={confirmReplaceWithAudioOpen}
+						icon={<FontAwesomeIcon icon={faVolumeHigh} />}
+						title="Replace with audio"
+						description={`Extract the audio from "${cap.name}" and permanently delete the video to reclaim storage. Playback will use the audio only. This cannot be undone.`}
+						confirmLabel={isReplacingWithAudio ? "Replacing..." : "Replace"}
+						cancelLabel="Cancel"
+						confirmVariant="destructive"
+						loading={isReplacingWithAudio}
+						onConfirm={handleReplaceWithAudio}
+						onCancel={() => setConfirmReplaceWithAudioOpen(false)}
 					/>
 				</div>
 

@@ -134,6 +134,16 @@ export interface VideoMetadata {
 	 */
 	mp4Ready?: boolean;
 	/**
+	 * Set by the owner-only "replace with audio" storage-reclaim action
+	 * (actions/video/replace-with-audio.ts). When true the heavy video objects
+	 * (transcoded.mp4 / result.* / raw-upload.*) have been deleted and an
+	 * audio-only file lives at <owner>/<videoId>/audio-only.mp3. The playlist
+	 * route serves that audio file for media-playback requests instead of the
+	 * (now-absent) video. Additive: absent → current behavior unchanged.
+	 * Irreversible — the original video bytes are gone once this is set.
+	 */
+	isAudio?: boolean;
+	/**
 	 * Generation status for the screen-capture thumbnail + animated preview.
 	 * "pending" is the implicit default for old rows (treat undefined as pending).
 	 */
