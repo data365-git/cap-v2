@@ -195,6 +195,56 @@ describe("poll-batch-jobs GET — orchestration branches", () => {
 		expect(body.cleared).toBe(1);
 	});
 
+	it("STRAND GUARD: parked with NO Batch job but patience elapsed → still flips to paid", async () => {
+		// A transient submit failure (or no key at submit time) parks the video with
+		// aiQuotaWaiting but no aiBatchJobs. It must still be rescued by the patience
+		// window instead of stranding in PROCESSING forever. The broadened SELECT
+		// picks it up (aiQuotaWaiting=true), and the patience check must run BEFORE
+		// the "no jobs → skip" guard.
+		H.currentMetadata = {
+			aiMode: "cheap",
+			aiQuotaWaiting: true,
+			aiBatchJobs: [],
+			aiJobStartedAt: new Date(Date.now() - 300 * 60_000).toISOString(),
+		};
+		H.candidates = [{ video: videoWith(H.currentMetadata) }];
+
+		const body = await bodyOf(await GET(authedRequest()));
+
+		expect(H.continueAiJobOnPaid).toHaveBeenCalledWith({
+			videoId: "v1",
+			ownerId: "owner1",
+			phase: "transcription",
+		});
+		expect(H.collectBatchResult).not.toHaveBeenCalled();
+		expect(body.flippedToPaid).toBe(1);
+	});
+
+	it("RACE GUARD: a paid takeover (aiMode flipped to fast under the lock) skips the cheap re-kick", async () => {
+		// The loop captured a stale aiMode="cheap" from the top-of-run SELECT, but a
+		// concurrent continue-paid flipped the row to "fast" before the re-kick. The
+		// re-kick must re-check aiMode UNDER the row lock and NOT start a second
+		// (cheap) workflow racing the paid one — otherwise the chunk is billed twice.
+		const candidateMeta = { aiMode: "cheap", aiBatchJobs: [JOB] };
+		// The freshly-locked DB state seen by patchVideoMetadata updaters: fast.
+		H.currentMetadata = { aiMode: "fast", aiBatchJobs: [JOB] };
+		H.candidates = [{ video: videoWith(candidateMeta) }];
+		H.collectBatchResult.mockResolvedValue({
+			status: "succeeded",
+			cues: [],
+			chunkVtt: "WEBVTT\n\nCHUNK",
+			inputTokens: 100,
+			outputTokens: 40,
+			audioInTokens: 30,
+		});
+
+		const body = await bodyOf(await GET(authedRequest()));
+
+		// The collected chunk was still merged (harmless), but NO cheap re-kick fired.
+		expect(H.transcribeVideo).not.toHaveBeenCalled();
+		expect(body.retried ?? 0).toBe(0);
+	});
+
 	it("patience elapsed: flips to paid via continueAiJobOnPaid, does not collect", async () => {
 		H.currentMetadata = {
 			aiMode: "cheap",

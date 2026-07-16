@@ -65,11 +65,16 @@ async function handler(request: Request) {
 
 	const patienceMs = serverEnv().AI_CHEAP_PATIENCE_MINUTES * 60_000;
 
+	// Select videos with a pending Batch job (to collect) OR any parked cheap job
+	// (aiQuotaWaiting) so the patience window can auto-continue it even when NO
+	// Batch was submitted — e.g. a transient submit failure. Without the second
+	// clause such a video is never collected AND never patience-continued: it
+	// strands in PROCESSING forever.
 	const candidates = await db()
 		.select({ video: videos })
 		.from(videos)
 		.where(
-			sql`JSON_LENGTH(JSON_EXTRACT(${videos.metadata}, '$.aiBatchJobs')) > 0`,
+			sql`JSON_LENGTH(JSON_EXTRACT(${videos.metadata}, '$.aiBatchJobs')) > 0 OR JSON_EXTRACT(${videos.metadata}, '$.aiQuotaWaiting') = true`,
 		);
 
 	let pending = 0;
@@ -84,11 +89,12 @@ async function handler(request: Request) {
 		try {
 			const metadata = (video.metadata as VideoMetadata) ?? {};
 			const jobs = metadata.aiBatchJobs ?? [];
-			if (jobs.length === 0) continue;
 
 			// Patience window elapsed → auto-continue on the paid synchronous tier.
 			// continueAiJobOnPaid abandons the pending Batch(es) and re-runs from the
-			// checkpoint, so no chunk is lost.
+			// checkpoint, so no chunk is lost. Checked BEFORE the no-jobs guard so a
+			// video parked WITHOUT a Batch (transient submit failure) is still rescued
+			// once its patience elapses instead of stranding in PROCESSING forever.
 			const startedAt = metadata.aiJobStartedAt
 				? Date.parse(metadata.aiJobStartedAt)
 				: Number.NaN;
@@ -105,6 +111,10 @@ async function handler(request: Request) {
 				flippedToPaid++;
 				continue;
 			}
+
+			// Parked but pre-patience with no Batch to collect yet — nothing to do
+			// this tick; the patience clause above will rescue it later.
+			if (jobs.length === 0) continue;
 
 			// The video is no longer cheap (paid takeover elsewhere): cancel any stray
 			// Batch and clear the jobs so paid Standard owns the checkpoint.
@@ -219,25 +229,36 @@ async function handler(request: Request) {
 			}));
 
 			// All jobs resolved → re-kick cheap so the workflow resumes from the fuller
-			// checkpoint (the collected chunk is now covered → skipped).
+			// checkpoint (the collected chunk is now covered → skipped). Re-check
+			// aiMode UNDER the row lock first: a concurrent paid takeover
+			// (continue-paid / patience flip) may have flipped this video to "fast"
+			// AFTER our stale top-of-run read. Re-kicking cheap then would start a
+			// SECOND workflow racing the paid one — double transcription, double spend.
+			// Only clear the wait markers if still cheap; skip the re-kick otherwise.
 			if (terminal && remaining.length === 0) {
-				await db()
-					.update(videos)
-					.set({ transcriptionStatus: null })
-					.where(eq(videos.id, video.id as Video.VideoId));
-				await patchVideoMetadata(video.id, (m) => ({
-					...m,
-					aiQuotaWaiting: false,
-					aiProcessingStartedAt: undefined,
-				}));
-				await transcribeVideo(
-					video.id as Video.VideoId,
-					video.ownerId,
-					true,
-					true,
-					"cheap",
-				);
-				retried++;
+				let stillCheap = false;
+				await patchVideoMetadata(video.id, (m) => {
+					stillCheap = m.aiMode === "cheap";
+					return {
+						...m,
+						aiQuotaWaiting: false,
+						aiProcessingStartedAt: undefined,
+					};
+				});
+				if (stillCheap) {
+					await db()
+						.update(videos)
+						.set({ transcriptionStatus: null })
+						.where(eq(videos.id, video.id as Video.VideoId));
+					await transcribeVideo(
+						video.id as Video.VideoId,
+						video.ownerId,
+						true,
+						true,
+						"cheap",
+					);
+					retried++;
+				}
 			}
 		} catch (error) {
 			errors++;
