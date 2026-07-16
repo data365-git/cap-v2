@@ -107,6 +107,12 @@ function createServerEnv() {
 				.string()
 				.optional()
 				.describe("Audio transcription (deprecated)"),
+			ELEVENLABS_API_KEY: z
+				.string()
+				.optional()
+				.describe(
+					"ElevenLabs Scribe speech-to-text for opt-in timestamp refinement",
+				),
 			ANTHROPIC_API_KEY: z.string().optional().describe("AI chat"),
 			OPENAI_API_KEY: z.string().optional().describe("AI summaries"),
 			GROQ_API_KEY: z.string().optional().describe("AI summaries"),

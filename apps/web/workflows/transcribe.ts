@@ -20,6 +20,7 @@ import { userIsPro } from "@cap/utils";
 import { Storage } from "@cap/web-backend";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
+import { Option } from "effect";
 import { FatalError } from "workflow";
 import { withCostGuard } from "@/lib/ai-cost-guard";
 import {
@@ -33,6 +34,7 @@ import {
 	chunkAudio,
 	extractAudioFromUrl,
 } from "@/lib/audio-extract";
+import { fetchScribeWordTimes } from "@/lib/eleven-scribe";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
 import {
 	cuesToVtt,
@@ -52,6 +54,7 @@ import {
 	transcriptHasCues,
 } from "@/lib/transcription-chunking";
 import { decodeStorageVideo } from "@/lib/video-storage";
+import { transferVttTimingWithStats } from "@/lib/vtt-timing-transfer";
 
 interface TranscribeWorkflowPayload {
 	videoId: string;
@@ -1551,5 +1554,128 @@ async function _enhanceAndSaveAudio(
 				},
 			})
 			.where(eq(videos.id, videoId as Video.VideoId));
+	}
+}
+
+/**
+ * Opt-in ElevenLabs Scribe timestamp refinement (per-video owner action).
+ *
+ * Replaces Gemini's estimated cue timing with Scribe's word-accurate timing
+ * while preserving the transcript TEXT. This never runs automatically — it is
+ * triggered only from the owner's dashboard menu (POST
+ * /api/videos/[videoId]/refine-timestamps) and is fully DORMANT unless
+ * ELEVENLABS_API_KEY is configured. On any failure or low-confidence outcome
+ * the stored Gemini-timed VTT is left untouched.
+ *
+ * Called inline (fire-and-forget) like transcribeVideoWorkflow, so it does not
+ * need to be registered as a separate workflow entry.
+ */
+export async function refineVideoTimestampsWorkflow(payload: {
+	videoId: string;
+	userId: string;
+}): Promise<{ success: boolean; reason?: string }> {
+	const { videoId, userId } = payload;
+
+	const [video] = await db()
+		.select()
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+
+	if (!video || video.ownerId !== userId) {
+		return { success: false, reason: "not_found" };
+	}
+	if (!serverEnv().ELEVENLABS_API_KEY) {
+		await patchVideoMetadata(videoId, {
+			timestampRefineStatus: "ERROR",
+			timestampRefineError: "missing_key",
+		});
+		return { success: false, reason: "missing_key" };
+	}
+	if (video.transcriptionStatus !== "COMPLETE") {
+		await patchVideoMetadata(videoId, {
+			timestampRefineStatus: "ERROR",
+			timestampRefineError: "missing_transcript",
+		});
+		return { success: false, reason: "missing_transcript" };
+	}
+
+	try {
+		const [bucket] = await Storage.getAccessForVideo(
+			decodeStorageVideo(video),
+		).pipe(runPromise);
+
+		const transcriptKey = `${video.ownerId}/${videoId}/transcription.vtt`;
+		const storedTranscript = await bucket
+			.getObject(transcriptKey)
+			.pipe(runPromise);
+		if (Option.isNone(storedTranscript)) {
+			throw new Error("missing_transcript");
+		}
+
+		const audio = await extractAudio(videoId, userId, video);
+		if (!audio) throw new Error("no_audio");
+
+		// Bill the Scribe call through the same cost guard used for Gemini so the
+		// spend is captured under the new "scribe" operation.
+		const { words } = await withCostGuard({
+			orgId: video.orgId,
+			userId,
+			videoId,
+			operation: "scribe",
+			model: "elevenlabs-scribe-v2",
+			fn: async () => {
+				const scribeWords = await fetchScribeWordTimes([
+					{ url: audio.audioUrl, startSec: 0 },
+				]);
+				return { words: scribeWords, inputTokens: 0, outputTokens: 0 };
+			},
+		});
+
+		// Re-read the stored VTT after the (slow) external call so any edits made
+		// while Scribe was running are preserved — only timing lines are rewritten.
+		const latest = await bucket.getObject(transcriptKey).pipe(runPromise);
+		const baseVtt = Option.isSome(latest)
+			? latest.value
+			: storedTranscript.value;
+
+		const result = transferVttTimingWithStats(baseVtt, words);
+		if (result.stats.identity) {
+			// Too few confident anchors to safely re-time — keep the Gemini VTT.
+			console.log(
+				`[transcribe] scribe-refine low confidence for ${videoId}; keeping Gemini-timed VTT`,
+			);
+			await patchVideoMetadata(videoId, {
+				timestampRefineStatus: "ERROR",
+				timestampRefineError: "low_confidence",
+			});
+			return { success: false, reason: "low_confidence" };
+		}
+
+		await bucket
+			.putObject(transcriptKey, result.vtt, { contentType: "text/vtt" })
+			.pipe(runPromise);
+
+		console.log(
+			`[transcribe] scribe-refine: ${result.stats.shiftedCueCount} cues shifted, mean ${result.stats.meanShiftSec.toFixed(1)}s, ${result.stats.denseMatches} dense matches for ${videoId}`,
+		);
+
+		await patchVideoMetadata(videoId, {
+			timestampsRefined: true,
+			timestampRefineStatus: "COMPLETE",
+			timestampRefineError: undefined,
+			timestampRefinedAt: new Date().toISOString(),
+		});
+		return { success: true };
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : "failed";
+		console.log(
+			`[transcribe] scribe-refine failed for ${videoId}; keeping Gemini-timed VTT`,
+			error,
+		);
+		await patchVideoMetadata(videoId, {
+			timestampRefineStatus: "ERROR",
+			timestampRefineError: reason,
+		}).catch(() => {});
+		return { success: false, reason };
 	}
 }
