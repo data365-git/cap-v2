@@ -31,7 +31,6 @@ import {
 	type AudioSlice,
 	checkHasAudioTrack,
 	chunkAudio,
-	chunkAudioVad,
 	extractAudioFromUrl,
 } from "@/lib/audio-extract";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
@@ -977,14 +976,12 @@ async function transcribeAudio(
 	let totalCueCount = 0;
 
 	try {
-		// VAD-based chunking: split on detected silence instead of blind fixed
-		// windows — boundaries land in silence, long silences are skipped (they
-		// trigger repetition loops and cost tokens for nothing). Falls back to
-		// fixed windows internally when no usable silence is found.
-		slices = await chunkAudioVad(localAudioPath, effectiveDuration, {
-			targetSec: chunkWindowSec,
-			maxSec: chunkWindowSec + 60,
-		});
+		slices = await chunkAudio(
+			localAudioPath,
+			effectiveDuration,
+			chunkWindowSec,
+			CHUNK_OVERLAP_SEC,
+		);
 
 		const chunkStartedAt = new Date().toISOString();
 		const unitTimesMs: number[] = [];
