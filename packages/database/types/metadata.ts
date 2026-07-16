@@ -2,6 +2,8 @@
  * Type definitions for JSON metadata fields
  */
 
+import type { LanguageCode } from "@cap/web-domain";
+
 export interface AiSummary {
 	overview: string;
 	topics: { title: string; body: string }[];
@@ -24,6 +26,31 @@ export interface AiSummary {
 		};
 		chapters: { startSec: number; title: string; paragraphs: string[] }[];
 	};
+}
+
+/** Lifecycle of an on-demand summary/transcript translation. */
+export type TranslationStatus = "PROCESSING" | "COMPLETE" | "ERROR";
+
+/**
+ * A single cached translation of a video's AI content into one target
+ * language. Stored under `VideoMetadata.translations[<langCode>]`. Purely
+ * additive: the base `aiSummary` and original transcript are never mutated.
+ */
+export interface VideoTranslation {
+	status: TranslationStatus;
+	/** Translated copy of the base `aiSummary` (same shape). */
+	aiSummary?: AiSummary;
+	/**
+	 * R2 key of the translated transcript VTT, when produced. Lives at
+	 * `{ownerId}/{videoId}/transcription.{lang}.vtt`.
+	 */
+	captionsKey?: string;
+	/** ISO timestamp when the translation was requested. */
+	requestedAt?: string;
+	/** ISO timestamp of the last status change. */
+	updatedAt?: string;
+	/** Human-readable failure reason when status === "ERROR". */
+	error?: string;
 }
 
 export type PipelinePhaseKey = "audio" | "transcribe" | "analyze" | "index";
@@ -174,6 +201,27 @@ export interface VideoMetadata {
 	timestampRefineError?: string;
 	/** ISO timestamp of the most recent successful refinement. */
 	timestampRefinedAt?: string;
+	/**
+	 * Set by the storage-reconcile cron when the video's underlying S3/R2 object
+	 * can no longer be found (orphaned DB row). Purely a diagnostic flag so the
+	 * reconcile job skips already-flagged rows on subsequent runs; it does not
+	 * change playback behavior. See app/api/cron/reconcile-storage/route.ts.
+	 */
+	storageMissing?: boolean;
+	/**
+	 * On-demand translations of the AI summary + transcript into other
+	 * languages, keyed by ISO language code (see `@cap/web-domain` LanguageCode).
+	 * Additive: the base `aiSummary` and original transcript VTT are untouched;
+	 * each entry caches a translated copy plus the R2 key of its translated VTT.
+	 * Written by lib/translate-ai.ts via the translate endpoint.
+	 */
+	translations?: Partial<Record<LanguageCode, VideoTranslation>>;
+	/**
+	 * Per-video default display language chosen by the owner. When set and a
+	 * matching entry exists in `translations`, the share page opens in that
+	 * language instead of the base content.
+	 */
+	preferredLanguage?: LanguageCode;
 }
 
 export type VideoEditRange = {

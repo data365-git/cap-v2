@@ -1542,7 +1542,8 @@ export type AiOperation =
 	| "summary"
 	| "embedding"
 	| "chat"
-	| "scribe";
+	| "scribe"
+	| "translate";
 
 export const aiUsageEvents = mysqlTable(
 	"ai_usage_events",

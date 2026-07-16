@@ -78,9 +78,22 @@ function isQuotaExceededError(status: number, msg: string): boolean {
 }
 
 function isTransientGeminiError(status: number, msg: string): boolean {
-	if (status === 429 || status === 503) return true;
+	// 500/501 (INTERNAL) and 503 (UNAVAILABLE) are Google-side transient failures
+	// that typically succeed on retry; 429 is rate-limit/overload. cap-v2
+	// previously treated a 500/501 as permanent and failed the whole chunk on the
+	// first hiccup. Widened to match the ustoz qa-fixes fork's transient set
+	// (429/500/501/503 + "overloaded"/"high demand"/"unavailable") so a transient
+	// backend blip is retried within the existing bounded backoff budget instead
+	// of surfacing as an ERROR. Quota (limit:0 / RESOURCE_EXHAUSTED) is still
+	// checked first and short-circuits, so this never masks a real quota wall.
+	if (status === 429 || status === 500 || status === 501 || status === 503)
+		return true;
 	const lower = msg.toLowerCase();
-	return lower.includes("high demand") || lower.includes("overloaded");
+	return (
+		lower.includes("high demand") ||
+		lower.includes("overloaded") ||
+		lower.includes("unavailable")
+	);
 }
 
 function backoffWithJitter(attempt: number): number {
