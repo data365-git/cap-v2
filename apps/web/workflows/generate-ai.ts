@@ -29,6 +29,7 @@ import {
 	billedOutputTokens,
 	type GeminiUsageMetadata,
 } from "@/lib/gemini-usage";
+import { restoreRussianScriptDeep } from "@/lib/restore-russian-script";
 import { runPromise } from "@/lib/server";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
@@ -115,7 +116,9 @@ const AiSummarySchema = z.object({
 function parseAiSummary(raw: unknown): AiSummary | null {
 	const result = AiSummarySchema.safeParse(raw);
 	if (!result.success) return null;
-	return result.data;
+	// Restore any romanized Russian in the generated summary/tasks/refined text
+	// (the same deterministic guard applied to the transcript source).
+	return restoreRussianScriptDeep(result.data);
 }
 
 // The 1M-token context easily holds any meeting transcript (a 3-hour meeting is

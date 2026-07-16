@@ -3,6 +3,7 @@ import {
 	billedInputTokens as readInputTokens,
 	billedOutputTokens as readOutputTokens,
 } from "@/lib/gemini-usage";
+import { restoreRussianScript } from "@/lib/restore-russian-script";
 import { collapseRepeatedCues } from "@/lib/transcription-chunking";
 
 /**
@@ -383,10 +384,17 @@ export function mergeVtt(
 	// before bounding/output.
 	const deduped = collapseRepeatedCues(all);
 	// Final safety net: drop anything that still lands past the real duration.
-	const bounded =
+	const clamped =
 		maxDurationSec != null
 			? clampCuesToDuration(deduped, maxDurationSec)
 			: deduped;
+	// Deterministic guard: restore any romanized Russian ("lyuboy" → "любой") the
+	// model produced despite the prompt. Applied at the source so panels,
+	// captions, and summaries all see corrected text.
+	const bounded = clamped.map((c) => ({
+		...c,
+		text: restoreRussianScript(c.text),
+	}));
 	return { vtt: cuesToVtt(bounded), cues: bounded };
 }
 
@@ -833,7 +841,10 @@ IMPORTANT: Start your response with "WEBVTT" header and format each line as WebV
 	);
 	// Strip repetition-loop artifacts within this chunk before shifting so a
 	// single-shot transcript is cleaned too (the merge path cleans across chunks).
-	const deduped = collapseRepeatedCues(parsedCues);
+	const deduped = collapseRepeatedCues(parsedCues).map((c) => ({
+		...c,
+		text: restoreRussianScript(c.text),
+	}));
 	const shifted = shiftCues(deduped, startOffsetSec);
 	const transcriptVtt = cuesToVtt(shifted);
 
