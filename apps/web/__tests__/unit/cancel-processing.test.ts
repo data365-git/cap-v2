@@ -10,9 +10,23 @@ let videoRow:
 	  }
 	| undefined;
 let lastUpdateSet: Record<string, unknown> | null = null;
+let patchCalled = false;
+let lastPatchUpdater:
+	| ((m: Record<string, unknown>) => Record<string, unknown>)
+	| null = null;
 
 vi.mock("@cap/database/auth/session", () => ({
 	getCurrentUser: () => Promise.resolve(currentUser),
+}));
+vi.mock("@/lib/video-metadata", () => ({
+	patchVideoMetadata: (
+		_id: string,
+		updater: (m: Record<string, unknown>) => Record<string, unknown>,
+	) => {
+		patchCalled = true;
+		lastPatchUpdater = updater;
+		return Promise.resolve();
+	},
 }));
 vi.mock("@cap/database/schema", () => ({ videos: { id: "id", ownerId: "o" } }));
 vi.mock("drizzle-orm", () => ({ eq: vi.fn() }));
@@ -38,9 +52,12 @@ vi.mock("@cap/database", () => ({
 import { POST } from "@/app/api/videos/[videoId]/cancel-processing/route";
 
 const call = () =>
-	POST(new Request("http://x/api/videos/v1/cancel-processing", { method: "POST" }), {
-		params: Promise.resolve({ videoId: "v1" }),
-	});
+	POST(
+		new Request("http://x/api/videos/v1/cancel-processing", { method: "POST" }),
+		{
+			params: Promise.resolve({ videoId: "v1" }),
+		},
+	);
 
 /**
  * Cancelling an in-flight transcription must (a) never clobber a video that has
@@ -51,6 +68,8 @@ describe("POST cancel-processing", () => {
 	beforeEach(() => {
 		currentUser = { id: "user_1" };
 		lastUpdateSet = null;
+		patchCalled = false;
+		lastPatchUpdater = null;
 		videoRow = {
 			id: "v1",
 			ownerId: "user_1",
@@ -77,15 +96,16 @@ describe("POST cancel-processing", () => {
 	it("sets CANCELLED and the durable cancel marker while processing", async () => {
 		const res = await call();
 		expect(res.status).toBe(200);
+		// transcriptionStatus is a plain column write (no metadata clobber).
 		expect(lastUpdateSet?.transcriptionStatus).toBe("CANCELLED");
-		expect(
-			(lastUpdateSet?.metadata as { cancelRequested?: boolean })
-				.cancelRequested,
-		).toBe(true);
-		// existing metadata is preserved, not overwritten
-		expect(
-			(lastUpdateSet?.metadata as { existing?: boolean }).existing,
-		).toBe(true);
+		expect(lastUpdateSet?.metadata).toBeUndefined();
+		// The cancel marker goes through the atomic row-locked helper. Apply the
+		// captured updater to the freshly-locked row: it must set cancelRequested
+		// AND preserve every sibling field (no lost update).
+		expect(patchCalled).toBe(true);
+		const next = lastPatchUpdater!({ existing: true });
+		expect(next.cancelRequested).toBe(true);
+		expect(next.existing).toBe(true);
 	});
 
 	it.each(["COMPLETE", "SKIPPED", "NO_AUDIO"])(
@@ -95,6 +115,7 @@ describe("POST cancel-processing", () => {
 			const res = await call();
 			expect(res.status).toBe(409);
 			expect(lastUpdateSet).toBeNull();
+			expect(patchCalled).toBe(false);
 		},
 	);
 });

@@ -1,13 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { db } from "@cap/database";
 import { videos, videoUploads } from "@cap/database/schema";
-import type { VideoMetadata } from "@cap/database/types";
 import { Storage } from "@cap/web-backend";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { NextResponse } from "next/server";
 import { sendOpsAlert } from "@/lib/ops-alert";
 import { runPromise } from "@/lib/server";
+import { patchVideoMetadata } from "@/lib/video-metadata";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
 export const dynamic = "force-dynamic";
@@ -94,11 +94,12 @@ export async function GET(request: Request) {
 			if (!exists) {
 				missing++;
 				missingVideoIds.push(video.id);
-				const metadata = (video.metadata as VideoMetadata) ?? {};
-				await db()
-					.update(videos)
-					.set({ metadata: { ...metadata, storageMissing: true } })
-					.where(eq(videos.id, video.id));
+				// Atomic row-locked patch (derive from the freshly-locked row, not the
+				// stale candidate read) so we don't clobber a concurrent metadata write.
+				await patchVideoMetadata(video.id, (current) => ({
+					...current,
+					storageMissing: true,
+				}));
 			}
 		} catch (error) {
 			console.error(

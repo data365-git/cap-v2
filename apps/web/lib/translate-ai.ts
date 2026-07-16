@@ -18,6 +18,7 @@ import {
 	restoreRussianScriptDeep,
 } from "@/lib/restore-russian-script";
 import { runPromise } from "@/lib/server";
+import { patchVideoMetadata as patchVideoMetadataLocked } from "@/lib/video-metadata";
 import { decodeStorageVideo } from "@/lib/video-storage";
 
 interface TranslateAiContentPayload {
@@ -533,20 +534,16 @@ async function getCurrentVideoRow(videoId: Video.VideoId) {
 }
 
 /**
- * Read-modify-write a video's metadata JSON. Re-selects the current row each
- * call so it never clobbers a concurrent partial write of an unrelated field.
+ * Read-modify-write a video's metadata JSON. Delegates to the shared atomic
+ * helper (SELECT … FOR UPDATE + UPDATE in one transaction under a row lock) so a
+ * concurrent partial write of an unrelated field can never be lost. Keeps the
+ * `(videoId, patch)` full-return callback signature the call sites already use.
  */
 async function patchVideoMetadata(
 	videoId: Video.VideoId,
 	patch: (current: VideoMetadata) => VideoMetadata,
 ): Promise<void> {
-	const row = await getCurrentVideoRow(videoId);
-	if (!row) return;
-	const current = (row.metadata as VideoMetadata) || {};
-	await db()
-		.update(videos)
-		.set({ metadata: patch(current) })
-		.where(eq(videos.id, videoId));
+	await patchVideoMetadataLocked(videoId, patch);
 }
 
 /**
