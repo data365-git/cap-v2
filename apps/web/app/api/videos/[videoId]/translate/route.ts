@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(
 	request: NextRequest,
-	props: RouteContext<"/api/videos/[videoId]/translate">,
+	props: { params: Promise<{ videoId: string }> },
 ) {
 	try {
 		const user = await getCurrentUser();
@@ -129,7 +129,7 @@ export async function POST(
  */
 export async function GET(
 	request: NextRequest,
-	props: RouteContext<"/api/videos/[videoId]/translate">,
+	props: { params: Promise<{ videoId: string }> },
 ) {
 	try {
 		const { videoId } = (await props.params) as { videoId: Video.VideoId };
