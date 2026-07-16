@@ -191,7 +191,7 @@ describe("replaceVideoWithAudio", () => {
 		expect(H.deleteObjectCalls).toHaveLength(0);
 	});
 
-	it("4. happy path: extract -> put -> verify -> reclaim -> patch metadata, in order", async () => {
+	it("4. happy path: extract -> put -> verify -> patch metadata -> reclaim, crash-safe order", async () => {
 		H.getCurrentUser.mockResolvedValue({ id: OWNER_ID });
 		H.existingObjects.set(TRANSCODED_KEY, 1_000_000); // heavy source + reclaimable
 		H.existingObjects.set(RAW_MP4_KEY, 900_000); // reclaimable
@@ -201,7 +201,10 @@ describe("replaceVideoWithAudio", () => {
 			async (
 				_id: string,
 				patch: (m: Record<string, unknown>) => Record<string, unknown>,
-			) => patch({ aiSummary: { overview: "kept" } }),
+			) => {
+				H.callOrder.push("patch:isAudio");
+				return patch({ aiSummary: { overview: "kept" } });
+			},
 		);
 
 		const result = await replaceVideoWithAudio(VIDEO_ID);
@@ -220,11 +223,16 @@ describe("replaceVideoWithAudio", () => {
 			},
 		]);
 
-		// SAFETY ordering: put happens strictly before any reclaim delete.
+		// SAFETY ordering: put, then flip isAudio, then reclaim-delete — strictly.
+		// isAudio must flip BEFORE the heavy objects are deleted so a crash between
+		// them leaves working playback (audio-only.mp3, already written) plus
+		// reclaimable orphans, never a video whose files are gone but isAudio=false.
 		const putIndex = H.callOrder.indexOf(`put:${AUDIO_KEY}`);
+		const patchIndex = H.callOrder.indexOf("patch:isAudio");
 		const deleteIndex = H.callOrder.indexOf(`delete:${RAW_MP4_KEY}`);
 		expect(putIndex).toBeGreaterThanOrEqual(0);
-		expect(deleteIndex).toBeGreaterThan(putIndex);
+		expect(patchIndex).toBeGreaterThan(putIndex);
+		expect(deleteIndex).toBeGreaterThan(patchIndex);
 
 		expect(H.deleteObjectCalls).toEqual([TRANSCODED_KEY, RAW_MP4_KEY]);
 		// the newly-written audio object is NEVER deleted

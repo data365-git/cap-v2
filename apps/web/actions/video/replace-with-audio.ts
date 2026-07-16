@@ -131,6 +131,14 @@ export async function replaceVideoWithAudio(
 	}
 	if (!verified) return { ok: false, reason: "verify_failed" };
 
+	// Flip isAudio BEFORE deleting the heavy objects, not after. audio-only.mp3
+	// is already written and verified, so the playlist route can serve it now. If
+	// the process dies mid-reclaim, playback already points at the audio file
+	// (works) and the undeleted heavy objects are just reclaimable orphans — the
+	// opposite order would leave isAudio=false with the video files gone, so the
+	// playlist would serve a now-missing transcoded.mp4 and playback would 404.
+	await patchVideoMetadata(videoId, (cur) => ({ ...cur, isAudio: true }));
+
 	const reclaimedFrom: string[] = [];
 	for (const name of RECLAIM_CANDIDATE_NAMES) {
 		const key = `${video.ownerId}/${videoId}/${name}`;
@@ -153,8 +161,6 @@ export async function replaceVideoWithAudio(
 			});
 		}
 	}
-
-	await patchVideoMetadata(videoId, (cur) => ({ ...cur, isAudio: true }));
 
 	revalidatePath(`/s/${videoId}`);
 
