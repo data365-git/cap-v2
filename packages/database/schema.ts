@@ -1537,7 +1537,12 @@ export const transcriptChunksRelations = relations(
 	}),
 );
 
-export type AiOperation = "transcription" | "summary" | "embedding" | "chat";
+export type AiOperation =
+	| "transcription"
+	| "summary"
+	| "embedding"
+	| "chat"
+	| "translate";
 
 export const aiUsageEvents = mysqlTable(
 	"ai_usage_events",
