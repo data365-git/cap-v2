@@ -128,18 +128,25 @@ export const ShareVideo = forwardRef<
 		// translation from metadata.translations. Defaults to the owner's
 		// preferredLanguage when that translation is available.
 		const translations = data.metadata?.translations;
-		const [selectedLanguage, setSelectedLanguage] = useState<SelectedLanguage>(
-			() => {
-				const preferred = data.metadata?.preferredLanguage;
-				if (
-					preferred &&
-					translations?.[preferred]?.status === "COMPLETE" &&
-					translations[preferred]?.aiSummary
-				) {
-					return preferred;
+		// Single source of truth for language: CaptionContext already drives the
+		// captions + transcript (Groq VTT translation). Derive the summary picker's
+		// value from it ("original"/"off" → "base") and, on pick, drive BOTH — so
+		// one language choice translates summary, transcript, and captions together
+		// instead of the two disconnected selectors that existed before.
+		const captionLang = captionContext.selectedLanguage;
+		const selectedLanguage: SelectedLanguage =
+			captionLang === "original" || captionLang === "off"
+				? "base"
+				: captionLang;
+		const setSelectedLanguage = useCallback(
+			(value: SelectedLanguage) => {
+				const capLang: CaptionLanguage = value === "base" ? "original" : value;
+				captionContext.setSelectedLanguage(capLang);
+				if (value !== "base") {
+					void captionContext.requestTranslation(value);
 				}
-				return "base";
 			},
+			[captionContext],
 		);
 
 		const baseSummary = data.metadata?.aiSummary ?? undefined;
