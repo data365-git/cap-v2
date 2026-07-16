@@ -5,30 +5,30 @@ import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 
 /**
- * Read-modify-write a video's `metadata` JSON so sibling fields (aiSummary,
- * completedChunks, pipelineProgress…) are never clobbered. Takes an updater that
- * receives the current metadata and returns the next one, so callers outside the
- * transcribe workflow (the Batch collector cron, the paid-takeover control) can
- * mutate metadata safely. Mirrors the workflow's private patch helper but is
- * import-safe from route/lib code (no workflow directives).
+ * Atomically read-modify-write a video's metadata JSON under a row lock so
+ * concurrent writers (AI generation, translation, task toggle, metadata edit,
+ * replace-with-audio) cannot clobber each other's changes (lost-update race).
+ * Runs SELECT ... FOR UPDATE + UPDATE inside one transaction. The `patch`
+ * callback receives the freshly-locked current metadata and must return the
+ * FULL next metadata. Throwing inside `patch` rolls back the transaction (use
+ * for mid-lock validation).
  */
 export async function patchVideoMetadata(
 	videoId: string,
-	updater: (current: VideoMetadata) => VideoMetadata,
+	patch: (current: VideoMetadata) => VideoMetadata | Promise<VideoMetadata>,
 ): Promise<VideoMetadata> {
-	const [row] = await db()
-		.select({ metadata: videos.metadata })
-		.from(videos)
-		.where(eq(videos.id, videoId as Video.VideoId))
-		.limit(1);
-
-	const current = (row?.metadata as VideoMetadata) || {};
-	const next = updater(current);
-
-	await db()
-		.update(videos)
-		.set({ metadata: next })
-		.where(eq(videos.id, videoId as Video.VideoId));
-
-	return next;
+	return await db().transaction(async (tx) => {
+		const [row] = await tx
+			.select({ metadata: videos.metadata })
+			.from(videos)
+			.where(eq(videos.id, videoId as Video.VideoId))
+			.for("update");
+		const current = ((row?.metadata as VideoMetadata) ?? {}) as VideoMetadata;
+		const next = await patch(current);
+		await tx
+			.update(videos)
+			.set({ metadata: next })
+			.where(eq(videos.id, videoId as Video.VideoId));
+		return next;
+	});
 }

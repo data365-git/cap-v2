@@ -291,6 +291,24 @@ const getPlaylistResponse = (
 			return yield* proxyObject(audioKey, audioMimeForKey(audioKey));
 		}
 
+		// Storage-reclaimed videos (owner "replace with audio" action): the heavy
+		// video objects were deleted and only audio-only.mp3 remains. Serve that
+		// audio file for media-playback requests so the player plays the reclaimed
+		// audio. Non-media sub-requests (transcription VTT, enhanced audio) carry a
+		// `fileType` and fall through to their own handlers below, untouched.
+		const reclaimedMetadata = Option.getOrUndefined(video.metadata) as
+			| { isAudio?: boolean }
+			| undefined;
+		const isReclaimedToAudio = reclaimedMetadata?.isAudio === true;
+		if (
+			isReclaimedToAudio &&
+			Option.isNone(urlParams.fileType) &&
+			(isMp4Source || urlParams.videoType === "mp4")
+		) {
+			const audioOnlyKey = `${video.ownerId}/${video.id}/audio-only.mp3`;
+			return yield* proxyObject(audioOnlyKey, "audio/mpeg");
+		}
+
 		if (urlParams.videoType === "raw-preview") {
 			const rawFileKey = yield* resolveRawPreviewKey(video);
 			return yield* proxyObject(rawFileKey);

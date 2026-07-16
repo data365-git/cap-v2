@@ -134,6 +134,16 @@ export interface VideoMetadata {
 	 */
 	mp4Ready?: boolean;
 	/**
+	 * Set by the owner-only "replace with audio" storage-reclaim action
+	 * (actions/video/replace-with-audio.ts). When true the heavy video objects
+	 * (transcoded.mp4 / result.* / raw-upload.*) have been deleted and an
+	 * audio-only file lives at <owner>/<videoId>/audio-only.mp3. The playlist
+	 * route serves that audio file for media-playback requests instead of the
+	 * (now-absent) video. Additive: absent → current behavior unchanged.
+	 * Irreversible — the original video bytes are gone once this is set.
+	 */
+	isAudio?: boolean;
+	/**
 	 * Generation status for the screen-capture thumbnail + animated preview.
 	 * "pending" is the implicit default for old rows (treat undefined as pending).
 	 */
@@ -220,6 +230,31 @@ export interface VideoMetadata {
 	 * cost). See app/api/cron/recover-stale-ai-jobs/route.ts.
 	 */
 	recoveryAttempts?: number;
+	/**
+	 * Opt-in ElevenLabs Scribe timestamp refinement (per-video owner action).
+	 * Gemini timing remains the default for every transcript; the owner may
+	 * choose "Refine timestamps" to replace the estimated cue timing with
+	 * Scribe's word-accurate timing while preserving the transcript TEXT.
+	 *
+	 * `timestampsRefined` is true once a refinement has successfully rewritten
+	 * the stored VTT. `timestampRefineStatus` tracks the in-flight/terminal state
+	 * of the most recent request. Both live in this JSON column (no new DB
+	 * column / migration) and default to undefined for every existing row.
+	 * Dormant unless ELEVENLABS_API_KEY is configured.
+	 */
+	timestampsRefined?: boolean;
+	timestampRefineStatus?: "PROCESSING" | "COMPLETE" | "ERROR";
+	/** Human-readable reason the most recent refinement failed. */
+	timestampRefineError?: string;
+	/** ISO timestamp of the most recent successful refinement. */
+	timestampRefinedAt?: string;
+	/**
+	 * Set by the storage-reconcile cron when the video's underlying S3/R2 object
+	 * can no longer be found (orphaned DB row). Purely a diagnostic flag so the
+	 * reconcile job skips already-flagged rows on subsequent runs; it does not
+	 * change playback behavior. See app/api/cron/reconcile-storage/route.ts.
+	 */
+	storageMissing?: boolean;
 	/**
 	 * On-demand translations of the AI summary + transcript into other
 	 * languages, keyed by ISO language code (see `@cap/web-domain` LanguageCode).
