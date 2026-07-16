@@ -22,6 +22,8 @@ import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { FatalError } from "workflow";
 import { withCostGuard } from "@/lib/ai-cost-guard";
+import { isAiQuotaWaitError, isQuotaLikeAiError } from "@/lib/ai-quota-wait";
+import { type AiSpeedMode, resolveAiSpeedMode } from "@/lib/ai-speed-mode";
 import {
 	ENHANCED_AUDIO_CONTENT_TYPE,
 	ENHANCED_AUDIO_EXTENSION,
@@ -33,6 +35,7 @@ import {
 	chunkAudio,
 	extractAudioFromUrl,
 } from "@/lib/audio-extract";
+import { submitChunkBatch } from "@/lib/gemini-batch-transcribe";
 import { EMBED_MODEL, embedChunksWithUsage } from "@/lib/gemini-embed";
 import {
 	cuesToVtt,
@@ -57,6 +60,10 @@ interface TranscribeWorkflowPayload {
 	videoId: string;
 	userId: string;
 	aiGenerationEnabled: boolean;
+	/** Optional per-call override of the org-level aiSpeedMode default (used by
+	 * the paid-takeover flip and the Batch collector re-kick). Absent = resolve
+	 * from metadata.aiMode / org setting; missing entirely on the default path. */
+	speedModeOverride?: AiSpeedMode;
 }
 
 interface VideoData {
@@ -65,6 +72,7 @@ interface VideoData {
 	isOwnerPro: boolean;
 	ownerEncryptedGeminiKey: string | null;
 	orgId: string;
+	aiSpeedMode: AiSpeedMode;
 }
 
 export async function transcribeVideoWorkflow(
@@ -72,9 +80,9 @@ export async function transcribeVideoWorkflow(
 ) {
 	"use workflow";
 
-	const { videoId, userId, aiGenerationEnabled } = payload;
+	const { videoId, userId, aiGenerationEnabled, speedModeOverride } = payload;
 
-	const videoData = await validateVideo(videoId);
+	const videoData = await validateVideo(videoId, speedModeOverride);
 
 	if (videoData.transcriptionDisabled) {
 		await markSkipped(videoId);
@@ -108,7 +116,12 @@ export async function transcribeVideoWorkflow(
 				// MAX_TOKENS truncation → ERROR.
 				audio.durationSec ?? videoData.video.duration,
 				videoData.ownerEncryptedGeminiKey,
-				{ userId, orgId: videoData.orgId, videoId },
+				{
+					userId,
+					orgId: videoData.orgId,
+					videoId,
+					aiSpeedMode: videoData.aiSpeedMode,
+				},
 				isAudioSource,
 			),
 		]);
@@ -152,6 +165,19 @@ export async function transcribeVideoWorkflow(
 			await cleanupTempAudio(videoId, userId, videoData.video);
 			return { success: true, message: "Transcription cancelled" };
 		}
+		if (isAiQuotaWaitError(error)) {
+			// Cheap-mode free/quota wall: the uncovered chunk was submitted to the
+			// paid Batch API and the video PARKS in PROCESSING + aiQuotaWaiting. NOT
+			// an error — the poll-batch-jobs cron collects + re-kicks, or the
+			// patience window auto-continues on paid. Keep the checkpoint; do not
+			// mark ERROR and do not flip the phase to error.
+			await markQuotaWaiting(videoId);
+			await cleanupTempAudio(videoId, userId, videoData.video);
+			return {
+				success: true,
+				message: "Cheap mode waiting on free-tier quota (Batch submitted)",
+			};
+		}
 		await markError(videoId, describeTranscriptionError(error));
 		await markActivePhaseError(videoId);
 		await cleanupTempAudio(videoId, userId, videoData.video);
@@ -167,7 +193,10 @@ export async function transcribeVideoWorkflow(
 	return { success: true, message: "Transcription completed successfully" };
 }
 
-async function validateVideo(videoId: string): Promise<VideoData> {
+async function validateVideo(
+	videoId: string,
+	speedModeOverride?: AiSpeedMode,
+): Promise<VideoData> {
 	"use step";
 
 	const query = await db()
@@ -198,8 +227,19 @@ async function validateVideo(videoId: string): Promise<VideoData> {
 
 	const isOwnerPro = userIsPro(result.owner);
 
+	const staleMetadata = (result.video.metadata as VideoMetadata) || {};
+
+	// Resolve the transcription speed/cost mode ONCE at workflow start. Per-call
+	// override wins (paid takeover / Batch re-kick), then the per-video mode, then
+	// the org setting; anything unset resolves to "fast" (unchanged behavior).
+	const aiSpeedMode = resolveAiSpeedMode(
+		speedModeOverride ??
+			staleMetadata.aiMode ??
+			result.orgSettings?.aiSpeedMode,
+	);
+
 	console.log(
-		`[transcribe] Owner check: stripeSubscriptionStatus=${result.owner.stripeSubscriptionStatus}, thirdPartyStripeSubscriptionId=${result.owner.thirdPartyStripeSubscriptionId}, isOwnerPro=${isOwnerPro}`,
+		`[transcribe] Owner check: stripeSubscriptionStatus=${result.owner.stripeSubscriptionStatus}, thirdPartyStripeSubscriptionId=${result.owner.thirdPartyStripeSubscriptionId}, isOwnerPro=${isOwnerPro}, aiSpeedMode=${aiSpeedMode}`,
 	);
 
 	await db()
@@ -210,22 +250,25 @@ async function validateVideo(videoId: string): Promise<VideoData> {
 	// Clear any stale failure reason AND a stale cancel marker so a retry starts
 	// clean — otherwise a leftover cancelRequested:true would immediately abort
 	// the new run at the first checkpoint. Read-modify-write to preserve
-	// aiSummary/refinedTranscript/etc.
-	const staleMetadata = (result.video.metadata as VideoMetadata) || {};
-	if (
-		staleMetadata.transcriptionError !== undefined ||
-		staleMetadata.cancelRequested !== undefined
-	) {
-		const {
-			transcriptionError: _clearedError,
-			cancelRequested: _clearedCancel,
-			...rest
-		} = staleMetadata;
-		await db()
-			.update(videos)
-			.set({ metadata: rest })
-			.where(eq(videos.id, videoId as Video.VideoId));
-	}
+	// aiSummary/refinedTranscript/etc. Also stamps the resolved cost mode + job
+	// clock (additive; "fast" is inert for every downstream check).
+	const {
+		transcriptionError: _clearedError,
+		cancelRequested: _clearedCancel,
+		...rest
+	} = staleMetadata;
+	await db()
+		.update(videos)
+		.set({
+			metadata: {
+				...rest,
+				aiMode: aiSpeedMode,
+				aiJobStartedAt:
+					staleMetadata.aiJobStartedAt ?? new Date().toISOString(),
+				aiQuotaWaiting: false,
+			} satisfies VideoMetadata,
+		})
+		.where(eq(videos.id, videoId as Video.VideoId));
 
 	return {
 		video: result.video,
@@ -233,6 +276,7 @@ async function validateVideo(videoId: string): Promise<VideoData> {
 		isOwnerPro,
 		ownerEncryptedGeminiKey: result.owner.geminiApiKey ?? null,
 		orgId: result.video.orgId,
+		aiSpeedMode,
 	};
 }
 
@@ -252,6 +296,85 @@ async function markNoAudio(videoId: string): Promise<void> {
 		.update(videos)
 		.set({ transcriptionStatus: "NO_AUDIO" })
 		.where(eq(videos.id, videoId as Video.VideoId));
+}
+
+/**
+ * Park a cheap-mode video that hit a free/quota wall: keep transcriptionStatus
+ * PROCESSING and flip metadata.aiQuotaWaiting so the UI can surface the wait and
+ * the poll-batch-jobs cron picks it up. Read-modify-write to preserve the
+ * completedChunks checkpoint + the submitted aiBatchJobs.
+ */
+async function markQuotaWaiting(videoId: string): Promise<void> {
+	"use step";
+
+	const [row] = await db()
+		.select({ metadata: videos.metadata })
+		.from(videos)
+		.where(eq(videos.id, videoId as Video.VideoId));
+	const metadata = (row?.metadata as VideoMetadata) || {};
+
+	await db()
+		.update(videos)
+		.set({
+			metadata: { ...metadata, aiQuotaWaiting: true } satisfies VideoMetadata,
+		})
+		.where(eq(videos.id, videoId as Video.VideoId));
+}
+
+/**
+ * One-at-a-time cheap-mode durable Batch submit. On a cheap free/quota failure
+ * for a chunk, upload that ONE uncovered slice to the paid Gemini Batch API using
+ * the SERVER paid key (never an owner key — the collector must resolve the same
+ * project), persist the job (with its chunk index so the collector can drop the
+ * result onto the same grid), and return so the caller can rethrow the quota
+ * wait. Submits at most one job per video. NEVER throws: any failure here is
+ * logged and swallowed so the patient wait stays live and a transient problem
+ * never escalates a quota wait to ERROR.
+ */
+async function submitCheapChunkBatch(
+	chunk: { audioPath: string; startSec: number; durationSec: number },
+	chunkIndex: number,
+	videoId: string,
+): Promise<void> {
+	try {
+		const paidKey = serverEnv().GEMINI_API_KEY;
+		if (!paidKey) {
+			console.warn(
+				`[transcribe] cheap quota but no paid GEMINI_API_KEY set; staying on patient wait for video=${videoId}`,
+			);
+			return;
+		}
+
+		// Never submit while a job is already pending — one Batch per video.
+		const [row] = await db()
+			.select({ metadata: videos.metadata })
+			.from(videos)
+			.where(eq(videos.id, videoId as Video.VideoId))
+			.limit(1);
+		const existingJobs = ((row?.metadata as VideoMetadata) ?? {}).aiBatchJobs;
+		if (Array.isArray(existingJobs) && existingJobs.length > 0) return;
+
+		const submitted = await submitChunkBatch(
+			{ audioPath: chunk.audioPath },
+			{ apiKey: paidKey, videoId },
+		);
+		await patchVideoMetadata(videoId, {
+			aiBatchJobs: [
+				{
+					batchName: submitted.batchName,
+					fileName: submitted.fileName,
+					chunkIndex,
+					startSec: chunk.startSec,
+					durationSec: chunk.durationSec,
+					submittedAt: new Date().toISOString(),
+				},
+			],
+		});
+	} catch (error) {
+		console.warn(
+			`[transcribe] cheap-mode Batch submit failed for video=${videoId}; keeping patient wait: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 /**
@@ -412,6 +535,20 @@ class TranscriptionCancelledError extends FatalError {
 	constructor() {
 		super("Transcription cancelled by user");
 		this.name = "TranscriptionCancelledError";
+	}
+}
+
+/**
+ * Cheap-mode free/quota park signal. Extends FatalError so the workflow runtime
+ * does NOT retry the step (default 3 retries) — the chunk is already handed to
+ * the durable Batch and the video must PARK, not re-hit the exhausted free tier.
+ * Named "AiQuotaWaitError" so the shared `isAiQuotaWaitError` guard (used in the
+ * workflow catch + lib/transcribe) recognizes it without importing "workflow".
+ */
+class AiQuotaWaitFatalError extends FatalError {
+	constructor(message: string) {
+		super(message);
+		this.name = "AiQuotaWaitError";
 	}
 }
 
@@ -663,10 +800,17 @@ async function transcribeAudio(
 	audioUrl: string,
 	videoDuration: number | null,
 	ownerEncryptedGeminiKey: string | null,
-	context: { userId: string; orgId: string; videoId: string },
+	context: {
+		userId: string;
+		orgId: string;
+		videoId: string;
+		aiSpeedMode?: AiSpeedMode;
+	},
 	isAudioSource = false,
 ): Promise<TranscriptionResult> {
 	"use step";
+
+	const isCheap = context.aiSpeedMode === "cheap";
 
 	let apiKey: string | undefined;
 
@@ -690,7 +834,12 @@ async function transcribeAudio(
 		);
 	}
 
-	const resolvedApiKey = apiKey;
+	// Cheap mode tries the free-of-charge key FIRST when one is configured; on its
+	// quota wall the chunk is routed to the paid Batch API (below). Fast/default
+	// mode NEVER touches the free key — `resolvedApiKey` is unchanged, so its path
+	// stays byte-for-byte identical.
+	const cheapFreeKey = isCheap ? serverEnv().GEMINI_API_KEY_FREE : undefined;
+	const resolvedApiKey = cheapFreeKey || apiKey;
 	const knownDuration =
 		videoDuration != null && Number.isFinite(videoDuration) && videoDuration > 0
 			? videoDuration
@@ -703,6 +852,7 @@ async function transcribeAudio(
 	// directly to transcribeWithGemini for a single Files API upload + one
 	// generateContent call. No per-chunk progress — just active until done.
 	if (
+		!isCheap &&
 		isAudioSource &&
 		knownDuration !== null &&
 		!shouldChunkForTranscription({
@@ -796,8 +946,11 @@ async function transcribeAudio(
 	}
 
 	// Audio sources that reach here already failed the single-shot check above,
-	// so they always chunk. Video sources chunk beyond CHUNK_THRESHOLD_SEC.
+	// so they always chunk. Video sources chunk beyond CHUNK_THRESHOLD_SEC. Cheap
+	// mode ALWAYS chunks so the Batch collector can drop a collected chunk onto the
+	// deterministic completedChunks grid and the re-kick resumes from it.
 	const shouldChunk =
+		isCheap ||
 		isAudioSource ||
 		shouldChunkForTranscription({
 			isAudioSource,
@@ -993,8 +1146,11 @@ async function transcribeAudio(
 			unitTimesMs: [],
 		});
 
-		if (isAudioSource) {
-			// ─── T12: Parallel pool of 6 for audio > 90 min ─────────────────────
+		if (isAudioSource || isCheap) {
+			// ─── T12: Parallel pool for audio > 90 min (also the cheap-mode path) ──
+			// Cheap mode uses a pool of ONE so a quota wall submits exactly one Batch
+			// job before parking; fast audio keeps the parallel pool.
+			const poolSize = isCheap ? 1 : AUDIO_PARALLEL_POOL;
 			// Read previously completed chunks from metadata so a retry can skip them.
 			const [metaRow] = await db()
 				.select({ metadata: videos.metadata })
@@ -1041,11 +1197,11 @@ async function transcribeAudio(
 				.map((_, i) => i)
 				.filter((i) => orderedResults[i] === null);
 
-			for (let b = 0; b < pendingIndices.length; b += AUDIO_PARALLEL_POOL) {
+			for (let b = 0; b < pendingIndices.length; b += poolSize) {
 				// Stop before dispatching the next (billable) batch if cancelled.
 				await assertNotCancelled(context.videoId);
 
-				const batchIndices = pendingIndices.slice(b, b + AUDIO_PARALLEL_POOL);
+				const batchIndices = pendingIndices.slice(b, b + poolSize);
 				const batchSlices = batchIndices
 					.map((i) => slices[i])
 					.filter((s): s is AudioSlice => !!s);
@@ -1070,13 +1226,58 @@ async function transcribeAudio(
 						const globalIdx = batchIndices[bi] ?? b + bi;
 						const chunkLabel = `${globalIdx + 1}/${slices.length}`;
 						const t0 = Date.now();
-						return transcribeChunk(slice, chunkLabel, 0).then((r) => ({
-							...r,
-							globalIdx,
-							elapsedMs: Date.now() - t0,
-						}));
+						return transcribeChunk(slice, chunkLabel, 0)
+							.then((r) => ({
+								...r,
+								globalIdx,
+								elapsedMs: Date.now() - t0,
+								quotaWait: false as const,
+								slice,
+							}))
+							.catch((err) => {
+								// Cheap-mode quota is NOT a missing chunk: signal a park so the
+								// uncovered slice goes to the durable paid Batch and the video
+								// waits. Fast mode rethrows → allSettled records a rejected
+								// chunk exactly as before (byte-for-byte).
+								if (isCheap && isQuotaLikeAiError(err)) {
+									return {
+										quotaWait: true as const,
+										globalIdx,
+										slice,
+										cues: [] as VttCue[],
+										isComplete: false,
+										elapsedMs: Date.now() - t0,
+									};
+								}
+								throw err;
+							});
 					}),
 				);
+
+				// Cheap-mode park: one uncovered slice hit the quota wall — submit it to
+				// the durable paid Batch and throw so the workflow parks in PROCESSING +
+				// aiQuotaWaiting. Runs BEFORE the persist/fault-tolerance merge below,
+				// which would otherwise swallow the wait into a silent gap.
+				if (isCheap) {
+					const parked = batchResults.find(
+						(s) => s.status === "fulfilled" && s.value.quotaWait === true,
+					);
+					if (parked && parked.status === "fulfilled") {
+						const { slice, globalIdx } = parked.value;
+						await submitCheapChunkBatch(
+							{
+								audioPath: slice.path,
+								startSec: slice.startOffsetSec,
+								durationSec: slice.durationSec,
+							},
+							globalIdx,
+							context.videoId,
+						);
+						throw new AiQuotaWaitFatalError(
+							`Free-tier transcription quota exhausted for video=${context.videoId}`,
+						);
+					}
+				}
 
 				// Persist each successful chunk to metadata immediately.
 				for (const settled of batchResults) {
@@ -1102,7 +1303,7 @@ async function transcribeAudio(
 				});
 
 				doneCount = orderedResults.filter(Boolean).length;
-				const isLastBatch = b + AUDIO_PARALLEL_POOL >= pendingIndices.length;
+				const isLastBatch = b + poolSize >= pendingIndices.length;
 				await patchPipelinePhase(context.videoId, "transcribe", {
 					status:
 						isLastBatch && doneCount === slices.length ? "done" : "active",
@@ -1153,6 +1354,22 @@ async function transcribeAudio(
 							unitTimesMs: [...unitTimesMs],
 						});
 					} catch (retryErr) {
+						// Cheap mode: a quota wall on retry parks the video (submit Batch +
+						// throw) instead of leaving a gap, same as the pool path above.
+						if (isCheap && isQuotaLikeAiError(retryErr)) {
+							await submitCheapChunkBatch(
+								{
+									audioPath: slice.path,
+									startSec: slice.startOffsetSec,
+									durationSec: slice.durationSec,
+								},
+								fi,
+								context.videoId,
+							);
+							throw new AiQuotaWaitFatalError(
+								`Free-tier transcription quota exhausted for video=${context.videoId}`,
+							);
+						}
 						console.error(
 							`[CAP-TRANSCRIBE] T12 retry chunk ${fi + 1}/${slices.length} also failed:`,
 							retryErr,

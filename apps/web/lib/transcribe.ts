@@ -3,6 +3,8 @@ import { organizations, videos, videoUploads } from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
+import { isAiQuotaWaitError } from "@/lib/ai-quota-wait";
+import type { AiSpeedMode } from "@/lib/ai-speed-mode";
 import { transcribeVideoWorkflow } from "@/workflows/transcribe";
 
 type TranscribeResult = {
@@ -15,6 +17,7 @@ export async function transcribeVideo(
 	userId: string,
 	aiGenerationEnabled = false,
 	_isRetry = false,
+	speedModeOverride?: AiSpeedMode,
 ): Promise<TranscribeResult> {
 	if (!serverEnv().GEMINI_API_KEY) {
 		return {
@@ -118,7 +121,18 @@ export async function transcribeVideo(
 			videoId,
 			userId,
 			aiGenerationEnabled,
+			// Only include the override when explicitly set, so the default-path
+			// payload stays exactly {videoId, userId, aiGenerationEnabled}.
+			...(speedModeOverride ? { speedModeOverride } : {}),
 		}).catch((err) => {
+			if (isAiQuotaWaitError(err)) {
+				// Cheap-mode park (Batch submitted, waiting on free-tier quota) — not a
+				// failure. The poll-batch-jobs / patience cron drives it to completion.
+				console.warn(
+					`[transcribeVideo] Cheap transcription parked on free-tier quota for video ${videoId}`,
+				);
+				return;
+			}
 			console.error(
 				`[transcribeVideo] Inline workflow failed for video ${videoId}:`,
 				err,

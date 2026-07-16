@@ -25,6 +25,7 @@ import { BelowVideoTabs } from "./BelowVideoTabs";
 import { CapAudioPlayer } from "./CapAudioPlayer";
 import { type CaptionLanguage, useCaptionContext } from "./CaptionContext";
 import { CapVideoPlayer } from "./CapVideoPlayer";
+import { CheapWaitingNotice } from "./CheapWaitingNotice";
 import { GenerateStrip } from "./GenerateStrip";
 import { LanguagePicker, type SelectedLanguage } from "./LanguagePicker";
 import { MiniPlayerController } from "./MiniPlayerController";
@@ -755,6 +756,10 @@ export const ShareVideo = forwardRef<
 					open={upgradeModalOpen}
 					onOpenChange={setUpgradeModalOpen}
 				/>
+
+				{isOwner && data.metadata?.aiQuotaWaiting && (
+					<CheapWaitingNotice videoId={data.id} />
+				)}
 
 				{isOwner && (
 					<GenerateStrip

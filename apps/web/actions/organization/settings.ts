@@ -11,6 +11,7 @@ import {
 } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { type AiSpeedMode, isAiSpeedMode } from "@/lib/ai-speed-mode";
 import { normalizePlaybackSpeed } from "@/lib/playback-speed";
 import { requireOrganizationSettingsManager } from "./authorization";
 
@@ -25,6 +26,7 @@ type OrganizationSettingsInput = {
 	shareableLinkUseOrganizationIcon?: boolean;
 	aiGenerationLanguage?: AiGenerationLanguage;
 	defaultPlaybackSpeed?: number;
+	aiSpeedMode?: AiSpeedMode;
 };
 
 const proOrganizationSettingKeys = [
@@ -79,6 +81,13 @@ export async function updateOrganizationSettings(
 		!isAiGenerationLanguage(settings.aiGenerationLanguage)
 	) {
 		throw new Error("Unsupported AI generation language");
+	}
+
+	if (
+		settings.aiSpeedMode !== undefined &&
+		!isAiSpeedMode(settings.aiSpeedMode)
+	) {
+		throw new Error("Unsupported AI speed mode");
 	}
 
 	if (!user.activeOrganizationId) {
