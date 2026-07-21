@@ -57,6 +57,7 @@ import { runPromise } from "@/lib/server";
 import { chunkTranscript } from "@/lib/transcript-chunk";
 import {
 	AUDIO_SINGLE_SHOT_MAX_SEC,
+	buildTranscriptionSourceKeys,
 	CHUNK_THRESHOLD_SEC,
 	shouldChunkForTranscription,
 	transcriptHasCues,
@@ -715,7 +716,7 @@ async function extractAudio(
 
 async function resolveVideoSourceUrl(
 	videoId: string,
-	userId: string,
+	_userId: string,
 	video: typeof videos.$inferSelect,
 ): Promise<string> {
 	const [resolvedBucket] = await Storage.getAccessForVideo(
@@ -728,18 +729,12 @@ async function resolveVideoSourceUrl(
 		.where(eq(videoUploads.videoId, videoId as Video.VideoId))
 		.limit(1);
 
-	// webAudio uploads have no server-side `result.mp4` — the raw upload IS the
-	// audio file. Look at the raw upload key first so we don't probe a 404
-	// before falling through.
-	const isAudioSource = video.source?.type === "webAudio";
-	const candidateKeys = (
-		isAudioSource
-			? [upload[0]?.rawFileKey, `${userId}/${videoId}/result.mp4`]
-			: [`${userId}/${videoId}/result.mp4`, upload[0]?.rawFileKey]
-	).filter(
-		(value, index, values): value is string =>
-			Boolean(value) && values.indexOf(value) === index,
-	);
+	const candidateKeys = buildTranscriptionSourceKeys({
+		isAudioSource: video.source?.type === "webAudio",
+		ownerId: video.ownerId,
+		videoId,
+		rawFileKey: upload[0]?.rawFileKey,
+	});
 
 	for (const key of candidateKeys) {
 		const url = await resolvedBucket

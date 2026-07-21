@@ -95,3 +95,41 @@ export function collapseRepeatedCues<T extends RepeatCollapsibleCue>(
 	}
 	return out.map((c, i) => ({ ...c, index: i + 1 }));
 }
+
+/**
+ * Ordered, de-duplicated list of storage keys to try when locating a video's
+ * transcription source. The process-video workflow DELETES the videoUploads row
+ * on completion, so `rawFileKey` is often gone by the time transcription runs —
+ * and for webAudio there is no server-side `result.mp4` to fall back on. So also
+ * probe the known owner-prefixed `raw-upload.<ext>` keys (the same fallback the
+ * playlist route uses). Without this, audio transcription throws "Video file not
+ * accessible" once the upload row is cleared. Pure so it can be unit-tested.
+ */
+export function buildTranscriptionSourceKeys(input: {
+	isAudioSource: boolean;
+	ownerId: string;
+	videoId: string;
+	rawFileKey?: string | null;
+}): string[] {
+	const { isAudioSource, ownerId, videoId, rawFileKey } = input;
+	const base = `${ownerId}/${videoId}`;
+	const rawUploadFallbacks = [
+		"mp3",
+		"m4a",
+		"aac",
+		"wav",
+		"ogg",
+		"opus",
+		"flac",
+		"webm",
+		"mp4",
+	].map((ext) => `${base}/raw-upload.${ext}`);
+	return (
+		isAudioSource
+			? [rawFileKey, ...rawUploadFallbacks, `${base}/result.mp4`]
+			: [`${base}/result.mp4`, rawFileKey, ...rawUploadFallbacks]
+	).filter(
+		(value, index, values): value is string =>
+			Boolean(value) && values.indexOf(value) === index,
+	);
+}
