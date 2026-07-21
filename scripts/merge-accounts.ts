@@ -24,7 +24,7 @@ import {
   transcriptChunks,
   aiUsageEvents,
 } from "../packages/database/schema.ts";
-import { eq, sql, count, and, inArray } from "drizzle-orm";
+import { eq, sql, count, and, inArray } from "../packages/database/drizzle-helpers.ts";
 
 function parseArgs() {
   const args = process.argv.slice(2);
