@@ -1,29 +1,37 @@
 "use client";
 
 import { Button } from "@cap/ui";
-import { faFilm, faTrash } from "@fortawesome/free-solid-svg-icons";
+import {
+	faFilm,
+	faFolderOpen,
+	faTrash,
+} from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import NumberFlow from "@number-flow/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ConfirmationDialog } from "@/app/(org)/dashboard/_components/ConfirmationDialog";
+import { MoveToFolderDialog } from "./MoveToFolderDialog";
+
+import type { Folder, Video } from "@cap/web-domain";
+import { useState } from "react";
 
 interface SelectedCapsBarProps {
 	selectedCaps: string[];
 	setSelectedCaps: (caps: Video.VideoId[]) => void;
 	deleteSelectedCaps: () => void;
 	isDeleting: boolean;
+	currentFolderId?: Folder.FolderId | null;
 }
-
-import type { Video } from "@cap/web-domain";
-import { useState } from "react";
 
 export const SelectedCapsBar = ({
 	selectedCaps,
 	setSelectedCaps,
 	deleteSelectedCaps,
 	isDeleting,
+	currentFolderId,
 }: SelectedCapsBarProps) => {
 	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [moveDialogOpen, setMoveDialogOpen] = useState(false);
 
 	const handleConfirmDelete = () => {
 		deleteSelectedCaps();
@@ -59,6 +67,18 @@ export const SelectedCapsBar = ({
 					<div className="flex gap-2 ml-4">
 						<Button
 							variant="dark"
+							onClick={() => setMoveDialogOpen(true)}
+							className="text-sm"
+							size="sm"
+						>
+							<FontAwesomeIcon
+								className="w-3.5 mr-1.5"
+								icon={faFolderOpen}
+							/>
+							Move
+						</Button>
+						<Button
+							variant="dark"
 							onClick={() => setSelectedCaps([])}
 							className="text-sm"
 							size="sm"
@@ -89,6 +109,13 @@ export const SelectedCapsBar = ({
 							loading={isDeleting}
 							onConfirm={handleConfirmDelete}
 							onCancel={() => setConfirmOpen(false)}
+						/>
+						<MoveToFolderDialog
+							open={moveDialogOpen}
+							onOpenChange={setMoveDialogOpen}
+							selectedCaps={selectedCaps as Video.VideoId[]}
+							onComplete={() => setSelectedCaps([])}
+							currentFolderId={currentFolderId}
 						/>
 					</div>
 				</motion.div>

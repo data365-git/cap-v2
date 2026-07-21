@@ -2,6 +2,7 @@ export * from "./CapPagination";
 export * from "./EmptyCapState";
 export * from "./Folder";
 export * from "./ImportLoomButton";
+export * from "./MoveToFolderDialog";
 export * from "./NewFolderDialog";
 export * from "./SelectedCapsBar";
 export * from "./UploadCapButton";

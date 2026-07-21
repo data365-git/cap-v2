@@ -1,6 +1,6 @@
 import { db } from "../packages/database/index.ts";
 import { users, videos, organizations, organizationMembers } from "../packages/database/schema.ts";
-import { eq, sql, count } from "../packages/database/drizzle-helpers.ts";
+import { eq, sql, count } from "drizzle-orm";
 
 async function listAccounts() {
   const allUsers = await db()
