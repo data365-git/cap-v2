@@ -107,7 +107,7 @@ jobs:
             echo "::error::source_user_id and target_user_id are required for S3 copy."
             exit 1
           fi
-          pnpm --filter @cap/web exec tsx ../../scripts/copy-s3-owner-files.ts \
+          pnpm --filter @cap/web exec tsx scripts/copy-s3-owner-files.ts \
             --source-user "${{ inputs.source_user_id }}" \
             --target-user "${{ inputs.target_user_id }}" \
             --dry-run
@@ -129,6 +129,6 @@ jobs:
             echo "::error::source_user_id and target_user_id are required for S3 copy."
             exit 1
           fi
-          pnpm --filter @cap/web exec tsx ../../scripts/copy-s3-owner-files.ts \
+          pnpm --filter @cap/web exec tsx scripts/copy-s3-owner-files.ts \
             --source-user "${{ inputs.source_user_id }}" \
             --target-user "${{ inputs.target_user_id }}"
