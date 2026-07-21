@@ -126,6 +126,7 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 					analyticsEnabled={Boolean(
 						serverEnv().TINYBIRD_TOKEN && serverEnv().TINYBIRD_HOST,
 					)}
+					folderId={folderId}
 				/>
 			</div>
 		);

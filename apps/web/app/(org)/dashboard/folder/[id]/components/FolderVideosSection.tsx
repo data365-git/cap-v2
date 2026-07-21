@@ -1,6 +1,6 @@
 "use client";
 
-import type { Video } from "@cap/web-domain";
+import type { Folder, Video } from "@cap/web-domain";
 import { Effect, Exit } from "effect";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
@@ -17,11 +17,13 @@ import { useUploadingStatus } from "../../../caps/UploadingContext";
 interface FolderVideosSectionProps {
 	initialVideos: VideoData;
 	analyticsEnabled: boolean;
+	folderId?: string;
 }
 
 export default function FolderVideosSection({
 	initialVideos,
 	analyticsEnabled,
+	folderId,
 }: FolderVideosSectionProps) {
 	const router = useRouter();
 	const { user } = useDashboardContext();
@@ -167,6 +169,7 @@ export default function FolderVideosSection({
 				setSelectedCaps={setSelectedCaps}
 				deleteSelectedCaps={() => deleteCaps(selectedCaps)}
 				isDeleting={isDeletingCaps || isDeletingCap}
+				currentFolderId={folderId as Folder.FolderId | undefined}
 			/>
 		</>
 	);
