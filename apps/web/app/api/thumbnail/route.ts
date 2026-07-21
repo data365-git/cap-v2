@@ -76,9 +76,13 @@ export async function GET(request: NextRequest) {
 			.pipe(runPromise);
 		const contents = listResponse.Contents || [];
 
-		const thumbnailKey = contents.find((item) =>
-			item.Key?.endsWith("screen-capture.jpg"),
-		)?.Key;
+		// Video uploads have a screen-capture.jpg frame; audio-only (webAudio)
+		// uploads have no video frame — they generate a waveform.png instead.
+		// Fall back to the waveform so audio uploads get a real thumbnail rather
+		// than a broken/"corrupt or truncated" image.
+		const thumbnailKey =
+			contents.find((item) => item.Key?.endsWith("screen-capture.jpg"))?.Key ??
+			contents.find((item) => item.Key?.endsWith("waveform.png"))?.Key;
 
 		if (!thumbnailKey)
 			return new Response(
