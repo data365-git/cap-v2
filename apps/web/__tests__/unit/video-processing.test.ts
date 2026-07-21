@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateWhereMock = vi.fn();
 const selectWhereMock = vi.fn();
-const startMock = vi.fn();
+// The processing workflow is invoked INLINE (fire-and-forget) because the
+// Workflow DevKit plugin is disabled (see next.config.mjs) — so we mock the
+// workflow function itself, not `start()` from workflow/api.
+const processVideoWorkflowMock = vi.fn();
 
 const dbMock = vi.fn(() => ({
 	update: vi.fn(() => ({
@@ -23,13 +26,20 @@ vi.mock("@cap/database", () => ({
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("workflow/api", () => ({
-	start: startMock,
+vi.mock("@/workflows/process-video", () => ({
+	processVideoWorkflow: processVideoWorkflowMock,
 }));
 
-vi.mock("@/workflows/process-video", () => ({
-	processVideoWorkflow: Symbol("processVideoWorkflow"),
-}));
+const flushMicrotasks = () => new Promise((r) => setTimeout(r, 0));
+
+const baseArgs = {
+	videoId: "video-123" as never,
+	userId: "user-123",
+	rawFileKey: "user-123/video-123/raw-upload.webm",
+	bucketId: null,
+	processingMessage: "Starting video processing...",
+	startFailureMessage: "Video processing could not start.",
+};
 
 describe("video processing starts", () => {
 	beforeEach(() => {
@@ -50,69 +60,46 @@ describe("video processing starts", () => {
 			"@/lib/video-processing"
 		);
 
-		await expect(
-			startVideoProcessingWorkflow({
-				videoId: "video-123" as never,
-				userId: "user-123",
-				rawFileKey: "user-123/video-123/raw-upload.webm",
-				bucketId: null,
-				processingMessage: "Starting video processing...",
-				startFailureMessage: "Video processing could not start.",
-			}),
-		).resolves.toBe("already-processing");
+		await expect(startVideoProcessingWorkflow(baseArgs)).resolves.toBe(
+			"already-processing",
+		);
 
-		expect(startMock).not.toHaveBeenCalled();
+		expect(processVideoWorkflowMock).not.toHaveBeenCalled();
 	});
 
-	it("starts the workflow after claiming the upload row", async () => {
+	it("starts the workflow inline after claiming the upload row", async () => {
 		updateWhereMock.mockResolvedValueOnce({ affectedRows: 1 });
-		startMock.mockResolvedValueOnce(undefined);
+		processVideoWorkflowMock.mockResolvedValueOnce(undefined);
 
 		const { startVideoProcessingWorkflow } = await import(
 			"@/lib/video-processing"
 		);
 
 		await expect(
-			startVideoProcessingWorkflow({
-				videoId: "video-123" as never,
-				userId: "user-123",
-				rawFileKey: "user-123/video-123/raw-upload.webm",
-				bucketId: null,
-				processingMessage: "Starting video processing...",
-				startFailureMessage: "Video processing could not start.",
-				mode: "multipart",
-			}),
+			startVideoProcessingWorkflow({ ...baseArgs, mode: "multipart" }),
 		).resolves.toBe("started");
 
-		expect(startMock).toHaveBeenCalledTimes(1);
+		expect(processVideoWorkflowMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("starts the workflow when mysql returns affectedRows in the first tuple slot", async () => {
 		updateWhereMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
-		startMock.mockResolvedValueOnce(undefined);
+		processVideoWorkflowMock.mockResolvedValueOnce(undefined);
 
 		const { startVideoProcessingWorkflow } = await import(
 			"@/lib/video-processing"
 		);
 
 		await expect(
-			startVideoProcessingWorkflow({
-				videoId: "video-123" as never,
-				userId: "user-123",
-				rawFileKey: "user-123/video-123/raw-upload.webm",
-				bucketId: null,
-				processingMessage: "Starting video processing...",
-				startFailureMessage: "Video processing could not start.",
-				mode: "multipart",
-			}),
+			startVideoProcessingWorkflow({ ...baseArgs, mode: "multipart" }),
 		).resolves.toBe("started");
 
-		expect(startMock).toHaveBeenCalledTimes(1);
+		expect(processVideoWorkflowMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("force restarts a stale processing row", async () => {
 		updateWhereMock.mockResolvedValueOnce({ affectedRows: 1 });
-		startMock.mockResolvedValueOnce(undefined);
+		processVideoWorkflowMock.mockResolvedValueOnce(undefined);
 
 		const { startVideoProcessingWorkflow } = await import(
 			"@/lib/video-processing"
@@ -120,41 +107,38 @@ describe("video processing starts", () => {
 
 		await expect(
 			startVideoProcessingWorkflow({
-				videoId: "video-123" as never,
-				userId: "user-123",
-				rawFileKey: "user-123/video-123/raw-upload.webm",
-				bucketId: null,
+				...baseArgs,
 				processingMessage: "Retrying video processing...",
 				startFailureMessage: "Video processing could not restart.",
 				forceRestart: true,
 			}),
 		).resolves.toBe("started");
 
-		expect(startMock).toHaveBeenCalledTimes(1);
+		expect(processVideoWorkflowMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("marks the upload as errored when workflow start fails", async () => {
+	it("records a processing error when the background workflow fails", async () => {
+		// transition claim + the setVideoProcessingError update from the .catch
 		updateWhereMock
 			.mockResolvedValueOnce({ affectedRows: 1 })
 			.mockResolvedValueOnce({ affectedRows: 1 });
-		startMock.mockRejectedValueOnce(new Error("temporary failure"));
+		processVideoWorkflowMock.mockRejectedValueOnce(
+			new Error("temporary failure"),
+		);
 
 		const { startVideoProcessingWorkflow } = await import(
 			"@/lib/video-processing"
 		);
 
-		await expect(
-			startVideoProcessingWorkflow({
-				videoId: "video-123" as never,
-				userId: "user-123",
-				rawFileKey: "user-123/video-123/raw-upload.webm",
-				bucketId: null,
-				processingMessage: "Starting video processing...",
-				startFailureMessage: "Video processing could not start.",
-			}),
-		).rejects.toThrow("temporary failure");
+		// The trigger returns "started" immediately — processing is fire-and-forget,
+		// so a workflow failure must NOT surface as a synchronous throw.
+		await expect(startVideoProcessingWorkflow(baseArgs)).resolves.toBe(
+			"started",
+		);
+		expect(processVideoWorkflowMock).toHaveBeenCalledTimes(1);
 
-		expect(startMock).toHaveBeenCalledTimes(1);
+		// The background .catch records the failure on the video row.
+		await flushMicrotasks();
 		expect(updateWhereMock).toHaveBeenCalledTimes(2);
 	});
 });

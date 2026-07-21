@@ -2,7 +2,6 @@ import { db } from "@cap/database";
 import { videoUploads } from "@cap/database/schema";
 import type { S3Bucket, Video } from "@cap/web-domain";
 import { and, eq, ne } from "drizzle-orm";
-import { start } from "workflow/api";
 import { processVideoWorkflow } from "@/workflows/process-video";
 
 export type VideoProcessingStartStatus = "started" | "already-processing";
@@ -118,26 +117,29 @@ export async function startVideoProcessingWorkflow({
 		return status;
 	}
 
-	try {
-		await start(processVideoWorkflow, [
-			{
-				videoId,
-				userId,
-				rawFileKey,
-				bucketId: bucketId as S3Bucket.S3BucketId | null,
-			},
-		]);
-		return "started";
-	} catch (error) {
-		const normalizedError =
-			error instanceof Error
-				? error
-				: new Error("Video processing could not start");
-		await setVideoProcessingError(
+	// The Workflow DevKit plugin is disabled (see next.config.mjs), so
+	// `start()`-dispatched workflows are never transformed/registered and throw
+	// "invalid workflow function" at runtime. Run the processing workflow INLINE
+	// as fire-and-forget — exactly like transcription (lib/transcribe.ts) and AI
+	// generation (lib/generate-ai.ts). The action returns immediately; the long-
+	// running server keeps executing the workflow in the background, and any
+	// failure is recorded on the video row so the UI shows a real error instead
+	// of a trigger 500.
+	processVideoWorkflow({
+		videoId,
+		userId,
+		rawFileKey,
+		bucketId: bucketId as S3Bucket.S3BucketId | null,
+	}).catch((error) => {
+		console.error(
+			`[video-processing] processVideoWorkflow failed for ${videoId}:`,
+			error,
+		);
+		void setVideoProcessingError(
 			videoId,
 			startFailureMessage,
-			normalizedError,
-		);
-		throw normalizedError;
-	}
+			error instanceof Error ? error : new Error("Video processing failed"),
+		).catch(() => {});
+	});
+	return "started";
 }

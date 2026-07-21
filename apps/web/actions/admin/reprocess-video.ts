@@ -6,7 +6,6 @@ import { videos, videoUploads } from "@cap/database/schema";
 import { serverEnv } from "@cap/env";
 import { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
-import { start } from "workflow/api";
 import { MESSENGER_ADMIN_EMAIL } from "@/lib/messenger/constants";
 import { adminReprocessVideoWorkflow } from "@/workflows/admin-reprocess-video";
 
@@ -85,7 +84,10 @@ export async function adminReprocessVideo(input: string) {
 			},
 		});
 
-	await start(adminReprocessVideoWorkflow, [{ videoId }]);
+	// Inline fire-and-forget (workflow plugin disabled — see next.config.mjs).
+	adminReprocessVideoWorkflow({ videoId }).catch((error) => {
+		console.error(`[reprocessVideo] workflow failed for ${videoId}:`, error);
+	});
 
 	return {
 		videoId,
