@@ -1,0 +1,81 @@
+name: Merge accounts
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - list-accounts
+          - merge-dry-run
+          - merge-live
+      source_email:
+        description: "Source email (merge only)"
+        required: false
+        type: string
+      target_email:
+        description: "Target email (merge only)"
+        required: false
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.5.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: List accounts
+        if: inputs.action == 'list-accounts'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret not set. Add it in repo Settings -> Secrets -> Actions."
+            exit 1
+          fi
+          pnpm tsx scripts/list-accounts.ts
+
+      - name: Merge accounts (dry run)
+        if: inputs.action == 'merge-dry-run'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret not set."
+            exit 1
+          fi
+          if [ -z "${{ inputs.source_email }}" ] || [ -z "${{ inputs.target_email }}" ]; then
+            echo "::error::source_email and target_email are required for merge."
+            exit 1
+          fi
+          pnpm tsx scripts/merge-accounts.ts \
+            --source "${{ inputs.source_email }}" \
+            --target "${{ inputs.target_email }}" \
+            --dry-run
+
+      - name: Merge accounts (LIVE)
+        if: inputs.action == 'merge-live'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret not set."
+            exit 1
+          fi
+          if [ -z "${{ inputs.source_email }}" ] || [ -z "${{ inputs.target_email }}" ]; then
+            echo "::error::source_email and target_email are required for merge."
+            exit 1
+          fi
+          pnpm tsx scripts/merge-accounts.ts \
+            --source "${{ inputs.source_email }}" \
+            --target "${{ inputs.target_email }}"
