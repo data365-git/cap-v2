@@ -2,7 +2,6 @@ import { db } from "@cap/database";
 import { videoUploads } from "@cap/database/schema";
 import type { User, Video } from "@cap/web-domain";
 import { and, eq, notInArray } from "drizzle-orm";
-import { start } from "workflow/api";
 import { finalizeDesktopRecordingWorkflow } from "@/workflows/finalize-desktop-recording";
 
 export { isRetryableDesktopSegmentsFinalizationError } from "@/lib/desktop-segments-retryable-errors";
@@ -66,16 +65,12 @@ export async function queueDesktopSegmentsFinalization({
 		}
 	}
 
-	try {
-		await start(finalizeDesktopRecordingWorkflow, [
-			{
-				videoId,
-				userId,
-			},
-		]);
-		return "queued";
-	} catch (error) {
-		await db()
+	// Inline fire-and-forget (workflow plugin disabled — see next.config.mjs).
+	finalizeDesktopRecordingWorkflow({
+		videoId,
+		userId,
+	}).catch((error) => {
+		void db()
 			.update(videoUploads)
 			.set({
 				phase: "error",
@@ -84,8 +79,8 @@ export async function queueDesktopSegmentsFinalization({
 				processingError: error instanceof Error ? error.message : String(error),
 				updatedAt: new Date(),
 			})
-			.where(eq(videoUploads.videoId, videoId));
-
-		throw error;
-	}
+			.where(eq(videoUploads.videoId, videoId))
+			.catch(() => {});
+	});
+	return "queued";
 }

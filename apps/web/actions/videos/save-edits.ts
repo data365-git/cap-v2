@@ -10,7 +10,6 @@ import type { Video } from "@cap/web-domain";
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { revalidatePath } from "next/cache";
-import { start } from "workflow/api";
 import { runPromise } from "@/lib/server";
 import { getEditSourceKey } from "@/lib/video-edit-processing";
 import {
@@ -239,30 +238,27 @@ export async function saveVideoEdits(
 
 	await markEditProcessing({ videoId, sourceKey });
 
-	try {
-		await start(editVideoWorkflow, [
-			{
-				videoId,
-				userId: user.id,
-				sourceKey,
-				previousSpec,
-				editSpec: normalizedEditSpec,
-				keepRanges: normalizedEditSpec.keepRanges,
-				aiGenerationEnabled,
-			},
-		]);
-	} catch (error) {
-		await db().delete(videoUploads).where(eq(videoUploads.videoId, videoId));
-		console.error("[saveVideoEdits] workflow start failed", {
+	// Inline fire-and-forget (workflow plugin disabled — see next.config.mjs).
+	// The edit runs in the background; on failure the staged upload row is
+	// cleared so the video reverts to its pre-edit state and can be retried.
+	editVideoWorkflow({
+		videoId,
+		userId: user.id,
+		sourceKey,
+		previousSpec,
+		editSpec: normalizedEditSpec,
+		keepRanges: normalizedEditSpec.keepRanges,
+		aiGenerationEnabled,
+	}).catch((error) => {
+		console.error("[saveVideoEdits] edit workflow failed", {
 			videoId,
 			err: error instanceof Error ? error.message : String(error),
 		});
-		return {
-			ok: false,
-			error:
-				"Couldn't start the edit job. The processing service may be unavailable — try again in a few minutes.",
-		};
-	}
+		void db()
+			.delete(videoUploads)
+			.where(eq(videoUploads.videoId, videoId))
+			.catch(() => {});
+	});
 
 	revalidatePath(`/s/${videoId}`);
 	revalidatePath(`/s/${videoId}/edit`);

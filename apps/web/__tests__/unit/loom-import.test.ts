@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const whereMock = vi.fn();
 const valuesMock = vi.fn();
-const startMock = vi.fn();
+const importLoomVideoWorkflowMock = vi.fn();
 const revalidatePathMock = vi.fn();
 const storageGetWritableAccessForUserMock = vi.hoisted(() => vi.fn());
 const checkRateLimitMock = vi.hoisted(() => vi.fn());
@@ -150,12 +150,10 @@ vi.mock("@/actions/organization/authorization", () => ({
 	requireOrganizationAccess: vi.fn(),
 }));
 
-vi.mock("workflow/api", () => ({
-	start: startMock,
-}));
-
+// Loom import runs the workflow INLINE (fire-and-forget) — plugin disabled,
+// see next.config.mjs — so we mock the workflow function directly.
 vi.mock("@/workflows/import-loom-video", () => ({
-	importLoomVideoWorkflow: Symbol("importLoomVideoWorkflow"),
+	importLoomVideoWorkflow: importLoomVideoWorkflowMock,
 }));
 
 import { getCurrentUser } from "@cap/database/auth/session";
@@ -182,7 +180,7 @@ describe("importFromLoom", () => {
 		mockDb.transaction.mockImplementation((callback) => callback(mockDb));
 		valuesMock.mockResolvedValue(undefined);
 		whereMock.mockResolvedValue([]);
-		startMock.mockResolvedValue(undefined);
+		importLoomVideoWorkflowMock.mockResolvedValue(undefined);
 		checkRateLimitMock.mockResolvedValue({ rateLimited: false });
 		headersMock.mockResolvedValue(
 			new Headers({
@@ -308,7 +306,7 @@ describe("importFromLoom", () => {
 				sourceId: "loom-abc1234567",
 			}),
 		);
-		expect(startMock).toHaveBeenCalledTimes(1);
+		expect(importLoomVideoWorkflowMock).toHaveBeenCalledTimes(1);
 		expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard/caps");
 	});
 
@@ -534,14 +532,11 @@ describe("importFromLoom", () => {
 				ownerId: "member-123",
 			}),
 		);
-		expect(startMock).toHaveBeenCalledWith(
-			expect.anything(),
-			expect.arrayContaining([
-				expect.objectContaining({
-					userId: "member-123",
-					rawFileKey: "member-123/video-123/raw-upload.mp4",
-				}),
-			]),
+		expect(importLoomVideoWorkflowMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				userId: "member-123",
+				rawFileKey: "member-123/video-123/raw-upload.mp4",
+			}),
 		);
 	});
 

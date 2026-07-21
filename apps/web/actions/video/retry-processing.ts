@@ -5,7 +5,6 @@ import { getCurrentUser } from "@cap/database/auth/session";
 import { importedVideos, videos, videoUploads } from "@cap/database/schema";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
-import { start } from "workflow/api";
 import {
 	setVideoProcessingError,
 	startVideoProcessingWorkflow,
@@ -90,29 +89,25 @@ export async function retryVideoProcessing({
 			})
 			.where(eq(videoUploads.videoId, videoId));
 
-		try {
-			await start(importLoomVideoWorkflow, [
-				{
-					videoId,
-					userId: user.id,
-					rawFileKey: upload.rawFileKey,
-					bucketId: video.bucket ?? null,
-					loomDownloadUrl: "",
-					loomVideoId: importedVideo.sourceId,
-				},
-			]);
-		} catch (error) {
+		// Inline fire-and-forget (workflow plugin disabled — see next.config.mjs).
+		importLoomVideoWorkflow({
+			videoId,
+			userId: user.id,
+			rawFileKey: upload.rawFileKey,
+			bucketId: video.bucket ?? null,
+			loomDownloadUrl: "",
+			loomVideoId: importedVideo.sourceId,
+		}).catch((error) => {
 			const normalizedError =
 				error instanceof Error
 					? error
 					: new Error("Loom import could not restart");
-			await setVideoProcessingError(
+			void setVideoProcessingError(
 				videoId,
 				"Loom import could not restart.",
 				normalizedError,
-			);
-			throw normalizedError;
-		}
+			).catch(() => {});
+		});
 
 		return { success: true, status: "started" };
 	}
