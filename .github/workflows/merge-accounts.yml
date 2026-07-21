@@ -11,12 +11,22 @@ on:
           - list-accounts
           - merge-dry-run
           - merge-live
+          - copy-s3-dry-run
+          - copy-s3-live
       source_email:
         description: "Source email (merge only)"
         required: false
         type: string
       target_email:
         description: "Target email (merge only)"
+        required: false
+        type: string
+      source_user_id:
+        description: "Source user ID (S3 copy only)"
+        required: false
+        type: string
+      target_user_id:
+        description: "Target user ID (S3 copy only)"
         required: false
         type: string
 
@@ -79,3 +89,46 @@ jobs:
           pnpm tsx scripts/merge-accounts.ts \
             --source "${{ inputs.source_email }}" \
             --target "${{ inputs.target_email }}"
+
+      - name: Copy S3 owner files (dry run)
+        if: inputs.action == 'copy-s3-dry-run'
+        env:
+          CAP_AWS_BUCKET: ${{ secrets.CAP_AWS_BUCKET }}
+          CAP_AWS_REGION: ${{ secrets.CAP_AWS_REGION }}
+          CAP_AWS_ACCESS_KEY: ${{ secrets.CAP_AWS_ACCESS_KEY }}
+          CAP_AWS_SECRET_KEY: ${{ secrets.CAP_AWS_SECRET_KEY }}
+          CAP_AWS_ENDPOINT: ${{ secrets.CAP_AWS_ENDPOINT }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_R2_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY }}
+          CLOUDFLARE_R2_SECRET_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_KEY }}
+        run: |
+          if [ -z "${{ inputs.source_user_id }}" ] || [ -z "${{ inputs.target_user_id }}" ]; then
+            echo "::error::source_user_id and target_user_id are required for S3 copy."
+            exit 1
+          fi
+          pnpm --filter @cap/web exec tsx ../../scripts/copy-s3-owner-files.ts \
+            --source-user "${{ inputs.source_user_id }}" \
+            --target-user "${{ inputs.target_user_id }}" \
+            --dry-run
+
+      - name: Copy S3 owner files (LIVE)
+        if: inputs.action == 'copy-s3-live'
+        env:
+          CAP_AWS_BUCKET: ${{ secrets.CAP_AWS_BUCKET }}
+          CAP_AWS_REGION: ${{ secrets.CAP_AWS_REGION }}
+          CAP_AWS_ACCESS_KEY: ${{ secrets.CAP_AWS_ACCESS_KEY }}
+          CAP_AWS_SECRET_KEY: ${{ secrets.CAP_AWS_SECRET_KEY }}
+          CAP_AWS_ENDPOINT: ${{ secrets.CAP_AWS_ENDPOINT }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_R2_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY }}
+          CLOUDFLARE_R2_SECRET_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_KEY }}
+        run: |
+          if [ -z "${{ inputs.source_user_id }}" ] || [ -z "${{ inputs.target_user_id }}" ]; then
+            echo "::error::source_user_id and target_user_id are required for S3 copy."
+            exit 1
+          fi
+          pnpm --filter @cap/web exec tsx ../../scripts/copy-s3-owner-files.ts \
+            --source-user "${{ inputs.source_user_id }}" \
+            --target-user "${{ inputs.target_user_id }}"
